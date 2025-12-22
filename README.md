@@ -37,7 +37,7 @@ You can get the source code locally and contribute to the project.
 5. From the newly opened window select the **dist** folder from the locally cloned project
 6. Restart Chrome
 7. Open a OpenUI5/SAPUI5 based web application like: [https://openui5.hana.ondemand.com/explored.html](https://openui5.hana.ondemand.com/explored.html)
-8. Open Developer Tools via menu or shortcut F12 or Ctrl+Shift+I
+8. Open the Developer Tools from the menu or by pressing F12 or Ctrl+Shift+I
 9. In Developer Tools a new Tab UI5 is shown. Click on UI5.
 
 ## License
