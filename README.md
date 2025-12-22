@@ -23,7 +23,7 @@ The latest released version can be downloaded and installed as follows:
 5. From the newly opened window select the folder to which the zip file was unpacked
 6. Restart Chrome or Edge
 7. Open a OpenUI5/SAPUI5 based web application like: [https://openui5.hana.ondemand.com/explored.html](https://openui5.hana.ondemand.com/explored.html)
-8. Open Developer Tools via menu or shortcut F12 or Ctrl+Shift+I
+8. Open the Developer Tools from the menu or by pressing F12 or Ctrl+Shift+I
 9. Select the tab labeled 'UI5' in the Developer Tools
 
 ## Local development and use
