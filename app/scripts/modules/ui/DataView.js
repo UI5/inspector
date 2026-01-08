@@ -3,6 +3,18 @@
 var JSONFormatter = require('../ui/JSONFormatter');
 var DVHelper = require('../ui/helpers/DataViewHelper');
 
+/**
+ * Sort keys alphabetically (case-insensitive).
+ * Returns a new sorted array without mutating the original.
+ * @param {Array} keys
+ * @returns {Array}
+ */
+function sortKeysAlphabetically(keys) {
+    return keys.slice().sort(function (a, b) {
+        return a.toLowerCase().localeCompare(b.toLowerCase());
+    });
+}
+
 /** @property {Object} data - Object in the following format:
  *  {
  *      object1: {
@@ -267,18 +279,17 @@ DataView.prototype._generateHTMLForKeyValuePair = function (key, currentView) {
  */
 DataView.prototype._generateHTMLSection = function (viewObject) {
     var data = viewObject.data;
-    var associations = viewObject.associations;
-    var html = '';
-    var options = viewObject.options;
     var isDataArray = Array.isArray(data);
-    var lastArrayElement = data.length - 1;
+    var keys = isDataArray ? Object.keys(data) : sortKeysAlphabetically(Object.keys(data));
+    var html = '';
 
-    html += DVHelper.openUL(DVHelper.getULAttributesFromOptions(options));
+    html += DVHelper.openUL(DVHelper.getULAttributesFromOptions(viewObject.options));
 
-    for (var key in data) {
-        html += DVHelper.openLI();
-
+    for (var i = 0; i < keys.length; i++) {
+        var key = keys[i];
         var currentElement = data[key];
+
+        html += DVHelper.openLI();
 
         // Additional check for currentElement mainly to go around null values errors
         if (currentElement && currentElement.options) {
@@ -291,17 +302,19 @@ DataView.prototype._generateHTMLSection = function (viewObject) {
             html += this._generateHTMLForKeyValuePair(key, viewObject);
         }
 
-        if (isDataArray && key < lastArrayElement) {
+        if (isDataArray && i < keys.length - 1) {
             html += ',';
         }
 
         html += DVHelper.closeLI();
     }
 
-    for (var name in associations) {
-        var currentAssociation = associations[name];
+    // Associations are also sorted alphabetically
+    var assocKeys = sortKeysAlphabetically(Object.keys(viewObject.associations || {}));
+    for (var j = 0; j < assocKeys.length; j++) {
+        var name = assocKeys[j];
         html += DVHelper.openLI();
-        html += DVHelper.wrapInTag('key', name) + ':&nbsp;' + DVHelper.wrapInTag('value', currentAssociation);
+        html += DVHelper.wrapInTag('key', name) + ':&nbsp;' + DVHelper.wrapInTag('value', viewObject.associations[name]);
         html += DVHelper.closeLI();
     }
 
