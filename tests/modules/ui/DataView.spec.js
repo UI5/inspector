@@ -698,6 +698,105 @@ describe('DataView', function () {
                 expect(keyTexts).to.eql(['dummy', 'alpha', 'beta', 'zeta']);
             });
         });
+
+        describe('filter functionality', function () {
+
+            it('should render filter input when data is set', function () {
+                sampleView.setData(mockDataWithPropertiesInfo);
+                var dataViewElement = document.getElementById('data-view');
+                var filterInput = dataViewElement.querySelector('.dataview-filter-input');
+                expect(filterInput).to.not.be.null;
+            });
+
+            it('should initialize filter handler on construction', function () {
+                var filterHandlerSpy = sinon.spy(DataViewComponent.prototype, '_onFilterHandler');
+                new DataViewComponent('data-view');
+                filterHandlerSpy.calledOnce.should.be.equal(true);
+                filterHandlerSpy.restore();
+            });
+
+            it('should hide non-matching properties when filter is applied', function () {
+                var testData = {
+                    properties: {
+                        options: {
+                            expandable: false,
+                            expanded: true,
+                            title: 'Test'
+                        },
+                        data: {
+                            visible: true,
+                            enabled: true,
+                            text: 'hello'
+                        }
+                    }
+                };
+                sampleView.setData(testData);
+                sampleView._filterValue = 'visible';
+                sampleView._applyFilter();
+
+                var dataViewElement = document.getElementById('data-view');
+                var items = dataViewElement.querySelectorAll('ul[expanded] > li > key');
+                var visibleItems = Array.prototype.filter.call(items, function(key) {
+                    return key.parentNode.style.display !== 'none';
+                });
+                expect(visibleItems.length).to.equal(1);
+            });
+
+            it('should show all properties when filter is cleared', function () {
+                var testData = {
+                    properties: {
+                        options: {
+                            expandable: false,
+                            expanded: true,
+                            title: 'Test'
+                        },
+                        data: {
+                            visible: true,
+                            enabled: true,
+                            text: 'hello'
+                        }
+                    }
+                };
+                sampleView.setData(testData);
+                sampleView._filterValue = 'visible';
+                sampleView._applyFilter();
+                sampleView._filterValue = '';
+                sampleView._applyFilter();
+
+                var dataViewElement = document.getElementById('data-view');
+                var items = dataViewElement.querySelectorAll('ul[expanded] > li');
+                var hiddenItems = Array.prototype.filter.call(items, function(li) {
+                    return li.style.display === 'none';
+                });
+                expect(hiddenItems.length).to.equal(0);
+            });
+
+            it('should filter case-insensitively', function () {
+                var testData = {
+                    properties: {
+                        options: {
+                            expandable: false,
+                            expanded: true,
+                            title: 'Test'
+                        },
+                        data: {
+                            Visible: true,
+                            hidden: false
+                        }
+                    }
+                };
+                sampleView.setData(testData);
+                sampleView._filterValue = 'visible';
+                sampleView._applyFilter();
+
+                var dataViewElement = document.getElementById('data-view');
+                var items = dataViewElement.querySelectorAll('ul[expanded] > li > key');
+                var visibleItems = Array.prototype.filter.call(items, function(key) {
+                    return key.parentNode.style.display !== 'none';
+                });
+                expect(visibleItems.length).to.equal(1);
+            });
+        });
     });
 
     describe('with clickable value', function () {
