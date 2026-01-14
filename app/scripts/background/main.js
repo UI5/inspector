@@ -154,4 +154,298 @@
         // Page actions are disabled by default and enabled on select tabs
         chrome.action.disable();
     });
+
+    // ================================================================================
+    // Prompt API Integration (Gemini Nano)
+    // ================================================================================
+
+    let promptAPISession = null;
+    let promptAPIController = null;
+
+    /**
+     * Check if Prompt API is supported
+     */
+    function isPromptAPISupported() {
+        return 'LanguageModel' in self;
+    }
+
+    /**
+     * Initialize Prompt API session
+     */
+    async function initPromptAPISession(options, signal) {
+        const availability = await self.LanguageModel.availability();
+
+        if (availability === 'unavailable') {
+            throw new Error('AI Model is not available on this device.');
+        }
+
+        const sessionOptions = {
+            signal
+        };
+
+        // Add download progress monitoring if callback provided
+        if (options.onProgress) {
+            sessionOptions.monitor = function(m) {
+                m.addEventListener('downloadprogress', (e) => {
+                    options.onProgress(e.loaded || 0);
+                });
+            };
+        }
+
+        return await self.LanguageModel.create(sessionOptions);
+    }
+
+    /**
+     * Handle check availability request
+     */
+    async function handleCheckAvailability(port) {
+
+        if (!isPromptAPISupported()) {
+            port.postMessage({
+                type: 'availability',
+                status: 'unavailable',
+                message: 'Prompt API not supported - LanguageModel not found in self'
+            });
+            return;
+        }
+
+        try {
+            const availability = await self.LanguageModel.availability();
+
+            let status;
+            let message;
+            if (availability === 'available') {
+                status = 'ready';
+                message = 'Gemini Nano is ready to use';
+            } else if (availability === 'downloadable') {
+                status = 'needs-download';
+                message = 'Gemini Nano needs to be downloaded (~22GB)';
+            } else if (availability === 'downloading') {
+                status = 'downloading';
+                message = 'Gemini Nano is currently downloading';
+            } else if (availability === 'unavailable') {
+                status = 'unavailable';
+                message = 'Gemini Nano is not available on this device';
+            } else {
+                status = 'unavailable';
+                message = `Gemini Nano status unknown. Availability returned: "${availability}"`;
+            }
+
+            port.postMessage({
+                type: 'availability',
+                status: status,
+                message: message
+            });
+        } catch (error) {
+            console.error('[Background] Error checking availability:', error);
+            port.postMessage({
+                type: 'availability',
+                status: 'error',
+                message: `Error: ${error.message}`
+            });
+        }
+    }
+
+    /**
+     * Handle download model request
+     */
+    async function handleDownloadModel(port) {
+
+        if (!isPromptAPISupported()) {
+            port.postMessage({
+                type: 'error',
+                message: 'Prompt API not supported'
+            });
+            return;
+        }
+
+        // Abort any existing operation
+        if (promptAPIController) {
+            promptAPIController.abort();
+        }
+        promptAPIController = new AbortController();
+
+        try {
+            promptAPISession = await initPromptAPISession({
+                onProgress: (progress) => {
+                    port.postMessage({
+                        type: 'download-progress',
+                        progress: progress
+                    });
+                }
+            }, promptAPIController.signal);
+
+            port.postMessage({
+                type: 'download-complete'
+            });
+        } catch (error) {
+            console.error('[Background] Error downloading model:', error);
+            port.postMessage({
+                type: 'error',
+                message: error.message
+            });
+        } finally {
+            promptAPIController = null;
+        }
+    }
+
+    /**
+     * Handle create session request
+     */
+    async function handleCreateSession(data, port) {
+
+        if (!isPromptAPISupported()) {
+            port.postMessage({
+                type: 'error',
+                message: 'Prompt API not supported'
+            });
+            return;
+        }
+
+        try {
+            // Destroy existing session if any
+            if (promptAPISession) {
+                promptAPISession.destroy();
+                promptAPISession = null;
+            }
+
+            promptAPISession = await initPromptAPISession({}, new AbortController().signal);
+
+            port.postMessage({
+                type: 'session-created'
+            });
+        } catch (error) {
+            console.error('[Background] Error creating session:', error);
+            port.postMessage({
+                type: 'error',
+                message: error.message
+            });
+        }
+    }
+
+    /**
+     * Handle streaming prompt request
+     */
+    async function handlePromptStreaming(data, port) {
+
+        if (!promptAPISession) {
+            port.postMessage({
+                type: 'error',
+                message: 'No active session'
+            });
+            return;
+        }
+
+        // Abort any existing operation
+        if (promptAPIController) {
+            promptAPIController.abort();
+        }
+        promptAPIController = new AbortController();
+
+        try {
+            const stream = await promptAPISession.promptStreaming(
+                data.messages,
+                { signal: promptAPIController.signal }
+            );
+
+            for await (const chunk of stream) {
+                if (promptAPIController.signal.aborted) {
+                    break;
+                }
+
+                port.postMessage({
+                    type: 'chunk',
+                    content: chunk
+                });
+            }
+
+            if (!promptAPIController.signal.aborted) {
+                port.postMessage({
+                    type: 'complete'
+                });
+            }
+        } catch (error) {
+            console.error('[Background] Error during streaming:', error);
+            port.postMessage({
+                type: 'error',
+                message: error.message
+            });
+        } finally {
+            promptAPIController = null;
+        }
+    }
+
+    /**
+     * Handle get usage info request
+     */
+    function handleGetUsageInfo(port) {
+        if (!promptAPISession) {
+            port.postMessage({
+                type: 'usage-info',
+                data: null
+            });
+            return;
+        }
+
+        const inputUsage = promptAPISession.inputUsage || 0;
+        const inputQuota = promptAPISession.inputQuota || 4096;
+        const percentUsed = Math.round((inputUsage / inputQuota) * 100);
+
+        port.postMessage({
+            type: 'usage-info',
+            data: {
+                inputUsage: inputUsage,
+                inputQuota: inputQuota,
+                percentUsed: percentUsed
+            }
+        });
+    }
+
+    /**
+     * Handle destroy session request
+     */
+    function handleDestroySession(port) {
+        if (promptAPISession) {
+            promptAPISession.destroy();
+            promptAPISession = null;
+        }
+
+        if (promptAPIController) {
+            promptAPIController.abort();
+            promptAPIController = null;
+        }
+
+        port.postMessage({
+            type: 'session-destroyed'
+        });
+    }
+
+    // Listen for long-lived connections for Prompt API
+    chrome.runtime.onConnect.addListener((port) => {
+        if (port.name === 'prompt-api') {
+            port.onMessage.addListener((message) => {
+                switch (message.type) {
+                    case 'check-availability':
+                        handleCheckAvailability(port);
+                        break;
+                    case 'download-model':
+                        handleDownloadModel(port);
+                        break;
+                    case 'create-session':
+                        handleCreateSession(message.data, port);
+                        break;
+                    case 'prompt-streaming':
+                        handlePromptStreaming(message.data, port);
+                        break;
+                    case 'get-usage-info':
+                        handleGetUsageInfo(port);
+                        break;
+                    case 'destroy-session':
+                        handleDestroySession(port);
+                        break;
+                }
+            });
+        }
+    });
+
 }());
