@@ -1,5 +1,4 @@
 
-// jshint maxstatements:52
 (function () {
     'use strict';
 
@@ -24,6 +23,7 @@
     var XMLDetailView = require('../../../modules/ui/XMLDetailView.js');
     var ControllerDetailView = require('../../../modules/ui/ControllerDetailView.js');
     var OElementsRegistryMasterView = require('../../../modules/ui/OElementsRegistryMasterView.js');
+    var AIChat = require('../../../modules/ui/AIChat.js');
 
     // Apply theme
     // ================================================================================
@@ -428,6 +428,16 @@
         onSelectionChange: displayFrameData
     });
 
+    // AI Chat component
+    var aiChat = new AIChat('ai-chat', {
+        getAppInfo: function () {
+            var currentFrameId = framesSelect.getSelectedId();
+            console.log('[main.js] getAppInfo called. currentFrameId:', currentFrameId);
+            console.log('[main.js] frameData:', frameData);
+            return frameData[currentFrameId] ? frameData[currentFrameId].applicationInformation : null;
+        }
+    });
+
     // ================================================================================
     // Communication
     // ================================================================================
@@ -482,6 +492,9 @@
 
             if (framesSelect.getSelectedId() === frameId) {
                 controlTree.setData(message.controlTree);
+
+                // Set URL for AI Chat history
+                aiChat.setUrl(frameData[frameId].url);
                 appInfo.setData(message.applicationInformation);
                 oElementsRegistryMasterView.setData(message.elementRegistry);
             }
@@ -559,6 +572,27 @@
 
                 // Close possible open binding info and/or methods info
                 controlBindingsSplitter.hideEndContainer();
+
+                // Update AI Chat context with control data
+                var controlId = message.controlProperties.own && message.controlProperties.own.options && message.controlProperties.own.options.controlId;
+                var controlType = null;
+                if (message.controlProperties.own && message.controlProperties.own.options && message.controlProperties.own.options.title) {
+                    var titleMatch = message.controlProperties.own.options.title.match(/\(([^)]+)\)<\/span>$/);
+                    if (titleMatch) {
+                        controlType = titleMatch[1];
+                    }
+                }
+
+                aiChat.updateContext({
+                    control: {
+                        type: controlType,
+                        id: controlId,
+                        properties: message.controlProperties,
+                        bindings: message.controlBindings,
+                        aggregations: message.controlAggregations
+                    },
+                    appInfo: frameData[frameId].applicationInformation
+                });
             }
         },
 

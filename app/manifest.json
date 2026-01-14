@@ -36,7 +36,8 @@
     "permissions": [
         "scripting",
         "contextMenus",
-        "activeTab"
+        "activeTab",
+        "storage"
     ],
     "host_permissions": [
         "http://*/*",

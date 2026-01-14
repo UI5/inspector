@@ -1250,3 +1250,308 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
 .elementsRegistry splitter {
   background-color: #000;
 }
+.ai-chat-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: #f5f5f5;
+}
+#ai-chat {
+  width: 100%;
+}
+.ai-status-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #ddd;
+  background-color: #fff;
+}
+.ai-status-banner .status-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-status-banner .status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #999;
+}
+.ai-status-banner .status-text {
+  font-size: 13px;
+  color: #333;
+}
+.ai-status-banner .download-button,
+.ai-status-banner .clear-history-button {
+  padding: 6px 12px;
+  border: 1px solid #007bff;
+  background-color: #007bff;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  margin-left: 8px;
+}
+.ai-status-banner .download-button:hover:not(:disabled),
+.ai-status-banner .clear-history-button:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+.ai-status-banner .download-button:disabled,
+.ai-status-banner .clear-history-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ai-status-banner .clear-history-button {
+  background-color: #6c757d;
+  border-color: #6c757d;
+}
+.ai-status-banner .clear-history-button:hover:not(:disabled) {
+  background-color: #5a6268;
+}
+.ai-status-banner.status-ready {
+  background-color: #d4edda;
+  border-color: #c3e6cb;
+}
+.ai-status-banner.status-ready .status-indicator {
+  background-color: #28a745;
+}
+.ai-status-banner.status-needs-download {
+  background-color: #fff3cd;
+  border-color: #ffeaa7;
+}
+.ai-status-banner.status-needs-download .status-indicator {
+  background-color: #ffc107;
+}
+.ai-status-banner.status-downloading {
+  background-color: #d1ecf1;
+  border-color: #bee5eb;
+}
+.ai-status-banner.status-downloading .status-indicator {
+  background-color: #17a2b8;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+.ai-status-banner.status-unavailable,
+.ai-status-banner.status-error {
+  background-color: #f8d7da;
+  border-color: #f5c6cb;
+}
+.ai-status-banner.status-unavailable .status-indicator,
+.ai-status-banner.status-error .status-indicator {
+  background-color: #dc3545;
+}
+.ai-status-banner.status-unavailable .status-text,
+.ai-status-banner.status-error .status-text {
+  white-space: pre-line;
+  font-size: 11px;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+.ai-messages-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ai-welcome-message {
+  text-align: center;
+  padding: 32px 16px;
+  color: #666;
+}
+.ai-welcome-message h3 {
+  margin: 0 0 12px 0;
+  color: #333;
+  font-size: 18px;
+}
+.ai-welcome-message p {
+  margin: 8px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ai-message {
+  display: flex;
+  flex-direction: column;
+  max-width: 80%;
+  animation: fadeIn 0.2s ease-in;
+}
+.ai-message.message-user {
+  align-self: flex-end;
+}
+.ai-message.message-user .message-header {
+  justify-content: flex-end;
+}
+.ai-message.message-user .message-content {
+  background-color: #007bff;
+  color: #fff;
+  border-radius: 12px 12px 0 12px;
+}
+.ai-message.message-assistant {
+  align-self: flex-start;
+}
+.ai-message.message-assistant .message-content {
+  background-color: #fff;
+  color: #333;
+  border: 1px solid #ddd;
+  border-radius: 12px 12px 12px 0;
+}
+.ai-message.message-system {
+  align-self: center;
+  max-width: 90%;
+}
+.ai-message.message-system .message-content {
+  background-color: #e9ecef;
+  color: #495057;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 12px;
+  font-style: italic;
+}
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: #666;
+  padding: 0 8px;
+}
+.message-header .message-role {
+  font-weight: 600;
+}
+.message-header .message-time {
+  opacity: 0.7;
+}
+.message-content {
+  padding: 10px 14px;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.5;
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.ai-input-area {
+  border-top: 1px solid #ddd;
+  background-color: #fff;
+  padding: 12px 16px;
+}
+.context-info {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background-color: #e7f3ff;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #004085;
+}
+.context-info .context-icon {
+  font-size: 14px;
+}
+.context-info .context-text {
+  flex: 1;
+  font-weight: 500;
+}
+.input-wrapper {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.ai-input {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  max-height: 150px;
+}
+.ai-input:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.1);
+}
+.ai-input::placeholder {
+  color: #999;
+}
+.ai-send-button {
+  padding: 10px 20px;
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 0.2s;
+}
+.ai-send-button:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+.ai-send-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.input-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+.token-counter {
+  font-size: 11px;
+  color: #666;
+}
+.token-counter.warning {
+  color: #dc3545;
+  font-weight: 600;
+}
+.ai-messages-container::-webkit-scrollbar {
+  width: 8px;
+}
+.ai-messages-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+.ai-messages-container::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+.ai-messages-container::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+@media (max-width: 600px) {
+  .ai-message {
+    max-width: 90%;
+  }
+  .ai-status-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .ai-status-banner .status-content {
+    width: 100%;
+  }
+  .ai-status-banner .download-button,
+  .ai-status-banner .clear-history-button {
+    width: 100%;
+    margin-left: 0;
+  }
+}

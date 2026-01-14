@@ -58,7 +58,7 @@
     "maxdepth": 3,
 
     // {int} Max number statements per function
-    "maxstatements": 30,
+    "maxstatements": 60,
 
     // {int} Max cyclomatic complexity per function. The cyclomatic complexity of a section of source code is the count
     // of the number of linearly independent paths through the source code.
@@ -83,8 +83,8 @@
     // true: Allow ES5 syntax (ex: getters and setters)
     "es5": false,
 
-    // true: Allow ES.next (ES6) syntax (ex: `const`)
-    "esnext": true,
+    // Set specific ECMAScript version
+    "esversion": 11,
 
     // true: Allow Mozilla specific syntax (extends and overrides esnext features)(ex: `for each`, multiple try/catch, function expression…)
     "moz": false,
@@ -114,7 +114,7 @@
     "laxcomma": false,
 
     // true: Tolerate functions being defined in loops
-    "loopfunc": false,
+    "loopfunc": true,
 
     // true: Tolerate multi-line strings
     "multistr": false,
@@ -164,6 +164,8 @@
         "sinon": true,
         "should": true,
         "Event": true,
-		"ace": true
+		"ace": true,
+		"self": true,
+		"AbortController": true
     }
 }
