@@ -7,7 +7,7 @@
     "SAP SE <*@sap.com>"
   ],
   "dependencies": {
-    "lodash": "^4.17.21"
+    "lodash": "^4.17.23"
   },
   "devDependencies": {
     "@actions/core": "^1.9.1",
