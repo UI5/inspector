@@ -1,4 +1,7 @@
 # This is a basic workflow to automate the creation of the build artifact
+# Required GitHub Secrets:
+#   - ARTIFACTORY_USER: SAP Artifactory username
+#   - ARTIFACTORY_TOKEN: SAP Artifactory access token
 name: Release
 # Controls when the workflow will run
 on:
@@ -24,3 +27,35 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         uses: ./.github/actions/bump-version
+      - name: Setup Maven
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+      - name: Configure Maven Settings
+        run: |
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml << 'EOF'
+          <settings>
+            <servers>
+              <server>
+                <id>sap-artifactory</id>
+                <username>${env.ARTIFACTORY_USER}</username>
+                <password>${env.ARTIFACTORY_TOKEN}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
+      - name: Get version from package.json
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+      - name: Update pom.xml version
+        run: |
+          mvn versions:set -DnewVersion=${{ steps.version.outputs.version }} -DgenerateBackupPoms=false
+          echo "✅ Updated pom.xml to version ${{ steps.version.outputs.version }}"
+      - name: Deploy to SAP Artifactory
+        env:
+          ARTIFACTORY_USER: ${{ secrets.ARTIFACTORY_USER }}
+          ARTIFACTORY_TOKEN: ${{ secrets.ARTIFACTORY_TOKEN }}
+        run: |
+          mvn deploy -DskipTests
