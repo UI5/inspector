@@ -22,6 +22,7 @@ function AIChat(containerId, options) {
     this._isStreaming = false;
     this._streamingMessageElement = null;
     this._getAppInfo = options.getAppInfo || null;
+    this._hasShownUsageWarning = false;
 
     this.init();
 }
@@ -67,20 +68,33 @@ AIChat.prototype._render = function () {
                 <div class="context-info" id="ai-context-info" style="display: none;">
                     <span class="context-icon">🎯</span>
                     <span class="context-text"></span>
+                    <button class="context-clear-button" id="ai-context-clear-button" title="Clear context">×</button>
                 </div>
                 <div class="input-wrapper">
-                    <textarea
+                    <input
+                        type="text"
                         class="ai-input"
                         id="ai-input"
                         placeholder="Ask me anything about UI5..."
-                        rows="1"
-                    ></textarea>
+                    />
                     <button class="ai-send-button" id="ai-send-button" disabled>
                         Send
                     </button>
                 </div>
                 <div class="input-footer">
                     <span class="token-counter" id="ai-token-counter"></span>
+                </div>
+            </div>
+
+            <div class="ai-confirm-dialog" id="ai-confirm-dialog" style="display: none;">
+                <div class="confirm-overlay"></div>
+                <div class="confirm-content">
+                    <div class="confirm-title">Clear Chat History?</div>
+                    <div class="confirm-message">This will clear all chat history for this page. This action cannot be undone.</div>
+                    <div class="confirm-buttons">
+                        <button class="confirm-button confirm-cancel" id="ai-confirm-cancel">Cancel</button>
+                        <button class="confirm-button confirm-ok" id="ai-confirm-ok">Clear History</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -96,15 +110,16 @@ AIChat.prototype._attachEventListeners = function () {
     const sendButton = document.getElementById('ai-send-button');
     const downloadButton = document.getElementById('ai-download-button');
     const clearHistoryButton = document.getElementById('ai-clear-history-button');
+    const contextClearButton = document.getElementById('ai-context-clear-button');
 
     // Send message on button click
     sendButton.addEventListener('click', () => {
         this._handleSendMessage();
     });
 
-    // Send message on Ctrl/Cmd + Enter
+    // Send message on Enter
     input.addEventListener('keydown', (e) => {
-        if (!(e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        if (e.key === 'Enter') {
             e.preventDefault();
             this._handleSendMessage();
         }
@@ -126,6 +141,30 @@ AIChat.prototype._attachEventListeners = function () {
     clearHistoryButton.addEventListener('click', () => {
         this._handleClearHistory();
     });
+
+    // Clear context button
+    contextClearButton.addEventListener('click', () => {
+        this._clearContext();
+    });
+
+    // Confirmation dialog buttons
+    const confirmOk = document.getElementById('ai-confirm-ok');
+    const confirmCancel = document.getElementById('ai-confirm-cancel');
+    const confirmDialog = document.getElementById('ai-confirm-dialog');
+
+    confirmOk.addEventListener('click', () => {
+        this._hideConfirmDialog();
+        this._performClearHistory();
+    });
+
+    confirmCancel.addEventListener('click', () => {
+        this._hideConfirmDialog();
+    });
+
+    // Click on overlay to cancel
+    confirmDialog.querySelector('.confirm-overlay').addEventListener('click', () => {
+        this._hideConfirmDialog();
+    });
 };
 
 /**
@@ -138,6 +177,8 @@ AIChat.prototype._checkModelAvailability = async function () {
 
         if (availability.status === 'ready') {
             this._renderModelStatus('ready', 0, 'Gemini Nano is ready');
+            // Initialize session to show token counter
+            await this._initializeSession();
         } else if (availability.status === 'needs-download') {
             this._renderModelStatus('needs-download', 0, availability.message);
         } else {
@@ -261,7 +302,8 @@ AIChat.prototype._handleSendMessage = async function () {
         // Process stream
         for await (const chunk of stream) {
             fullResponse += chunk;
-            this._streamingMessageElement.textContent = fullResponse;
+            this._streamingMessageElement.innerHTML = this._parseMarkdown(fullResponse);
+            this._initializeJsonViewers(this._streamingMessageElement);
             this._scrollToBottom();
         }
 
@@ -289,11 +331,33 @@ AIChat.prototype._handleSendMessage = async function () {
  * Handle clear history.
  * @private
  */
-AIChat.prototype._handleClearHistory = async function () {
-    if (!confirm('Clear chat history for this page? This cannot be undone.')) {
-        return;
-    }
+AIChat.prototype._handleClearHistory = function () {
+    this._showConfirmDialog();
+};
 
+/**
+ * Show confirmation dialog.
+ * @private
+ */
+AIChat.prototype._showConfirmDialog = function () {
+    const dialog = document.getElementById('ai-confirm-dialog');
+    dialog.style.display = 'flex';
+};
+
+/**
+ * Hide confirmation dialog.
+ * @private
+ */
+AIChat.prototype._hideConfirmDialog = function () {
+    const dialog = document.getElementById('ai-confirm-dialog');
+    dialog.style.display = 'none';
+};
+
+/**
+ * Perform clear history action.
+ * @private
+ */
+AIChat.prototype._performClearHistory = async function () {
     try {
         await this._storageManager.clearHistory(this._currentUrl);
 
@@ -310,6 +374,9 @@ AIChat.prototype._handleClearHistory = async function () {
         // Destroy and recreate session to reset token counter
         this._sessionManager.destroy();
         await this._initializeSession();
+
+        // Reset usage warning flag
+        this._hasShownUsageWarning = false;
 
         this._addSystemMessage('Chat history cleared');
 
@@ -364,15 +431,25 @@ AIChat.prototype._addMessage = function (role, content) {
 
     const timestamp = new Date().toLocaleTimeString();
 
+    // Use markdown rendering for AI responses, escape HTML for user/system messages
+    const formattedContent = role === 'assistant' ? this._parseMarkdown(content) : this._escapeHtml(content);
+
     messageElement.innerHTML = `
         <div class="message-header">
             <span class="message-role">${role === 'user' ? 'You' : role === 'assistant' ? 'AI' : 'System'}</span>
             <span class="message-time">${timestamp}</span>
         </div>
-        <div class="message-content">${this._escapeHtml(content)}</div>
+        <div class="message-content">${formattedContent}</div>
     `;
 
     messagesContainer.appendChild(messageElement);
+
+    // Initialize JSON viewers if this is an assistant message
+    if (role === 'assistant') {
+        const contentElement = messageElement.querySelector('.message-content');
+        this._initializeJsonViewers(contentElement);
+    }
+
     this._scrollToBottom();
 
     this._messages.push({ role, content });
@@ -401,6 +478,293 @@ AIChat.prototype._escapeHtml = function (text) {
 };
 
 /**
+ * Parse markdown to HTML for AI responses.
+ * @private
+ * @param {string} text - Markdown text
+ * @returns {string} - HTML string
+ */
+AIChat.prototype._parseMarkdown = function (text) {
+    const placeholders = { codeBlocks: [], inlineCode: [] };
+
+    // Step 1: Extract code blocks and inline code
+    let html = this._extractCodeBlocks(text, placeholders);
+    html = this._extractInlineCode(html, placeholders);
+
+    // Step 2: Escape HTML
+    html = this._escapeHtml(html);
+
+    // Step 3: Apply markdown formatting
+    html = this._applyMarkdownFormatting(html);
+
+    // Step 4: Convert line breaks BEFORE restoring code (so <br> doesn't appear inside <code> tags)
+    html = html.replace(/\n/g, '<br>');
+
+    // Step 5: Restore code (after line breaks so code blocks keep their original formatting)
+    html = this._restoreInlineCode(html, placeholders.inlineCode);
+    html = this._restoreCodeBlocks(html, placeholders.codeBlocks);
+
+    return html;
+};
+
+/**
+ * Extract code blocks from text.
+ * @private
+ */
+AIChat.prototype._extractCodeBlocks = function (text, placeholders) {
+    return text.replace(/```([\w]*)?\n([\s\S]*?)```/g, (match, lang, code) => {
+        const index = placeholders.codeBlocks.length;
+        const trimmedCode = code.trim();
+        const isJson = lang === 'json' || (!lang && /^[\[\{]/.test(trimmedCode));
+
+        if (isJson) {
+            try {
+                placeholders.codeBlocks.push({ type: 'json', data: JSON.parse(trimmedCode) });
+            } catch (e) {
+                placeholders.codeBlocks.push({ type: 'code', lang: 'plaintext', code: trimmedCode });
+            }
+        } else {
+            placeholders.codeBlocks.push({ type: 'code', lang: lang || 'plaintext', code: trimmedCode });
+        }
+
+        return `___CODEBLOCK_${index}___`;
+    });
+};
+
+/**
+ * Extract inline code from text.
+ * @private
+ */
+AIChat.prototype._extractInlineCode = function (text, placeholders) {
+    return text.replace(/`([^`]+)`/g, (match, code) => {
+        const index = placeholders.inlineCode.length;
+        placeholders.inlineCode.push(code);
+        return `___INLINECODE_${index}___`;
+    });
+};
+
+/**
+ * Apply markdown formatting (bold, italic, links).
+ * @private
+ */
+AIChat.prototype._applyMarkdownFormatting = function (text) {
+    return text
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')  // Bold
+        .replace(/\b__([^_]+)__\b/g, '<strong>$1</strong>')   // Bold (alt)
+        .replace(/(?<!\*)\*(?!\*)([^*<>]+)(?<!\*)\*(?!\*)/g, '<em>$1</em>')  // Italic
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');  // Links
+};
+
+/**
+ * Restore inline code.
+ * @private
+ */
+AIChat.prototype._restoreInlineCode = function (text, inlineCode) {
+    inlineCode.forEach((code, index) => {
+        text = text.replace(`___INLINECODE_${index}___`, `<code>${this._escapeHtml(code)}</code>`);
+    });
+    return text;
+};
+
+/**
+ * Restore code blocks.
+ * @private
+ */
+AIChat.prototype._restoreCodeBlocks = function (text, codeBlocks) {
+    codeBlocks.forEach((block, index) => {
+        let replacement;
+        if (block.type === 'json') {
+            replacement = this._createJsonViewer(block.data);
+        } else {
+            // Use data attribute approach like JSON viewer
+            replacement = this._createCodeViewer(block.code, block.lang);
+        }
+        text = text.replace(`___CODEBLOCK_${index}___`, replacement);
+    });
+    return text;
+};
+
+/**
+ * Create JSON viewer HTML.
+ * @private
+ */
+AIChat.prototype._createJsonViewer = function (data) {
+    const jsonString = JSON.stringify(data).replace(/'/g, '&#39;');
+    return `<div class="json-viewer" data-json='${jsonString}'></div>`;
+};
+
+/**
+ * Create code viewer HTML.
+ * @private
+ */
+AIChat.prototype._createCodeViewer = function (code, lang) {
+    const escapedCode = code.replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+    return `<div class="code-viewer" data-code='${escapedCode}' data-lang='${lang}'></div>`;
+};
+
+/**
+ * Render interactive JSON viewer with expand/collapse.
+ * @private
+ */
+AIChat.prototype._renderJsonValue = function (value, key, isLast) {
+    const comma = isLast ? '' : ',';
+    const handlers = {
+        null: () => this._renderJsonLine(key, `<span class="json-null">null</span>${comma}`),
+        boolean: () => this._renderJsonLine(key, `<span class="json-boolean">${value}</span>${comma}`),
+        number: () => this._renderJsonLine(key, `<span class="json-number">${value}</span>${comma}`),
+        string: () => this._renderJsonString(key, value, comma),
+        array: () => this._renderJsonArray(key, value, comma),
+        object: () => this._renderJsonObject(key, value, comma)
+    };
+
+    const type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+    return handlers[type] ? handlers[type]() : this._renderJsonLine(key, `${this._escapeHtml(String(value))}${comma}`);
+};
+
+/**
+ * Render JSON string value.
+ * @private
+ */
+AIChat.prototype._renderJsonString = function (key, value, comma) {
+    const escaped = this._escapeHtml(value);
+    return this._renderJsonLine(key, `<span class="json-string">"${escaped}"</span>${comma}`);
+};
+
+/**
+ * Render JSON array.
+ * @private
+ */
+AIChat.prototype._renderJsonArray = function (key, value, comma) {
+    if (value.length === 0) {
+        return this._renderJsonLine(key, `<span class="json-bracket">[]</span>${comma}`);
+    }
+
+    const id = 'json-' + Math.random().toString(36).substr(2, 9);
+    const keyHtml = key ? `<span class="json-key">"${this._escapeHtml(key)}"</span>: ` : '';
+    const items = value.map((item, i) => this._renderJsonValue(item, null, i === value.length - 1)).join('');
+
+    return `<div class="json-line">${keyHtml}<span class="json-toggle" data-target="${id}">▼</span> <span class="json-bracket">[</span><span class="json-count">${value.length} items</span></div>
+            <div class="json-content" id="${id}">${items}<div class="json-line"><span class="json-bracket">]</span>${comma}</div></div>`;
+};
+
+/**
+ * Render JSON object.
+ * @private
+ */
+AIChat.prototype._renderJsonObject = function (key, value, comma) {
+    const keys = Object.keys(value);
+    if (keys.length === 0) {
+        return this._renderJsonLine(key, `<span class="json-bracket">{}</span>${comma}`);
+    }
+
+    const id = 'json-' + Math.random().toString(36).substr(2, 9);
+    const keyHtml = key ? `<span class="json-key">"${this._escapeHtml(key)}"</span>: ` : '';
+    const items = keys.map((k, i) => this._renderJsonValue(value[k], k, i === keys.length - 1)).join('');
+
+    return `<div class="json-line">${keyHtml}<span class="json-toggle" data-target="${id}">▼</span> <span class="json-bracket">{</span><span class="json-count">${keys.length} keys</span></div>
+            <div class="json-content" id="${id}">${items}<div class="json-line"><span class="json-bracket">}</span>${comma}</div></div>`;
+};
+
+
+
+/**
+ * Render a single JSON line.
+ * @private
+ * @param {string} key - Key name (null for array items)
+ * @param {string} content - HTML content
+ * @returns {string} - HTML string
+ */
+AIChat.prototype._renderJsonLine = function (key, content) {
+    let html = '<div class="json-line">';
+
+    if (key !== null) {
+        html += '<span class="json-key">"' + this._escapeHtml(key) + '"</span>: ';
+    }
+
+    html += content;
+    html += '</div>';
+
+    return html;
+};
+
+/**
+ * Initialize JSON viewers in a message element.
+ * @private
+ */
+AIChat.prototype._initializeJsonViewers = function (element) {
+    // Initialize JSON viewers
+    element.querySelectorAll('.json-viewer').forEach(viewer => {
+        const jsonData = viewer.getAttribute('data-json');
+        if (!jsonData) {
+            return;
+        }
+
+        try {
+            const parsed = JSON.parse(jsonData);
+            viewer.innerHTML = `<div class="json-wrapper"><div class="json-tree">${this._renderJsonValue(parsed, null, true)}</div></div>`;
+
+            this._setupJsonToggleHandlers(viewer);
+        } catch (e) {
+            viewer.textContent = `Error rendering JSON: ${e.message}`;
+            console.error('JSON viewer error:', e);
+        }
+    });
+
+    // Initialize code viewers
+    element.querySelectorAll('.code-viewer').forEach(viewer => {
+        const code = viewer.getAttribute('data-code');
+        const lang = viewer.getAttribute('data-lang');
+        if (!code) {
+            return;
+        }
+
+        try {
+            viewer.innerHTML = this._renderCodeBlock(code, lang);
+        } catch (e) {
+            viewer.textContent = `Error rendering code: ${e.message}`;
+            console.error('Code viewer error:', e);
+        }
+    });
+};
+
+/**
+ * Setup toggle handlers for JSON expand/collapse.
+ * @private
+ */
+AIChat.prototype._setupJsonToggleHandlers = function (viewer) {
+    viewer.querySelectorAll('.json-toggle').forEach(toggle => {
+        toggle.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const content = document.getElementById(toggle.getAttribute('data-target'));
+            if (content) {
+                const isCollapsed = content.style.display === 'none';
+                content.style.display = isCollapsed ? 'block' : 'none';
+                toggle.textContent = isCollapsed ? '▼' : '▶';
+            }
+        });
+    });
+};
+
+
+
+/**
+ * Render code block as DOM elements.
+ * @private
+ */
+AIChat.prototype._renderCodeBlock = function (code, lang) {
+    const lines = code.split('\n');
+    const linesHtml = lines.map(line => {
+        const escapedLine = this._escapeHtml(line || ' ');
+        return `<div class="code-line">${escapedLine}</div>`;
+    }).join('');
+
+    const langLabel = lang && lang !== 'plaintext' ? `<div class="code-lang">${lang}</div>` : '';
+
+    return `<div class="code-wrapper">${langLabel}<div class="code-content">${linesHtml}</div></div>`;
+};
+
+/**
  * Scroll messages container to bottom.
  * @private
  */
@@ -422,12 +786,46 @@ AIChat.prototype._updateTokenCounter = async function () {
         if (usageInfo) {
             counter.textContent = `Tokens: ${usageInfo.inputUsage}/${usageInfo.inputQuota} (${usageInfo.percentUsed}%)`;
             counter.classList.toggle('warning', usageInfo.percentUsed >= 90);
+
+            // Show usage warning when reaching 70% (only once per session)
+            this._checkTokenUsageWarning(usageInfo.percentUsed);
         } else {
             counter.textContent = '';
         }
     } catch (error) {
         counter.textContent = '';
     }
+};
+
+/**
+ * Check if token usage warning should be displayed.
+ * @private
+ * @param {number} percentUsed - Percentage of token quota used
+ */
+AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
+    // Show warning at 70% usage, only once per session
+    if (percentUsed >= 70 && !this._hasShownUsageWarning) {
+        this._hasShownUsageWarning = true;
+
+        const warningMessage = '💡 Your conversation is getting long (' + percentUsed + '% of token limit used). ' +
+            'For faster responses and better performance, consider clearing the chat history to start fresh. ' +
+            'Click "Clear History" button above.';
+
+        this._addSystemMessage(warningMessage);
+    }
+};
+
+/**
+ * Clear current context.
+ * @private
+ */
+AIChat.prototype._clearContext = function () {
+    this._currentContext = null;
+    const contextInfo = document.getElementById('ai-context-info');
+    contextInfo.style.display = 'none';
+
+    // Add a system message to inform AI that context was cleared
+    this._addSystemMessage('❌ Context cleared - no control is currently selected');
 };
 
 /**

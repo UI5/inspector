@@ -214,13 +214,33 @@ AISessionManager.prototype._formatPrompt = function (prompt, context) {
     contextString += `- Type: ${context.control.type || 'Unknown'}\n`;
     contextString += `- ID: ${context.control.id || 'None'}\n`;
 
+    // Properties
     if (context.control.properties && context.control.properties.own && context.control.properties.own.data && Object.keys(context.control.properties.own.data).length > 0) {
         const propsPreview = context.control.properties.own.data;
         contextString += `- Properties: ${JSON.stringify(propsPreview)}\n`;
     }
 
+    // Bindings (detailed)
     if (context.control.bindings && Object.keys(context.control.bindings).length > 0) {
-        contextString += `- Has Bindings: ${Object.keys(context.control.bindings).length}\n`;
+        contextString += `- Bindings (${Object.keys(context.control.bindings).length}):\n`;
+        try {
+            contextString += JSON.stringify(context.control.bindings, null, 2) + '\n';
+        } catch (e) {
+            contextString += '  (Bindings data available but cannot serialize)\n';
+        }
+    }
+
+    // Aggregations (detailed)
+    if (context.control.aggregations) {
+        const ownAggr = context.control.aggregations.own;
+        if (ownAggr && ownAggr.data && Object.keys(ownAggr.data).length > 0) {
+            contextString += `- Aggregations (${Object.keys(ownAggr.data).length}):\n`;
+            try {
+                contextString += JSON.stringify(ownAggr.data, null, 2) + '\n';
+            } catch (e) {
+                contextString += '  (Aggregations data available but cannot serialize)\n';
+            }
+        }
     }
 
     return contextString + '\nUser Question: ' + prompt;
