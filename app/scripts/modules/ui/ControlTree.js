@@ -439,6 +439,11 @@ ControlTree.prototype._selectTreeElement = function (targetElement) {
  * @param {Element} target - DOM element to which need to be scrolled
  */
 ControlTree.prototype._scrollToElement = function (target) {
+    // Guard against null elements or missing layout properties (e.g., in test environments)
+    if (!target || !this._treeContainer || this._treeContainer.offsetHeight === undefined) {
+        return;
+    }
+
     var desiredViewBottomPosition = this._treeContainer.offsetHeight - this._treeContainer.offsetTop + this._treeContainer.scrollTop;
 
     if (target.offsetTop > desiredViewBottomPosition || target.offsetTop < this._treeContainer.scrollTop) {

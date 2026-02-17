@@ -328,6 +328,15 @@
      */
     async function handlePromptStreaming(data, port) {
 
+        // Validate messages structure
+        if (!data || !Array.isArray(data.messages)) {
+            port.postMessage({
+                type: 'error',
+                message: 'Invalid messages format: expected array'
+            });
+            return;
+        }
+
         if (!promptAPISession) {
             port.postMessage({
                 type: 'error',

@@ -21,8 +21,12 @@ function AIChat(containerId, options) {
     this._messages = [];
     this._isStreaming = false;
     this._streamingMessageElement = null;
+    this._streamingMessageHeader = null;
     this._getAppInfo = options.getAppInfo || null;
     this._hasShownUsageWarning = false;
+    this._maxJsonDepth = 10;
+    this._renderDebounceTimer = null;
+    this._pendingRender = null;
 
     this.init();
 }
@@ -42,21 +46,21 @@ AIChat.prototype.init = function () {
  */
 AIChat.prototype._render = function () {
     this._container.innerHTML = `
-        <div class="ai-chat-wrapper">
-            <div class="ai-status-banner" id="ai-status-banner">
+        <div class="ai-chat-wrapper" role="region" aria-label="AI Chat">
+            <div class="ai-status-banner" id="ai-status-banner" role="status" aria-live="polite">
                 <div class="status-content">
                     <span class="status-indicator"></span>
                     <span class="status-text">Checking model status...</span>
                 </div>
-                <button class="download-button" id="ai-download-button" style="display: none;">
+                <button class="download-button" id="ai-download-button" style="display: none;" aria-label="Download AI model">
                     Download Model
                 </button>
-                <button class="clear-history-button" id="ai-clear-history-button" style="display: none;">
+                <button class="clear-history-button" id="ai-clear-history-button" style="display: none;" aria-label="Clear chat history">
                     Clear History
                 </button>
             </div>
 
-            <div class="ai-messages-container" id="ai-messages-container">
+            <div class="ai-messages-container" id="ai-messages-container" role="log" aria-live="polite" aria-label="Chat messages">
                 <div class="ai-welcome-message">
                     <h3>UI5 AI Assistant</h3>
                     <p>Ask questions about UI5 controls, debugging, or general development topics.</p>
@@ -65,10 +69,10 @@ AIChat.prototype._render = function () {
             </div>
 
             <div class="ai-input-area">
-                <div class="context-info" id="ai-context-info" style="display: none;">
-                    <span class="context-icon">🎯</span>
+                <div class="context-info" id="ai-context-info" style="display: none;" role="status" aria-live="polite">
+                    <span class="context-icon" aria-hidden="true"></span>
                     <span class="context-text"></span>
-                    <button class="context-clear-button" id="ai-context-clear-button" title="Clear context">×</button>
+                    <button class="context-clear-button" id="ai-context-clear-button" title="Clear context" aria-label="Clear context">×</button>
                 </div>
                 <div class="input-wrapper">
                     <input
@@ -76,20 +80,21 @@ AIChat.prototype._render = function () {
                         class="ai-input"
                         id="ai-input"
                         placeholder="Ask me anything about UI5..."
+                        aria-label="Message input"
                     />
-                    <button class="ai-send-button" id="ai-send-button" disabled>
+                    <button class="ai-send-button" id="ai-send-button" disabled aria-label="Send message">
                         Send
                     </button>
                 </div>
                 <div class="input-footer">
-                    <span class="token-counter" id="ai-token-counter"></span>
+                    <span class="token-counter" id="ai-token-counter" role="status" aria-live="polite"></span>
                 </div>
             </div>
 
-            <div class="ai-confirm-dialog" id="ai-confirm-dialog" style="display: none;">
+            <div class="ai-confirm-dialog" id="ai-confirm-dialog" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
                 <div class="confirm-overlay"></div>
                 <div class="confirm-content">
-                    <div class="confirm-title">Clear Chat History?</div>
+                    <div class="confirm-title" id="confirm-dialog-title">Clear Chat History?</div>
                     <div class="confirm-message">This will clear all chat history for this page. This action cannot be undone.</div>
                     <div class="confirm-buttons">
                         <button class="confirm-button confirm-cancel" id="ai-confirm-cancel">Cancel</button>
@@ -165,6 +170,16 @@ AIChat.prototype._attachEventListeners = function () {
     confirmDialog.querySelector('.confirm-overlay').addEventListener('click', () => {
         this._hideConfirmDialog();
     });
+
+    // ESC key to close dialog
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const dialog = document.getElementById('ai-confirm-dialog');
+            if (dialog && dialog.style.display !== 'none') {
+                this._hideConfirmDialog();
+            }
+        }
+    });
 };
 
 /**
@@ -209,7 +224,13 @@ AIChat.prototype._initializeSession = async function () {
  */
 AIChat.prototype._handleDownloadModel = async function () {
     const downloadButton = document.getElementById('ai-download-button');
+    const input = document.getElementById('ai-input');
+    const sendButton = document.getElementById('ai-send-button');
+
+    // Disable UI during download
     downloadButton.disabled = true;
+    input.disabled = true;
+    sendButton.disabled = true;
 
     try {
         this._renderModelStatus('downloading', 0, 'Starting download...');
@@ -224,9 +245,13 @@ AIChat.prototype._handleDownloadModel = async function () {
         // Initialize session after download
         await this._initializeSession();
 
+        // Re-enable UI after successful download
+        input.disabled = false;
+
     } catch (error) {
         this._renderModelStatus('error', 0, `Download failed: ${error.message}`);
         downloadButton.disabled = false;
+        input.disabled = false;
     }
 };
 
@@ -269,9 +294,19 @@ AIChat.prototype._handleSendMessage = async function () {
     try {
         this._isStreaming = true;
 
-        // Create placeholder for AI response
-        const messageElement = this._addMessage('assistant', '');
+        // Create placeholder for AI response without copy button (will add after completion)
+        const messageElement = this._addMessage('assistant', '', false);
         this._streamingMessageElement = messageElement.querySelector('.message-content');
+        this._streamingMessageHeader = messageElement.querySelector('.message-header');
+
+        // Add loading indicator as DOM elements (not HTML string to avoid escaping)
+        const loadingIndicator = document.createElement('span');
+        loadingIndicator.className = 'loading-indicator';
+        loadingIndicator.textContent = 'Thinking';
+        const loadingDots = document.createElement('span');
+        loadingDots.className = 'loading-dots';
+        loadingIndicator.appendChild(loadingDots);
+        this._streamingMessageElement.appendChild(loadingIndicator);
 
         // Build conversation history (exclude the placeholder we just added)
         const conversationHistory = this._messages.slice(0, -1);
@@ -302,10 +337,27 @@ AIChat.prototype._handleSendMessage = async function () {
         // Process stream
         for await (const chunk of stream) {
             fullResponse += chunk;
-            this._streamingMessageElement.innerHTML = this._parseMarkdown(fullResponse);
-            this._initializeJsonViewers(this._streamingMessageElement);
-            this._scrollToBottom();
+            this._debouncedRender(fullResponse);
         }
+
+        // Final render after stream completes
+        if (this._renderDebounceTimer) {
+            clearTimeout(this._renderDebounceTimer);
+            this._renderDebounceTimer = null;
+        }
+        this._streamingMessageElement.innerHTML = this._parseMarkdown(fullResponse);
+        this._initializeJsonViewers(this._streamingMessageElement);
+
+        // Add copy button now that response is complete
+        const copyButton = document.createElement('button');
+        copyButton.className = 'copy-response-button';
+        copyButton.title = 'Copy response';
+        copyButton.setAttribute('aria-label', 'Copy response');
+        copyButton.textContent = 'Copy';
+        copyButton.addEventListener('click', (e) => {
+            this._copyToClipboard(fullResponse, e.currentTarget);
+        });
+        this._streamingMessageHeader.appendChild(copyButton);
 
         // Save AI response to storage
         await this._storageManager.saveMessage(this._currentUrl, {
@@ -316,6 +368,7 @@ AIChat.prototype._handleSendMessage = async function () {
 
         this._isStreaming = false;
         this._streamingMessageElement = null;
+        this._streamingMessageHeader = null;
 
         // Update token counter
         this._updateTokenCounter();
@@ -324,6 +377,7 @@ AIChat.prototype._handleSendMessage = async function () {
         this._addSystemMessage(`Error: ${error.message}`);
         this._isStreaming = false;
         this._streamingMessageElement = null;
+        this._streamingMessageHeader = null;
     }
 };
 
@@ -342,6 +396,15 @@ AIChat.prototype._handleClearHistory = function () {
 AIChat.prototype._showConfirmDialog = function () {
     const dialog = document.getElementById('ai-confirm-dialog');
     dialog.style.display = 'flex';
+
+    // Store the element that had focus
+    this._previousFocus = document.activeElement;
+
+    // Focus the cancel button (safer default)
+    const cancelButton = document.getElementById('ai-confirm-cancel');
+    if (cancelButton) {
+        cancelButton.focus();
+    }
 };
 
 /**
@@ -351,6 +414,11 @@ AIChat.prototype._showConfirmDialog = function () {
 AIChat.prototype._hideConfirmDialog = function () {
     const dialog = document.getElementById('ai-confirm-dialog');
     dialog.style.display = 'none';
+
+    // Restore focus to the element that had focus before dialog opened
+    if (this._previousFocus) {
+        this._previousFocus.focus();
+    }
 };
 
 /**
@@ -415,9 +483,10 @@ AIChat.prototype._renderModelStatus = function (status, progress, message) {
  * Add a message to the chat UI.
  * @param {string} role - 'user', 'assistant', or 'system'
  * @param {string} content - Message content
+ * @param {boolean} showCopyButton - Whether to show copy button for assistant messages (default: true)
  * @returns {HTMLElement} - The message element
  */
-AIChat.prototype._addMessage = function (role, content) {
+AIChat.prototype._addMessage = function (role, content, showCopyButton) {
     const messagesContainer = document.getElementById('ai-messages-container');
 
     // Remove welcome message if it exists
@@ -429,15 +498,16 @@ AIChat.prototype._addMessage = function (role, content) {
     const messageElement = document.createElement('div');
     messageElement.className = 'ai-message message-' + role;
 
-    const timestamp = new Date().toLocaleTimeString();
-
     // Use markdown rendering for AI responses, escape HTML for user/system messages
     const formattedContent = role === 'assistant' ? this._parseMarkdown(content) : this._escapeHtml(content);
+
+    // Default showCopyButton to true for assistant messages
+    const shouldShowCopyButton = role === 'assistant' && (showCopyButton === undefined || showCopyButton === true);
 
     messageElement.innerHTML = `
         <div class="message-header">
             <span class="message-role">${role === 'user' ? 'You' : role === 'assistant' ? 'AI' : 'System'}</span>
-            <span class="message-time">${timestamp}</span>
+            ${shouldShowCopyButton ? '<button class="copy-response-button" title="Copy response" aria-label="Copy response">Copy</button>' : ''}
         </div>
         <div class="message-content">${formattedContent}</div>
     `;
@@ -448,9 +518,18 @@ AIChat.prototype._addMessage = function (role, content) {
     if (role === 'assistant') {
         const contentElement = messageElement.querySelector('.message-content');
         this._initializeJsonViewers(contentElement);
+
+        // Add copy button event listener if button exists
+        const copyButton = messageElement.querySelector('.copy-response-button');
+        if (copyButton) {
+            copyButton.addEventListener('click', (e) => {
+                this._copyToClipboard(content, e.currentTarget);
+            });
+        }
     }
 
-    this._scrollToBottom();
+    // Force scroll to bottom when adding new message
+    this._scrollToBottom(true);
 
     this._messages.push({ role, content });
 
@@ -605,15 +684,22 @@ AIChat.prototype._createCodeViewer = function (code, lang) {
  * Render interactive JSON viewer with expand/collapse.
  * @private
  */
-AIChat.prototype._renderJsonValue = function (value, key, isLast) {
+AIChat.prototype._renderJsonValue = function (value, key, isLast, depth) {
+    depth = depth || 0;
+
+    if (depth > this._maxJsonDepth) {
+        const comma = isLast ? '' : ',';
+        return this._renderJsonLine(key, `<span class="json-truncated">[Max depth reached]</span>${comma}`);
+    }
+
     const comma = isLast ? '' : ',';
     const handlers = {
         null: () => this._renderJsonLine(key, `<span class="json-null">null</span>${comma}`),
         boolean: () => this._renderJsonLine(key, `<span class="json-boolean">${value}</span>${comma}`),
         number: () => this._renderJsonLine(key, `<span class="json-number">${value}</span>${comma}`),
         string: () => this._renderJsonString(key, value, comma),
-        array: () => this._renderJsonArray(key, value, comma),
-        object: () => this._renderJsonObject(key, value, comma)
+        array: () => this._renderJsonArray(key, value, comma, depth),
+        object: () => this._renderJsonObject(key, value, comma, depth)
     };
 
     const type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
@@ -633,14 +719,14 @@ AIChat.prototype._renderJsonString = function (key, value, comma) {
  * Render JSON array.
  * @private
  */
-AIChat.prototype._renderJsonArray = function (key, value, comma) {
+AIChat.prototype._renderJsonArray = function (key, value, comma, depth) {
     if (value.length === 0) {
         return this._renderJsonLine(key, `<span class="json-bracket">[]</span>${comma}`);
     }
 
     const id = 'json-' + Math.random().toString(36).substr(2, 9);
     const keyHtml = key ? `<span class="json-key">"${this._escapeHtml(key)}"</span>: ` : '';
-    const items = value.map((item, i) => this._renderJsonValue(item, null, i === value.length - 1)).join('');
+    const items = value.map((item, i) => this._renderJsonValue(item, null, i === value.length - 1, depth + 1)).join('');
 
     return `<div class="json-line">${keyHtml}<span class="json-toggle" data-target="${id}">▼</span> <span class="json-bracket">[</span><span class="json-count">${value.length} items</span></div>
             <div class="json-content" id="${id}">${items}<div class="json-line"><span class="json-bracket">]</span>${comma}</div></div>`;
@@ -650,7 +736,7 @@ AIChat.prototype._renderJsonArray = function (key, value, comma) {
  * Render JSON object.
  * @private
  */
-AIChat.prototype._renderJsonObject = function (key, value, comma) {
+AIChat.prototype._renderJsonObject = function (key, value, comma, depth) {
     const keys = Object.keys(value);
     if (keys.length === 0) {
         return this._renderJsonLine(key, `<span class="json-bracket">{}</span>${comma}`);
@@ -658,13 +744,11 @@ AIChat.prototype._renderJsonObject = function (key, value, comma) {
 
     const id = 'json-' + Math.random().toString(36).substr(2, 9);
     const keyHtml = key ? `<span class="json-key">"${this._escapeHtml(key)}"</span>: ` : '';
-    const items = keys.map((k, i) => this._renderJsonValue(value[k], k, i === keys.length - 1)).join('');
+    const items = keys.map((k, i) => this._renderJsonValue(value[k], k, i === keys.length - 1, depth + 1)).join('');
 
     return `<div class="json-line">${keyHtml}<span class="json-toggle" data-target="${id}">▼</span> <span class="json-bracket">{</span><span class="json-count">${keys.length} keys</span></div>
             <div class="json-content" id="${id}">${items}<div class="json-line"><span class="json-bracket">}</span>${comma}</div></div>`;
 };
-
-
 
 /**
  * Render a single JSON line.
@@ -700,9 +784,20 @@ AIChat.prototype._initializeJsonViewers = function (element) {
 
         try {
             const parsed = JSON.parse(jsonData);
-            viewer.innerHTML = `<div class="json-wrapper"><div class="json-tree">${this._renderJsonValue(parsed, null, true)}</div></div>`;
+            viewer.innerHTML = `<div class="json-wrapper">
+                <button class="copy-code-button" title="Copy JSON" aria-label="Copy JSON">Copy</button>
+                <div class="json-tree">${this._renderJsonValue(parsed, null, true)}</div>
+            </div>`;
 
             this._setupJsonToggleHandlers(viewer);
+
+            // Add copy button event listener
+            const copyButton = viewer.querySelector('.copy-code-button');
+            if (copyButton) {
+                copyButton.addEventListener('click', (e) => {
+                    this._copyToClipboard(JSON.stringify(parsed, null, 2), e.currentTarget);
+                });
+            }
         } catch (e) {
             viewer.textContent = `Error rendering JSON: ${e.message}`;
             console.error('JSON viewer error:', e);
@@ -719,6 +814,14 @@ AIChat.prototype._initializeJsonViewers = function (element) {
 
         try {
             viewer.innerHTML = this._renderCodeBlock(code, lang);
+
+            // Add copy button event listener
+            const copyButton = viewer.querySelector('.copy-code-button');
+            if (copyButton) {
+                copyButton.addEventListener('click', (e) => {
+                    this._copyToClipboard(code, e.currentTarget);
+                });
+            }
         } catch (e) {
             viewer.textContent = `Error rendering code: ${e.message}`;
             console.error('Code viewer error:', e);
@@ -746,8 +849,6 @@ AIChat.prototype._setupJsonToggleHandlers = function (viewer) {
     });
 };
 
-
-
 /**
  * Render code block as DOM elements.
  * @private
@@ -760,17 +861,67 @@ AIChat.prototype._renderCodeBlock = function (code, lang) {
     }).join('');
 
     const langLabel = lang && lang !== 'plaintext' ? `<div class="code-lang">${lang}</div>` : '';
+    const copyButton = '<button class="copy-code-button" title="Copy code" aria-label="Copy code">Copy</button>';
 
-    return `<div class="code-wrapper">${langLabel}<div class="code-content">${linesHtml}</div></div>`;
+    return `<div class="code-wrapper">${langLabel}${copyButton}<div class="code-content">${linesHtml}</div></div>`;
 };
 
 /**
- * Scroll messages container to bottom.
+ * Check if user is scrolled to bottom (within threshold).
  * @private
+ * @returns {boolean}
  */
-AIChat.prototype._scrollToBottom = function () {
+AIChat.prototype._isScrolledToBottom = function () {
     const messagesContainer = document.getElementById('ai-messages-container');
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    if (!messagesContainer) {
+        return true;
+    }
+
+    const threshold = 100; // pixels from bottom
+    const scrollPosition = messagesContainer.scrollTop + messagesContainer.clientHeight;
+    const scrollHeight = messagesContainer.scrollHeight;
+
+    return scrollHeight - scrollPosition < threshold;
+};
+
+/**
+ * Scroll messages container to bottom (only if user is already at bottom).
+ * @private
+ * @param {boolean} force - Force scroll even if user scrolled up
+ */
+AIChat.prototype._scrollToBottom = function (force) {
+    const messagesContainer = document.getElementById('ai-messages-container');
+    if (!messagesContainer || messagesContainer.scrollHeight === undefined) {
+        return;
+    }
+
+    // Only auto-scroll if user is already at bottom, or if forced
+    if (force || this._isScrolledToBottom()) {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+};
+
+/**
+ * Debounced render for streaming content to improve performance.
+ * @private
+ * @param {string} content - Content to render
+ */
+AIChat.prototype._debouncedRender = function (content) {
+    this._pendingRender = content;
+
+    if (this._renderDebounceTimer) {
+        return;
+    }
+
+    this._renderDebounceTimer = setTimeout(() => {
+        if (this._pendingRender && this._streamingMessageElement) {
+            this._streamingMessageElement.innerHTML = this._parseMarkdown(this._pendingRender);
+            this._initializeJsonViewers(this._streamingMessageElement);
+            // Don't force scroll during streaming - let user scroll freely
+            this._scrollToBottom(false);
+        }
+        this._renderDebounceTimer = null;
+    }, 50); // 50ms debounce
 };
 
 /**
@@ -779,13 +930,28 @@ AIChat.prototype._scrollToBottom = function () {
  */
 AIChat.prototype._updateTokenCounter = async function () {
     const counter = document.getElementById('ai-token-counter');
+    const input = document.getElementById('ai-input');
+    const sendButton = document.getElementById('ai-send-button');
 
     try {
         const usageInfo = await this._sessionManager.getUsageInfo();
 
         if (usageInfo) {
             counter.textContent = `Tokens: ${usageInfo.inputUsage}/${usageInfo.inputQuota} (${usageInfo.percentUsed}%)`;
-            counter.classList.toggle('warning', usageInfo.percentUsed >= 90);
+
+            // Remove all warning classes first
+            counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
+
+            if (usageInfo.percentUsed >= 100) {
+                counter.classList.add('quota-exhausted');
+                input.disabled = true;
+                sendButton.disabled = true;
+                input.placeholder = 'Token quota exhausted. Clear history to continue.';
+            } else if (usageInfo.percentUsed >= 90) {
+                counter.classList.add('warning-critical');
+            } else if (usageInfo.percentUsed >= 70) {
+                counter.classList.add('warning');
+            }
 
             // Show usage warning when reaching 70% (only once per session)
             this._checkTokenUsageWarning(usageInfo.percentUsed);
@@ -855,8 +1021,8 @@ AIChat.prototype.onTabActivated = function () {
         this._loadHistory();
     }
 
-    // Scroll to bottom
-    this._scrollToBottom();
+    // Force scroll to bottom when context changes
+    this._scrollToBottom(true);
 };
 
 /**
@@ -887,10 +1053,63 @@ AIChat.prototype._loadHistory = async function () {
             });
 
             document.getElementById('ai-clear-history-button').style.display = 'inline-block';
-            this._scrollToBottom();
+            // Force scroll to bottom when loading history
+            this._scrollToBottom(true);
         }
     } catch (error) {
         // Fail silently
+    }
+};
+
+/**
+ * Copy text to clipboard.
+ * @private
+ * @param {string} text - Text to copy
+ * @param {HTMLElement} button - The button element that triggered the copy
+ */
+AIChat.prototype._copyToClipboard = function (text, button) {
+    // Create temporary textarea (must be visible for copy to work)
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    // Position off-screen but keep visible (opacity 0 can block copy in some contexts)
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.style.left = '-9999px';
+    textarea.setAttribute('readonly', '');
+    document.body.appendChild(textarea);
+
+    // Select the text
+    textarea.focus();
+    textarea.select();
+
+    // For iOS compatibility
+    textarea.setSelectionRange(0, text.length);
+
+    try {
+        // Execute copy command
+        const successful = document.execCommand('copy');
+
+        if (successful) {
+            // Change button text to "Copied!"
+            const originalText = button.textContent;
+            button.textContent = 'Copied!';
+            button.disabled = true;
+
+            // Revert back after 1.5 seconds
+            setTimeout(() => {
+                button.textContent = originalText;
+                button.disabled = false;
+            }, 1500);
+        } else {
+            console.error('execCommand returned false');
+            this._addSystemMessage('Failed to copy to clipboard');
+        }
+    } catch (err) {
+        console.error('Copy failed:', err);
+        this._addSystemMessage('Failed to copy to clipboard');
+    } finally {
+        // Clean up
+        document.body.removeChild(textarea);
     }
 };
 

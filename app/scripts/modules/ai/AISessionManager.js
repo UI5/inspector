@@ -199,6 +199,75 @@ AISessionManager.prototype.createSession = function () {
 };
 
 /**
+ * Truncate JSON string if needed.
+ * @private
+ * @param {Object} data - Data to stringify
+ * @param {number} maxLength - Maximum length
+ * @returns {string}
+ */
+AISessionManager.prototype._truncateJson = function (data, maxLength) {
+    try {
+        var json = JSON.stringify(data, null, 2);
+        if (json.length > maxLength) {
+            return json.substring(0, maxLength) + '... [truncated]';
+        }
+        return json;
+    } catch (e) {
+        return '(Data available but cannot serialize)';
+    }
+};
+
+/**
+ * Add properties to context string.
+ * @private
+ */
+AISessionManager.prototype._addPropertiesContext = function (control, maxLength) {
+    var props = control.properties;
+    if (!props || !props.own || !props.own.data) {
+        return '';
+    }
+    var keys = Object.keys(props.own.data);
+    if (keys.length === 0) {
+        return '';
+    }
+    var propsJson = JSON.stringify(props.own.data);
+    if (propsJson.length > maxLength) {
+        propsJson = propsJson.substring(0, maxLength) + '... [truncated]';
+    }
+    return '- Properties: ' + propsJson + '\n';
+};
+
+/**
+ * Add bindings to context string.
+ * @private
+ */
+AISessionManager.prototype._addBindingsContext = function (bindings, maxLength) {
+    if (!bindings || Object.keys(bindings).length === 0) {
+        return '';
+    }
+    var result = '- Bindings (' + Object.keys(bindings).length + '):\n';
+    result += this._truncateJson(bindings, maxLength) + '\n';
+    return result;
+};
+
+/**
+ * Add aggregations to context string.
+ * @private
+ */
+AISessionManager.prototype._addAggregationsContext = function (aggregations, maxLength) {
+    if (!aggregations || !aggregations.own || !aggregations.own.data) {
+        return '';
+    }
+    var keys = Object.keys(aggregations.own.data);
+    if (keys.length === 0) {
+        return '';
+    }
+    var result = '- Aggregations (' + keys.length + '):\n';
+    result += this._truncateJson(aggregations.own.data, maxLength) + '\n';
+    return result;
+};
+
+/**
  * Format prompt with optional context.
  * @private
  * @param {string} prompt - User prompt
@@ -206,42 +275,20 @@ AISessionManager.prototype.createSession = function () {
  * @returns {string}
  */
 AISessionManager.prototype._formatPrompt = function (prompt, context) {
+    var MAX_SECTION_LENGTH = 2000;
+
     if (!context || !context.control) {
         return prompt;
     }
 
-    let contextString = 'Current UI5 Control Context:\n';
-    contextString += `- Type: ${context.control.type || 'Unknown'}\n`;
-    contextString += `- ID: ${context.control.id || 'None'}\n`;
+    var control = context.control;
+    var contextString = 'Current UI5 Control Context:\n';
+    contextString += '- Type: ' + (control.type || 'Unknown') + '\n';
+    contextString += '- ID: ' + (control.id || 'None') + '\n';
 
-    // Properties
-    if (context.control.properties && context.control.properties.own && context.control.properties.own.data && Object.keys(context.control.properties.own.data).length > 0) {
-        const propsPreview = context.control.properties.own.data;
-        contextString += `- Properties: ${JSON.stringify(propsPreview)}\n`;
-    }
-
-    // Bindings (detailed)
-    if (context.control.bindings && Object.keys(context.control.bindings).length > 0) {
-        contextString += `- Bindings (${Object.keys(context.control.bindings).length}):\n`;
-        try {
-            contextString += JSON.stringify(context.control.bindings, null, 2) + '\n';
-        } catch (e) {
-            contextString += '  (Bindings data available but cannot serialize)\n';
-        }
-    }
-
-    // Aggregations (detailed)
-    if (context.control.aggregations) {
-        const ownAggr = context.control.aggregations.own;
-        if (ownAggr && ownAggr.data && Object.keys(ownAggr.data).length > 0) {
-            contextString += `- Aggregations (${Object.keys(ownAggr.data).length}):\n`;
-            try {
-                contextString += JSON.stringify(ownAggr.data, null, 2) + '\n';
-            } catch (e) {
-                contextString += '  (Aggregations data available but cannot serialize)\n';
-            }
-        }
-    }
+    contextString += this._addPropertiesContext(control, MAX_SECTION_LENGTH);
+    contextString += this._addBindingsContext(control.bindings, MAX_SECTION_LENGTH);
+    contextString += this._addAggregationsContext(control.aggregations, MAX_SECTION_LENGTH);
 
     return contextString + '\nUser Question: ' + prompt;
 };

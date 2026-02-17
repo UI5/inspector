@@ -432,8 +432,6 @@
     var aiChat = new AIChat('ai-chat', {
         getAppInfo: function () {
             var currentFrameId = framesSelect.getSelectedId();
-            console.log('[main.js] getAppInfo called. currentFrameId:', currentFrameId);
-            console.log('[main.js] frameData:', frameData);
             return frameData[currentFrameId] ? frameData[currentFrameId].applicationInformation : null;
         }
     });
