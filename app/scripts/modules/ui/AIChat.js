@@ -247,6 +247,7 @@ AIChat.prototype._handleDownloadModel = async function () {
 
         // Re-enable UI after successful download
         input.disabled = false;
+        sendButton.disabled = !input.value.trim().length;
 
     } catch (error) {
         this._renderModelStatus('error', 0, `Download failed: ${error.message}`);
@@ -335,6 +336,8 @@ AIChat.prototype._handleSendMessage = async function () {
         let fullResponse = '';
 
         // Process stream
+        // Note: Chrome Prompt API returns delta chunks (not cumulative text)
+        // in Chrome 132+, so we accumulate with +=
         for await (const chunk of stream) {
             fullResponse += chunk;
             this._debouncedRender(fullResponse);

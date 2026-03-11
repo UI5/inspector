@@ -37,6 +37,12 @@ AISessionManager.prototype._connect = function () {
         this._isConnected = false;
         this._hasActiveSession = false;
         this._port = null;
+
+        // Reject any in-flight streaming promise to prevent UI hang
+        var errorHandler = this._messageHandlers.error;
+        if (errorHandler) {
+            errorHandler({ message: 'Connection to background script lost. Please try again.' });
+        }
     });
 };
 
