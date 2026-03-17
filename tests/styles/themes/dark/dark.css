@@ -1397,6 +1397,19 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
   font-size: 13px;
   line-height: 1.5;
 }
+.experimental-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background-color: rgba(201, 135, 48, 0.15);
+  color: #C98730;
+  border: 1px solid rgba(201, 135, 48, 0.3);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-left: 8px;
+  vertical-align: middle;
+}
 .ai-message {
   display: flex;
   flex-direction: column;

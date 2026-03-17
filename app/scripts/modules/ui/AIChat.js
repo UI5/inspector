@@ -63,6 +63,7 @@ AIChat.prototype._render = function () {
             <div class="ai-messages-container" id="ai-messages-container" role="log" aria-live="polite" aria-label="Chat messages">
                 <div class="ai-welcome-message">
                     <h3>UI5 AI Assistant</h3>
+                    <span class="experimental-tag">Experimental</span>
                     <p>Ask questions about UI5 controls, debugging, or general development topics.</p>
                     <p>Select a control in the Control Inspector to automatically include context in your questions.</p>
                 </div>
@@ -578,10 +579,13 @@ AIChat.prototype._parseMarkdown = function (text) {
     // Step 3: Apply markdown formatting
     html = this._applyMarkdownFormatting(html);
 
-    // Step 4: Convert line breaks BEFORE restoring code (so <br> doesn't appear inside <code> tags)
+    // Step 4: Trim trailing whitespace before converting line breaks
+    html = html.trimEnd();
+
+    // Step 5: Convert line breaks BEFORE restoring code (so <br> doesn't appear inside <code> tags)
     html = html.replace(/\n/g, '<br>');
 
-    // Step 5: Restore code (after line breaks so code blocks keep their original formatting)
+    // Step 6: Restore code (after line breaks so code blocks keep their original formatting)
     html = this._restoreInlineCode(html, placeholders.inlineCode);
     html = this._restoreCodeBlocks(html, placeholders.codeBlocks);
 
