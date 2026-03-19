@@ -6,6 +6,29 @@ data-view {
     -webkit-transform: translateZ(0);
     word-break: break-all;
 
+    .dataview-filter {
+        padding: 4px;
+        border-bottom: 1px solid @gray-lighter;
+        position: sticky;
+        top: 0;
+        background: @tab-background-color;
+        z-index: 1;
+    }
+
+    .dataview-filter-input {
+        width: 100%;
+        padding: 4px 8px;
+        border: 1px solid @gray-lighter;
+        border-radius: 2px;
+        font-size: 12px;
+        box-sizing: border-box;
+
+        &:focus {
+            outline: none;
+            border-color: @light-blue;
+        }
+    }
+
     clickable-value,
     .controlId {
         color: @light-blue;

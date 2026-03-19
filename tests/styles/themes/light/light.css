@@ -318,6 +318,26 @@ data-view {
   -webkit-transform: translateZ(0);
   word-break: break-all;
 }
+data-view .dataview-filter {
+  padding: 4px;
+  border-bottom: 1px solid #d4d4d4;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+}
+data-view .dataview-filter-input {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid #d4d4d4;
+  border-radius: 2px;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+data-view .dataview-filter-input:focus {
+  outline: none;
+  border-color: #0000ee;
+}
 data-view clickable-value,
 data-view .controlId {
   color: #0000ee;

@@ -3,6 +3,35 @@
 var JSONFormatter = require('../ui/JSONFormatter');
 var DVHelper = require('../ui/helpers/DataViewHelper');
 
+var FILTER_INPUT_CLASS = 'dataview-filter-input';
+
+/**
+ * Escape HTML special characters to prevent XSS.
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeHTML(str) {
+    if (!str) {
+        return '';
+    }
+    return str.replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;');
+}
+
+/**
+ * Sort keys alphabetically (case-insensitive).
+ * Returns a new sorted array without mutating the original.
+ * @param {Array} keys
+ * @returns {Array}
+ */
+function sortKeysAlphabetically(keys) {
+    return keys.slice().sort(function (a, b) {
+        return a.toLowerCase().localeCompare(b.toLowerCase());
+    });
+}
+
 /** @property {Object} data - Object in the following format:
  *  {
  *      object1: {
@@ -30,10 +59,12 @@ var DVHelper = require('../ui/helpers/DataViewHelper');
 function DataView(target, options) {
 
     this._DataViewContainer = document.getElementById(target);
+    this._filterValue = '';
 
     // Initialize event handlers for editable fields
     this._onClickHandler();
     this._onEnterHandler();
+    this._onFilterHandler();
 
     // When the field is editable this flag shows whether the value should be selected
     this._selectValue = true;
@@ -267,18 +298,17 @@ DataView.prototype._generateHTMLForKeyValuePair = function (key, currentView) {
  */
 DataView.prototype._generateHTMLSection = function (viewObject) {
     var data = viewObject.data;
-    var associations = viewObject.associations;
-    var html = '';
-    var options = viewObject.options;
     var isDataArray = Array.isArray(data);
-    var lastArrayElement = data.length - 1;
+    var keys = isDataArray ? Object.keys(data) : sortKeysAlphabetically(Object.keys(data));
+    var html = '';
 
-    html += DVHelper.openUL(DVHelper.getULAttributesFromOptions(options));
+    html += DVHelper.openUL(DVHelper.getULAttributesFromOptions(viewObject.options));
 
-    for (var key in data) {
-        html += DVHelper.openLI();
-
+    for (var i = 0; i < keys.length; i++) {
+        var key = keys[i];
         var currentElement = data[key];
+
+        html += DVHelper.openLI();
 
         // Additional check for currentElement mainly to go around null values errors
         if (currentElement && currentElement.options) {
@@ -291,17 +321,19 @@ DataView.prototype._generateHTMLSection = function (viewObject) {
             html += this._generateHTMLForKeyValuePair(key, viewObject);
         }
 
-        if (isDataArray && key < lastArrayElement) {
+        if (isDataArray && i < keys.length - 1) {
             html += ',';
         }
 
         html += DVHelper.closeLI();
     }
 
-    for (var name in associations) {
-        var currentAssociation = associations[name];
+    // Associations are also sorted alphabetically
+    var assocKeys = sortKeysAlphabetically(Object.keys(viewObject.associations || {}));
+    for (var j = 0; j < assocKeys.length; j++) {
+        var name = assocKeys[j];
         html += DVHelper.openLI();
-        html += DVHelper.wrapInTag('key', name) + ':&nbsp;' + DVHelper.wrapInTag('value', currentAssociation);
+        html += DVHelper.wrapInTag('key', name) + ':&nbsp;' + DVHelper.wrapInTag('value', viewObject.associations[name]);
         html += DVHelper.closeLI();
     }
 
@@ -322,6 +354,9 @@ DataView.prototype._generateHTML = function () {
         this._DataViewContainer.innerHTML = noAvailableData;
         return;
     }
+
+    // Add filter input
+    html += '<div class="dataview-filter"><input type="search" placeholder="Filter properties..." class="' + FILTER_INPUT_CLASS + '" value="' + escapeHTML(this._filterValue) + '"/></div>';
 
     // Go trough all the objects on the top level in the data structure and
     // skip the ones that does not have anything to display
@@ -495,7 +530,10 @@ DataView.prototype._onClickHandler = function () {
             return;
         }
 
-        DVHelper.toggleCollapse(target);
+        var wasToggled = DVHelper.toggleCollapse(target);
+        if (wasToggled && that._filterValue) {
+            that._applyFilter();
+        }
 
         that._handleEditableValue(targetElement);
         that._handleClickableValue(targetElement, event);
@@ -686,6 +724,47 @@ DataView.prototype._onCheckBoxHandler = function (target) {
         target.removeEventListener('onchange', this);
         that._selectValue = true;
     };
+};
+
+/**
+ * Filter input event handler.
+ * @private
+ */
+DataView.prototype._onFilterHandler = function () {
+    var that = this;
+
+    this._DataViewContainer.addEventListener('input', function (e) {
+        if (!e.target.classList.contains(FILTER_INPUT_CLASS)) {
+            return;
+        }
+
+        that._filterValue = e.target.value.toLowerCase();
+        that._applyFilter();
+    });
+};
+
+/**
+ * Apply filter to visible properties.
+ * @private
+ */
+DataView.prototype._applyFilter = function () {
+    var filter = this._filterValue;
+    var items = this._DataViewContainer.querySelectorAll('ul[expanded] > li');
+
+    for (var i = 0; i < items.length; i++) {
+        var li = items[i];
+        var keyEl = li.querySelector(':scope > key');
+        if (!keyEl) {
+            continue;
+        }
+
+        var keyText = keyEl.textContent.toLowerCase();
+        if (filter && keyText.indexOf(filter) === -1) {
+            li.style.display = 'none';
+        } else {
+            li.style.display = '';
+        }
+    }
 };
 
 module.exports = DataView;
