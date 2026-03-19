@@ -57,8 +57,7 @@
                 "/vendor/mode-xml.js",
                 "/vendor/theme-chrome.js",
                 "/vendor/theme-vibrant_ink.js",
-                "/vendor/vkbeautify.js",
-                "/modules/utils/multipartmixed2har.js"
+                "/vendor/vkbeautify.js"
             ]
         }
     ]
