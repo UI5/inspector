@@ -1410,6 +1410,14 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
   margin-left: 8px;
   vertical-align: middle;
 }
+.ai-disclaimer {
+  margin-top: auto;
+  padding: 8px 0 0 0;
+  text-align: center;
+  font-size: 11px;
+  color: #a3a3a3;
+  font-style: italic;
+}
 .ai-message {
   display: flex;
   flex-direction: column;

@@ -67,6 +67,7 @@ AIChat.prototype._render = function () {
                     <p>Ask questions about UI5 controls, debugging, or general development topics.</p>
                     <p>Select a control in the Control Inspector to automatically include context in your questions.</p>
                 </div>
+                <div class="ai-disclaimer">AI-generated content may be incorrect</div>
             </div>
 
             <div class="ai-input-area">
@@ -441,6 +442,7 @@ AIChat.prototype._performClearHistory = async function () {
                 <h3>UI5 AI Assistant</h3>
                 <p>Chat history cleared. Ask me anything!</p>
             </div>
+            <div class="ai-disclaimer">AI-generated content may be incorrect</div>
         `;
 
         // Destroy and recreate session to reset token counter
@@ -497,6 +499,12 @@ AIChat.prototype._addMessage = function (role, content, showCopyButton) {
     const welcomeMessage = messagesContainer.querySelector('.ai-welcome-message');
     if (welcomeMessage) {
         welcomeMessage.remove();
+    }
+
+    // Remove disclaimer if it exists
+    const disclaimer = messagesContainer.querySelector('.ai-disclaimer');
+    if (disclaimer) {
+        disclaimer.remove();
     }
 
     const messageElement = document.createElement('div');
