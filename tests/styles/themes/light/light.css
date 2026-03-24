@@ -1421,12 +1421,12 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
   bottom: 0;
   left: 0;
   right: 0;
-  padding: 10px 8px;
+  padding: 8px 8px;
   text-align: center;
   font-size: 11px;
   color: #a3a3a3;
   font-style: italic;
-  background: linear-gradient(to top, #fff 70%, transparent);
+  background-color: #fff;
   pointer-events: none;
   z-index: 10;
 }
