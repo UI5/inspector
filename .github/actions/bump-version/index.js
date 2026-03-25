@@ -22,9 +22,15 @@ const run = async () => {
 
     await exec.exec('git', ['config', '--global', 'user.name', 'github-actions']);
     await exec.exec('git', ['config', '--global', 'user.email', 'actions@users.noreply.github.com']);
-    await exec.exec('git', ['checkout', '-b', `bump-version-${version}`]);
+
+    const branch = `bump-version-${version}`;
+
+    // Delete the remote branch if it already exists (e.g. from a previous run)
+    await exec.exec('git', ['push', 'origin', '--delete', branch]).catch(() => {});
+
+    await exec.exec('git', ['checkout', '-B', branch]);
     await exec.exec('git', ['commit', '-am', `chore: release ${version}`]);
-    await exec.exec('git', ['push', '-u', 'origin', `bump-version-${version}`]);
+    await exec.exec('git', ['push', '-u', 'origin', branch]);
     await exec.exec('gh', ['pr', 'create', '--fill']);
 };
 
