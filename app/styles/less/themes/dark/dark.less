@@ -32,3 +32,36 @@
 @bg-datagrid-header-background-color: @black;
 @bg-datagrid-th-sortable-background-color: #252525;
 @bg-datagrid-tr-hover-background-color: rgba(201, 135, 48, 0.1);
+
+// Dark theme specific overrides for AI Chat
+.ai-message.message-assistant .message-content {
+    color: @white;
+}
+
+// Dark theme JSON viewer colors
+.json-viewer {
+    .json-content {
+        background: #1e1e1e;
+        border-color: #3c3c3c;
+    }
+    
+    .json-key {
+        color: #9cdcfe; // Light blue for keys
+    }
+    
+    .json-string {
+        color: #ce9178; // Light orange for strings
+    }
+    
+    .json-number {
+        color: #b5cea8; // Light green for numbers
+    }
+    
+    .json-boolean {
+        color: #569cd6; // Blue for booleans
+    }
+    
+    .json-null {
+        color: #808080; // Gray for null
+    }
+}
