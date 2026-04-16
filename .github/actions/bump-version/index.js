@@ -20,8 +20,8 @@ const run = async () => {
     core.info('Update files version field');
     await exec.exec('node', [path.join(process.env.GITHUB_WORKSPACE, './scripts/update-version.js'), version]);
 
-    await exec.exec('git', ['config', '--global', 'user.name', 'github-actions']);
-    await exec.exec('git', ['config', '--global', 'user.email', 'actions@users.noreply.github.com']);
+    await exec.exec('git', ['config', '--global', 'user.name', 'github-actions[bot]']);
+    await exec.exec('git', ['config', '--global', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com']);
 
     const branch = `bump-version-${version}`;
 
