@@ -422,24 +422,16 @@ sap.ui.define(["sap/ui/core/Core", "sap/ui/core/Element", "sap/ui/core/ElementMe
                     });
 
                     subResult = results[results.length - 1].content;
-                } else if (node.id && control && control.isA("sap.ui.core.Control") && typeof control.getDomRef === "function") {
+                } else if (node.id && control && control.isA("sap.ui.core.Control") && control.getDomRef && control.getDomRef() === node) {
                     // Fallback for controls (e.g. sap.ui.core.HTML) that render without data-sap-ui on their root DOM node.
-                    var domRef;
-                    try {
-                        domRef = control.getDomRef();
-                    } catch (e) {
-                        // getDomRef() can throw when a control is partially destroyed or mid re-render
-                    }
-                    if (domRef === node) {
-                        results.push({
-                            id: control.getId(),
-                            name: control.getMetadata().getName(),
-                            type: "sap-ui-control",
-                            content: []
-                        });
+                    results.push({
+                        id: control.getId(),
+                        name: control.getMetadata().getName(),
+                        type: "sap-ui-control",
+                        content: []
+                    });
 
-                        subResult = results[results.length - 1].content;
-                    }
+                    subResult = results[results.length - 1].content;
                 }
 
                 while (childNode) {
