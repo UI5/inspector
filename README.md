@@ -1,4 +1,4 @@
-![OpenUI5](http://openui5.org/images/OpenUI5_new_big_side.png)
+![OpenUI5](docs/images/UI5_logo_wide.png)
 
 [![Built with Grunt](https://cdn.gruntjs.com/builtwith.png)](http://gruntjs.com/)
 [![Build Status](https://travis-ci.org/SAP/ui5-inspector.svg?branch=master)](https://travis-ci.org/SAP/ui5-inspector)

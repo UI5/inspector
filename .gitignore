@@ -14,6 +14,8 @@ temp
 tests/reports
 tempDist
 
+.DS_Store
+
 # App files
 **/styles/*.css
 FRONTEND.md
