@@ -196,6 +196,21 @@
 
     mutation.init();
 
+    // Build the actions list for the DataView panel. Web components don't have
+    // an `invalidate()` method (re-rendering is automatic), so we omit it.
+    function _buildControlActions(controlId) {
+        return {
+            actions: {
+                data: ['Focus', 'Copy to Console', 'Copy HTML to Console']
+            },
+            own: {
+                options: {
+                    controlId: controlId
+                }
+            }
+        };
+    }
+
     function _sendControlSelectResponse(controlId) {
         var controlProperties = WebCToolsAPI.getControlProperties(controlId);
         var controlAggregations = WebCToolsAPI.getControlAggregations(controlId);
@@ -207,7 +222,7 @@
             controlBindings: {},
             controlAggregations: _formatAggregations(controlId, controlAggregations),
             controlEvents: _formatEvents(controlId, controlEvents),
-            controlActions: { actions: ['Focus'] }
+            controlActions: _buildControlActions(controlId)
         });
     }
 
@@ -249,6 +264,29 @@
             }
 
             _sendControlSelectResponse(controlId);
+        },
+
+        'do-control-focus': function (event) {
+            var element = WebCToolsAPI.getElementById(event.detail.data.controlId);
+            if (element && typeof element.focus === 'function') {
+                element.focus();
+            }
+        },
+
+        'do-copy-control-to-console': function (event) {
+            var element = WebCToolsAPI.getElementById(event.detail.data.controlId);
+            if (element) {
+                // eslint-disable-next-line no-console
+                console.log(element);
+            }
+        },
+
+        'do-control-copy-html': function (event) {
+            var element = WebCToolsAPI.getElementById(event.detail.target);
+            if (element) {
+                // eslint-disable-next-line no-console
+                console.log(element.outerHTML);
+            }
         }
     };
 
