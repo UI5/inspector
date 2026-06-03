@@ -80,6 +80,36 @@
             });
         },
 
+        'do-webc-injection': function (message) {
+            const frameId = message.frameId;
+            chrome.windows.getCurrent().then(w => {
+                chrome.tabs.query({ active: true, windowId: w.id }).then(tabs => {
+                    const target = {
+                        tabId: tabs[0].id
+                    };
+                    if (frameId !== undefined) {
+                        target.frameIds = [message.frameId];
+                    }
+                    chrome.scripting.executeScript({
+                        target,
+                        files: ['/vendor/WebComponentsToolsAPI.js'],
+                        world: 'MAIN'
+                    }).then(() => {
+                        return chrome.scripting.executeScript({
+                            target,
+                            files: ['/scripts/injected/webcMain.js'],
+                            world: 'MAIN'
+                        });
+                    }).then(() => {
+                        chrome.runtime.sendMessage({
+                            action: 'on-webc-script-injection',
+                            frameId: frameId
+                        });
+                    });
+                });
+            });
+        },
+
         /**
          * Set the element that was clicked with the right button of the mouse.
          * @param {Object} message

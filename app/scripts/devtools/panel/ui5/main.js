@@ -2,6 +2,8 @@
 (function () {
     'use strict';
 
+
+
     // ================================================================================
     // Main controller for 'UI5' tab in devtools
     // ================================================================================
@@ -24,6 +26,7 @@
     var ControllerDetailView = require('../../../modules/ui/ControllerDetailView.js');
     var OElementsRegistryMasterView = require('../../../modules/ui/OElementsRegistryMasterView.js');
     var AIChat = require('../../../modules/ui/AIChat.js');
+
 
     // Apply theme
     // ================================================================================
@@ -385,6 +388,33 @@
         }
     }, sharedDataViewOptions));
 
+    function _getMergedControlTree(frameId) {
+        var fd = frameData[frameId];
+        if (!fd) {
+            return {};
+        }
+        var ui5Tree = fd.controlTreeUI5;
+        var webcTree = fd.controlTreeWebC;
+
+        if (ui5Tree && webcTree) {
+            return {
+                versionInfo: ui5Tree.versionInfo,
+                controls: ui5Tree.controls.concat([{
+                    id: '__webc_root__',
+                    name: '[' + webcTree.versionInfo.framework + ' v' + webcTree.versionInfo.version + ']',
+                    type: 'ui5-web-component',
+                    content: webcTree.controls
+                }])
+            };
+        }
+
+        if (webcTree) {
+            return webcTree;
+        }
+
+        return ui5Tree || {};
+    }
+
     displayFrameData = function (options) {
         var frameId = options.selectedId;
         var oldFrameId = options.oldSelectedId;
@@ -394,7 +424,7 @@
         updateSupportabilityOverlay();
 
         if (UI5Data) {
-            controlTree.setData(UI5Data.controlTree);
+            controlTree.setData(_getMergedControlTree(frameId));
             UI5Data.selectedElementId && controlTree.setSelectedElement(UI5Data.selectedElementId);
             appInfo.setData(UI5Data.applicationInformation);
             UI5Data.elementRegistry && oElementsRegistryMasterView.setData(UI5Data.elementRegistry);
@@ -435,13 +465,21 @@
         var overlayNoUI5Section = overlay.querySelector('[no-ui5-version]');
         var overlayUnsupportedVersionSection = overlay.querySelector('[unsupported-version]');
 
-        var showOverlay = !currentFrameData.isUI5Detected || !currentFrameData.isVersionSupported;
-        var showNoUI5Overlay = !currentFrameData.isUI5Detected;
-        var showUnsupportedVersionOverlay = currentFrameData.isUI5Detected && !currentFrameData.isVersionSupported;
+        var hasAnyFramework = currentFrameData.isUI5Detected || currentFrameData.isWebCDetected;
+        var showOverlay = !hasAnyFramework || (!currentFrameData.isVersionSupported && !currentFrameData.isWebCDetected);
+        var showNoUI5Overlay = !hasAnyFramework;
+        var showUnsupportedVersionOverlay = hasAnyFramework && !currentFrameData.isVersionSupported && !currentFrameData.isWebCDetected;
 
         overlay.hidden = !showOverlay;
         overlayNoUI5Section.style.display = showNoUI5Overlay ? 'block' : 'none';
         overlayUnsupportedVersionSection.style.display = showUnsupportedVersionOverlay ? 'block' : 'none';
+
+        // Pure WebC (no classic UI5): rename "Aggregations" tab to "Slots"
+        var aggregationsTab = document.getElementById('tab-aggregations');
+        if (aggregationsTab) {
+            var isPureWebC = currentFrameData.isWebCDetected && !currentFrameData.isUI5Detected;
+            aggregationsTab.textContent = isPureWebC ? 'Slots' : 'Aggregations';
+        }
     };
 
     framesSelect = new FrameSelect('frame-select', {
@@ -543,11 +581,12 @@
         'on-receiving-initial-data': function (message, messageSender) {
             var frameId = messageSender.frameId;
             frameData[frameId].controlTree = message.controlTree;
+            frameData[frameId].controlTreeUI5 = message.controlTree;
             frameData[frameId].applicationInformation = message.applicationInformation;
             frameData[frameId].elementRegistry = message.elementRegistry;
 
             if (framesSelect.getSelectedId() === frameId) {
-                controlTree.setData(message.controlTree);
+                controlTree.setData(_getMergedControlTree(frameId));
 
                 // Set URL for AI Chat history
                 aiChat.setUrl(frameData[frameId].url);
@@ -576,8 +615,9 @@
             var frameId = messageSender.frameId;
             var frameIds = Object.keys(frameData).map( x => parseInt(x));
             frameData[frameId].controlTree = message.controlTree;
+            frameData[frameId].controlTreeUI5 = message.controlTree;
             if (framesSelect.getSelectedId() === frameId) {
-                controlTree.setData(message.controlTree);
+                controlTree.setData(_getMergedControlTree(frameId));
             }
 
             if (frameIds.length > 1) {
@@ -716,6 +756,60 @@
             }
         },
 
+        'on-webc-detected': function (message, messageSender) {
+            var frameId = messageSender.frameId;
+            if (!frameData[frameId]) {
+                frameData[frameId] = { url: messageSender.url };
+            }
+            frameData[frameId].isWebCDetected = true;
+            framesSelect.setData(frameData);
+
+            if (framesSelect.getSelectedId() === frameId) {
+                updateSupportabilityOverlay();
+            }
+
+            port.postMessage({
+                action: 'do-webc-injection',
+                tabId: chrome.devtools.inspectedWindow.tabId,
+                frameId: frameId
+            });
+        },
+
+        'on-webc-not-detected': function () {
+        },
+
+        'on-webc-script-injection': function (message, messageSender) {
+            var frameId = message.frameId || (messageSender && messageSender.frameId);
+            port.postMessage({
+                action: 'get-initial-information-webc',
+                frameId: frameId
+            });
+        },
+
+        'on-receiving-initial-data-webc': function (message, messageSender) {
+            var frameId = messageSender.frameId;
+            if (!frameData[frameId]) {
+                frameData[frameId] = {};
+            }
+            frameData[frameId].controlTreeWebC = message.controlTree;
+
+            if (framesSelect.getSelectedId() === frameId) {
+                controlTree.setData(_getMergedControlTree(frameId));
+            }
+        },
+
+        'on-application-dom-update-webc': function (message, messageSender) {
+            var frameId = messageSender.frameId;
+            if (!frameData[frameId]) {
+                frameData[frameId] = {};
+            }
+            frameData[frameId].controlTreeWebC = message.controlTree;
+
+            if (framesSelect.getSelectedId() === frameId) {
+                controlTree.setData(_getMergedControlTree(frameId));
+            }
+        },
+
         'on-ping-frames': function(message) {
             var aLatestFrameIds = message.frameIds;
             var aFrameIds = Object.keys(frameData).map(x => parseInt(x));
@@ -758,6 +852,7 @@
     });
 
     port.postMessage({ action: 'do-ui5-detection' });
+    port.postMessage({ action: 'do-webc-detection' });
 
     // Restart everything when the URL is changed
     chrome.devtools.network.onNavigated.addListener(function () {
@@ -765,5 +860,6 @@
         framesSelect.setSelectedId(0);
         framesSelect.setData(frameData);
         port.postMessage({ action: 'do-ui5-detection' });
+        port.postMessage({ action: 'do-webc-detection' });
     });
 }());

@@ -15,6 +15,16 @@
                 "http://*/*",
                 "https://*/*"
             ]
+        },
+        {
+            "js": [
+                "/scripts/content/detectWebComponents.js"
+            ],
+            "all_frames": true,
+            "matches": [
+                "http://*/*",
+                "https://*/*"
+            ]
         }
     ],
     "content_security_policy": {
@@ -52,6 +62,7 @@
             "resources": [
                 "/scripts/injected/*.js",
                 "/vendor/ToolsAPI.js",
+                "/vendor/WebComponentsToolsAPI.js",
                 "/vendor/ace.js",
                 "/vendor/ext-searchbox.js",
                 "/vendor/mode-json.js",
