@@ -792,9 +792,16 @@
                 frameData[frameId] = {};
             }
             frameData[frameId].controlTreeWebC = message.controlTree;
+            // Only set application info if classic UI5 hasn't already provided richer info
+            if (!frameData[frameId].applicationInformation) {
+                frameData[frameId].applicationInformation = message.applicationInformation;
+            }
 
             if (framesSelect.getSelectedId() === frameId) {
                 controlTree.setData(_getMergedControlTree(frameId));
+                if (!frameData[frameId].isUI5Detected) {
+                    appInfo.setData(frameData[frameId].applicationInformation);
+                }
             }
         },
 

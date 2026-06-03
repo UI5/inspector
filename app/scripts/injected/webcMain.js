@@ -118,12 +118,33 @@
         return result;
     }
 
+    // Build application info in the same shape as classic UI5's applicationUtils.getApplicationInfo()
+    function _buildApplicationInfo(frameworkInformation) {
+        var common = frameworkInformation.commonInformation;
+        var general = {};
+        general[common.frameworkName] = common.version || '(unknown)';
+        general['User Agent'] = navigator.userAgent;
+        general.Application = location.href;
+
+        return {
+            common: {
+                options: {
+                    title: 'General',
+                    expandable: true,
+                    expanded: true
+                },
+                data: general
+            }
+        };
+    }
+
     // Send the current control tree to the panel
     function _sendTreeUpdate(action) {
         var controlTreeModel = WebCToolsAPI.getRenderedControlTree();
         WebCToolsAPI.getFrameworkInformation().then(function (frameworkInformation) {
             message.send({
                 action: action,
+                applicationInformation: _buildApplicationInfo(frameworkInformation),
                 controlTree: {
                     versionInfo: {
                         version: frameworkInformation.commonInformation.version,

@@ -6,6 +6,11 @@
             return '';
         }
         try {
+            // Web components stores runtime info as a JS property `Runtimes` on the meta element
+            if (meta.Runtimes && meta.Runtimes.length > 0 && meta.Runtimes[0].version) {
+                return meta.Runtimes[0].version;
+            }
+            // Fallback: older versions may have used a data attribute
             var runtimesData = meta.getAttribute('data-ui5-shared-resources-runtimes');
             if (!runtimesData) {
                 return '';
@@ -24,10 +29,11 @@
         if (meta) {
             return true;
         }
+        // Definitive check: UI5Element instances expose `isUI5Element === true`.
+        // See packages/base/src/UI5Element.ts (get isUI5Element).
         var allElements = document.querySelectorAll('*');
         for (var i = 0; i < allElements.length; i++) {
-            var localName = allElements[i].localName;
-            if (localName.indexOf('ui5-') === 0 && window.customElements.get(localName)) {
+            if (allElements[i].isUI5Element === true) {
                 return true;
             }
         }
