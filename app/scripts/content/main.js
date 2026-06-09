@@ -1,7 +1,8 @@
 (function () {
     'use strict';
     var utils = require('../modules/utils/utils.js');
-    var highLighter = require('../modules/content/highLighter.js');
+    var highLighterModule = require('../modules/content/highLighter.js');
+    var highLighter = highLighterModule.create();
     var port = utils.getPort();
 
     function confirmScriptInjectionDone() {
@@ -75,7 +76,7 @@
          * @param {Object} message
          */
         'on-control-tree-hover': function (message) {
-            highLighter.setDimensions(message.target);
+            highLighter.setDimensions(document.getElementById(message.target));
         },
 
         'on-hide-highlight': function () {

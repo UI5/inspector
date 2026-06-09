@@ -7,6 +7,10 @@
     }
 
     var message = require('../modules/injected/message.js');
+    var highLighterModule = require('../modules/content/highLighter.js');
+    // Use a distinct wrapper id so this instance doesn't collide with the
+    // classic content-script highlighter on mixed pages.
+    var highlighter = highLighterModule.create({ wrapperId: 'ui5-highlighter-webc' });
 
     var TREE_UPDATE_DEBOUNCE_MS = 150;
 
@@ -167,7 +171,7 @@
             var isMutationValid = true;
 
             mutations.forEach(function (m) {
-                if (m.target.id === 'ui5-highlighter' || m.target.id === 'ui5-highlighter-container') {
+                if (m.target.id === 'ui5-highlighter' || m.target.id === 'ui5-highlighter-webc') {
                     isMutationValid = false;
                     return;
                 }
@@ -224,6 +228,54 @@
             controlEvents: _formatEvents(controlId, controlEvents),
             controlActions: _buildControlActions(controlId)
         });
+    }
+
+    // ================================================================================
+    // Helpers for resolving the visible representation of a hovered element.
+    // Some web components (e.g. ui5-breadcrumbs-item) are light-DOM data
+    // carriers with zero rect — the visible element lives inside the parent's
+    // shadow root, by convention with id `<itemId>-<suffix>`.
+    // ================================================================================
+
+    // Find an element inside `host`'s shadow root whose id starts with
+    // `idPrefix` and has a non-zero layout box.
+    function _findVisibleInShadow(host, idPrefix) {
+        var match = host.shadowRoot.querySelector('[id^="' + idPrefix + '"]');
+        if (!match) {
+            return null;
+        }
+        var rect = match.getBoundingClientRect();
+        return (rect.width || rect.height) ? match : null;
+    }
+
+    // Find a target that actually has a layout box. Used by the highlighter,
+    // which needs a non-zero rect to position its overlay.
+    function _resolveVisibleElement(element) {
+        if (!element) {
+            return null;
+        }
+        var rect = element.getBoundingClientRect();
+        if (rect.width || rect.height) {
+            return element;
+        }
+
+        // Walk up to find a shadow-root host and search by id-prefix
+        var id = element._id || element.id;
+        if (!id) {
+            return element;
+        }
+
+        var host = element.parentElement;
+        while (host && !host.shadowRoot) {
+            host = host.parentElement;
+        }
+        if (!host) {
+            return element;
+        }
+
+        var visible = _findVisibleInShadow(host, id);
+        // Fall back to the parent web component itself if no shadow match
+        return visible || host;
     }
 
     var messageHandler = {
@@ -287,8 +339,61 @@
                 // eslint-disable-next-line no-console
                 console.log(element.outerHTML);
             }
+        },
+
+        // Position the highlighter overlay on the hovered tree element. Uses
+        // WebCToolsAPI.getElementById (web component _id) instead of
+        // document.getElementById, which would only find DOM-id matches.
+        'on-control-tree-hover': function (event) {
+            var element = WebCToolsAPI.getElementById(event.detail.target);
+            if (!element) {
+                return;
+            }
+            highlighter.setDimensions(_resolveVisibleElement(element));
+        },
+
+        'on-hide-highlight': function () {
+            highlighter.hide();
+        },
+
+        // Selects the right-clicked element in the tree. Background broadcasts
+        // this when "Inspect UI5 element" is chosen from the context menu.
+        'do-context-menu-control-select': function (event) {
+            var target = event.detail.target;
+            // Only respond if the stored id belongs to a UI5 web component
+            if (!target || !WebCToolsAPI.getElementById(target)) {
+                return;
+            }
+            message.send({
+                action: 'on-contextMenu-control-select',
+                target: target,
+                frameId: event.detail.frameId
+            });
         }
     };
+
+    // ================================================================================
+    // Right-click capture: when the user right-clicks a UI5 web component, store
+    // its id so the background can hand it to the panel when "Inspect UI5 element"
+    // is selected from the context menu.
+    // ================================================================================
+    document.addEventListener('mousedown', function (event) {
+        if (event.button !== 2) {
+            return;
+        }
+        var target = event.target;
+        // Walk up to find the nearest UI5 web component ancestor
+        while (target && target !== document.body) {
+            if (target.isUI5Element === true) {
+                message.send({
+                    action: 'on-right-click',
+                    target: target._id || target.id
+                });
+                return;
+            }
+            target = target.parentNode;
+        }
+    }, true);
 
     document.addEventListener('ui5-communication-with-injected-script', function (event) {
         var action = event.detail.action;

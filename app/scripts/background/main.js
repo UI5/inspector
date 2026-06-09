@@ -6,7 +6,7 @@
     var pageAction = require('../modules/background/pageAction.js');
 
     var contextMenu = new ContextMenu({
-        title: 'Inspect UI5 control',
+        title: 'Inspect UI5 element',
         id: 'context-menu',
         contexts: ['all']
     });
