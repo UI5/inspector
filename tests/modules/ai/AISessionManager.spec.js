@@ -184,46 +184,23 @@ describe('AISessionManager', function () {
         });
     });
 
-    describe('#_buildMessagesArray()', function () {
-        it('should include system prompt', function () {
-            var messages = sessionManager._buildMessagesArray('Hello', [], null);
+    describe('#buildSystemPrompt()', function () {
+        it('should return the default system prompt', function () {
+            var prompt = sessionManager.buildSystemPrompt(null);
 
-            messages[0].role.should.equal('system');
-            messages[0].content.should.contain('AI assistant');
+            prompt.should.contain('AI assistant');
         });
 
-        it('should include conversation history', function () {
-            var history = [
-                { role: 'user', content: 'First question' },
-                { role: 'assistant', content: 'First answer' }
-            ];
-
-            var messages = sessionManager._buildMessagesArray('Second question', history, null);
-
-            messages.should.have.lengthOf(4);
-            messages[1].content.should.equal('First question');
-            messages[2].content.should.equal('First answer');
-        });
-
-        it('should format user message with context', function () {
-            var context = {
-                control: {
-                    type: 'sap.m.Button',
-                    id: 'btn1'
-                }
+        it('should include app context when appInfo provided', function () {
+            var appInfo = {
+                common: { data: { OpenUI5: '1.120.0' } },
+                configurationComputed: { data: { theme: 'sap_horizon' } }
             };
 
-            var messages = sessionManager._buildMessagesArray('What is this?', [], context);
+            var prompt = sessionManager.buildSystemPrompt(appInfo);
 
-            messages[1].role.should.equal('user');
-            messages[1].content.should.contain('Type: sap.m.Button');
-            messages[1].content.should.contain('What is this?');
-        });
-
-        it('should handle empty conversation history', function () {
-            var messages = sessionManager._buildMessagesArray('Hello', null, null);
-
-            messages.should.have.lengthOf(2);
+            prompt.should.contain('1.120.0');
+            prompt.should.contain('sap_horizon');
         });
     });
 

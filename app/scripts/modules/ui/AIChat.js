@@ -209,12 +209,31 @@ AIChat.prototype._checkModelAvailability = async function () {
 };
 
 /**
- * Initialize AI session.
+ * Initialize AI session, seeding system prompt + any prior conversation
+ * (so the model "remembers" history loaded from storage).
  * @private
  */
 AIChat.prototype._initializeSession = async function () {
     try {
-        await this._sessionManager.createSession();
+        var appInfo = null;
+        if (this._getAppInfo) {
+            appInfo = this._getAppInfo();
+        } else if (this._currentContext) {
+            appInfo = this._currentContext.appInfo;
+        }
+
+        const initialPrompts = [
+            { role: 'system', content: this._sessionManager.buildSystemPrompt(appInfo) }
+        ];
+
+        // Replay prior user/assistant turns; skip UI-only 'system' notices.
+        this._messages.forEach(m => {
+            if (m.role === 'user' || m.role === 'assistant') {
+                initialPrompts.push({ role: m.role, content: m.content });
+            }
+        });
+
+        await this._sessionManager.createSession(initialPrompts);
         document.getElementById('ai-clear-history-button').style.display = 'inline-block';
         this._updateTokenCounter();
     } catch (error) {
@@ -313,9 +332,6 @@ AIChat.prototype._handleSendMessage = async function () {
         loadingIndicator.appendChild(loadingDots);
         this._streamingMessageElement.appendChild(loadingIndicator);
 
-        // Build conversation history (exclude the placeholder we just added)
-        const conversationHistory = this._messages.slice(0, -1);
-
         // Get app info for context
         var appInfo = null;
         if (this._getAppInfo) {
@@ -330,10 +346,9 @@ AIChat.prototype._handleSendMessage = async function () {
             appInfo: appInfo
         };
 
-        // Get streaming response
+        // Get streaming response — session retains history internally.
         const stream = await this._sessionManager.promptStreaming(
             userMessage,
-            conversationHistory,
             context
         );
 
@@ -1065,6 +1080,12 @@ AIChat.prototype._loadHistory = async function () {
             document.getElementById('ai-clear-history-button').style.display = 'inline-block';
             // Force scroll to bottom when loading history
             this._scrollToBottom(true);
+
+            // Re-seed session with loaded history so the model has context.
+            if (this._sessionManager.hasActiveSession()) {
+                this._sessionManager.destroy();
+                await this._initializeSession();
+            }
         }
     } catch (error) {
         // Fail silently

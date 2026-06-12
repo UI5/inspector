@@ -183,6 +183,10 @@
             signal
         };
 
+        if (Array.isArray(options.initialPrompts) && options.initialPrompts.length > 0) {
+            sessionOptions.initialPrompts = options.initialPrompts;
+        }
+
         // Add download progress monitoring if callback provided
         if (options.onProgress) {
             sessionOptions.monitor = function(m) {
@@ -309,7 +313,9 @@
                 promptAPISession = null;
             }
 
-            promptAPISession = await initPromptAPISession({}, new AbortController().signal);
+            promptAPISession = await initPromptAPISession({
+                initialPrompts: data && data.initialPrompts
+            }, new AbortController().signal);
 
             port.postMessage({
                 type: 'session-created'
@@ -328,11 +334,10 @@
      */
     async function handlePromptStreaming(data, port) {
 
-        // Validate messages structure
-        if (!data || !Array.isArray(data.messages)) {
+        if (!data || typeof data.userMessage !== 'string') {
             port.postMessage({
                 type: 'error',
-                message: 'Invalid messages format: expected array'
+                message: 'Invalid prompt: expected userMessage string'
             });
             return;
         }
@@ -353,7 +358,7 @@
 
         try {
             const stream = await promptAPISession.promptStreaming(
-                data.messages,
+                data.userMessage,
                 { signal: promptAPIController.signal }
             );
 
