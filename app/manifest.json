@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "UI5 Inspector",
-    "version": "1.9.1",
+    "version": "1.9.2",
     "background": {
         "service_worker": "/scripts/background/main.js"
     },
