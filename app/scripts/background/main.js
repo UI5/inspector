@@ -307,15 +307,17 @@
         }
 
         try {
-            // Destroy existing session if any
-            if (promptAPISession) {
-                promptAPISession.destroy();
-                promptAPISession = null;
-            }
-
-            promptAPISession = await initPromptAPISession({
+            // Create the new session first; only swap out the old one on success.
+            // Otherwise a failure here would leave promptAPISession null and every
+            // subsequent prompt would return "No active session".
+            const newSession = await initPromptAPISession({
                 initialPrompts: data && data.initialPrompts
             }, new AbortController().signal);
+
+            if (promptAPISession) {
+                promptAPISession.destroy();
+            }
+            promptAPISession = newSession;
 
             port.postMessage({
                 type: 'session-created'

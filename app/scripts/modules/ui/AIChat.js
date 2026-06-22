@@ -20,6 +20,7 @@ function AIChat(containerId, options) {
     this._currentContext = null;
     this._messages = [];
     this._isStreaming = false;
+    this._isReseedingSession = false;
     this._streamingMessageElement = null;
     this._streamingMessageHeader = null;
     this._getAppInfo = options.getAppInfo || null;
@@ -226,9 +227,10 @@ AIChat.prototype._initializeSession = async function () {
             { role: 'system', content: this._sessionManager.buildSystemPrompt(appInfo) }
         ];
 
-        // Replay prior user/assistant turns; skip UI-only 'system' notices.
+        // Replay prior user/assistant turns; skip UI-only 'system' notices
+        // and empty placeholders (e.g. the assistant slot added mid-stream).
         this._messages.forEach(m => {
-            if (m.role === 'user' || m.role === 'assistant') {
+            if ((m.role === 'user' || m.role === 'assistant') && m.content) {
                 initialPrompts.push({ role: m.role, content: m.content });
             }
         });
@@ -1066,13 +1068,19 @@ AIChat.prototype.setUrl = function (url) {
  * @private
  */
 AIChat.prototype._loadHistory = async function () {
+    if (this._isStreaming || this._isReseedingSession) {
+        return;
+    }
     try {
         const messages = await this._storageManager.loadHistory(this._currentUrl);
 
-        if (messages.length > 0) {
-            const messagesContainer = document.getElementById('ai-messages-container');
-            messagesContainer.innerHTML = '';
+        // Reset in-memory state before repopulating from storage —
+        // _addMessage always pushes, so without this every tab switch duplicates.
+        this._messages = [];
+        const messagesContainer = document.getElementById('ai-messages-container');
+        messagesContainer.innerHTML = '';
 
+        if (messages.length > 0) {
             messages.forEach(msg => {
                 this._addMessage(msg.role, msg.content);
             });
@@ -1080,14 +1088,21 @@ AIChat.prototype._loadHistory = async function () {
             document.getElementById('ai-clear-history-button').style.display = 'inline-block';
             // Force scroll to bottom when loading history
             this._scrollToBottom(true);
+        }
 
-            // Re-seed session with loaded history so the model has context.
-            if (this._sessionManager.hasActiveSession()) {
+        // Re-seed session regardless of history length: a fresh app context
+        // (different framework version, theme, libraries) needs a new system prompt.
+        if (this._sessionManager.hasActiveSession()) {
+            this._isReseedingSession = true;
+            try {
                 this._sessionManager.destroy();
                 await this._initializeSession();
+            } finally {
+                this._isReseedingSession = false;
             }
         }
     } catch (error) {
+        this._isReseedingSession = false;
         // Fail silently
     }
 };
