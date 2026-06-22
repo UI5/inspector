@@ -183,6 +183,10 @@
             signal
         };
 
+        if (Array.isArray(options.initialPrompts) && options.initialPrompts.length > 0) {
+            sessionOptions.initialPrompts = options.initialPrompts;
+        }
+
         // Add download progress monitoring if callback provided
         if (options.onProgress) {
             sessionOptions.monitor = function(m) {
@@ -303,13 +307,17 @@
         }
 
         try {
-            // Destroy existing session if any
+            // Create the new session first; only swap out the old one on success.
+            // Otherwise a failure here would leave promptAPISession null and every
+            // subsequent prompt would return "No active session".
+            const newSession = await initPromptAPISession({
+                initialPrompts: data && data.initialPrompts
+            }, new AbortController().signal);
+
             if (promptAPISession) {
                 promptAPISession.destroy();
-                promptAPISession = null;
             }
-
-            promptAPISession = await initPromptAPISession({}, new AbortController().signal);
+            promptAPISession = newSession;
 
             port.postMessage({
                 type: 'session-created'
@@ -328,11 +336,10 @@
      */
     async function handlePromptStreaming(data, port) {
 
-        // Validate messages structure
-        if (!data || !Array.isArray(data.messages)) {
+        if (!data || typeof data.userMessage !== 'string') {
             port.postMessage({
                 type: 'error',
-                message: 'Invalid messages format: expected array'
+                message: 'Invalid prompt: expected userMessage string'
             });
             return;
         }
@@ -353,7 +360,7 @@
 
         try {
             const stream = await promptAPISession.promptStreaming(
-                data.messages,
+                data.userMessage,
                 { signal: promptAPIController.signal }
             );
 

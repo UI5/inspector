@@ -174,10 +174,11 @@ Be neutral, direct, and developer-focused. Avoid marketing language, unnecessary
 };
 
 /**
- * Create a new AI session (empty, stateless).
+ * Create a new AI session with optional initial prompts (system + history).
+ * @param {Array} initialPrompts - Optional [{role, content}, ...]; first should be 'system'.
  * @returns {Promise<boolean>} - True if session created successfully
  */
-AISessionManager.prototype.createSession = function () {
+AISessionManager.prototype.createSession = function (initialPrompts) {
     return new Promise((resolve, reject) => {
         this._connect();
 
@@ -199,7 +200,9 @@ AISessionManager.prototype.createSession = function () {
 
         this._send({
             type: 'create-session',
-            data: {}
+            data: {
+                initialPrompts: initialPrompts || []
+            }
         });
     });
 };
@@ -300,39 +303,24 @@ AISessionManager.prototype._formatPrompt = function (prompt, context) {
 };
 
 /**
- * Build messages array for prompt API.
- * @private
- * @param {string} userMessage - Current user message
- * @param {Array} conversationHistory - Previous messages [{ role, content }]
- * @param {Object} context - Optional context (control data, appInfo)
- * @returns {Array} - Messages array [{ role, content }]
+ * Build the system prompt content for a given app context.
+ * @param {Object} appInfo - Application information
+ * @returns {string}
  */
-AISessionManager.prototype._buildMessagesArray = function (userMessage, conversationHistory, context) {
-    const messages = [];
-
-    const systemPrompt = this._getDefaultSystemPrompt(context ? context.appInfo : null);
-    messages.push({ role: 'system', content: systemPrompt });
-
-    if (conversationHistory && Array.isArray(conversationHistory)) {
-        conversationHistory.forEach(msg => {
-            messages.push({ role: msg.role, content: msg.content });
-        });
-    }
-
-    const formattedMessage = this._formatPrompt(userMessage, context);
-    messages.push({ role: 'user', content: formattedMessage });
-
-    return messages;
+AISessionManager.prototype.buildSystemPrompt = function (appInfo) {
+    return this._getDefaultSystemPrompt(appInfo);
 };
 
 /**
  * Send a prompt and get a streaming response.
+ * The Chrome Prompt API session retains its own conversation history,
+ * so only the new user message is sent here. System prompt and prior
+ * turns are seeded via initialPrompts at session creation time.
  * @param {string} userMessage - Current user message
- * @param {Array} conversationHistory - Previous messages [{ role, content }]
- * @param {Object} context - Optional context (control data, appInfo)
+ * @param {Object} context - Optional context (control data) for prompt formatting
  * @returns {Promise<Object>} - Object with methods to handle streaming
  */
-AISessionManager.prototype.promptStreaming = function (userMessage, conversationHistory, context) {
+AISessionManager.prototype.promptStreaming = function (userMessage, context) {
     return new Promise((resolve, reject) => {
         this._connect();
 
@@ -341,7 +329,7 @@ AISessionManager.prototype.promptStreaming = function (userMessage, conversation
             return;
         }
 
-        const messages = this._buildMessagesArray(userMessage, conversationHistory, context);
+        const formattedMessage = this._formatPrompt(userMessage, context);
         let streamHandlers = {
             onChunk: null,
             onComplete: null,
@@ -439,11 +427,11 @@ AISessionManager.prototype.promptStreaming = function (userMessage, conversation
         this._on('complete', completeHandler);
         this._on('error', errorHandler);
 
-        // Send messages array
+        // Send only the new user message — session retains prior history.
         this._send({
             type: 'prompt-streaming',
             data: {
-                messages: messages
+                userMessage: formattedMessage
             }
         });
 
