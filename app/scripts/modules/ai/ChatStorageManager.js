@@ -1,22 +1,23 @@
 'use strict';
 
-/**
- * ChatStorageManager - Manages chat history persistence in chrome.storage.local.
- * @constructor
- */
-function ChatStorageManager() {
-    this._maxMessages = 50;
-}
+var ConversationStore = require('./ConversationStore.js');
 
 /**
- * Get storage key for a URL.
- * @private
- * @param {string} url
- * @returns {string}
+ * ChatStorageManager - legacy entry point retained for AIChat compatibility
+ * during the Assistant Architecture V1 refactor. Delegates all behavior
+ * (key shape, retention, load/save/clear) to {@link ConversationStore}, the
+ * named persistence boundary for Inspector AI Assistant Conversation Memory.
+ *
+ * No direct Chrome storage access lives in this module anymore. New
+ * consumers should depend on `ConversationStore` directly.
+ *
+ * @param {Object} [options] - Options forwarded to the underlying
+ *     `ConversationStore`. See `ConversationStore` for available fields.
+ * @constructor
  */
-ChatStorageManager.prototype._getKey = function (url) {
-    return 'ai_chat_' + (url || 'default').replace(/[^a-zA-Z0-9]/g, '_');
-};
+function ChatStorageManager(options) {
+    this._store = new ConversationStore(options);
+}
 
 /**
  * Load chat history for a specific URL.
@@ -24,18 +25,7 @@ ChatStorageManager.prototype._getKey = function (url) {
  * @returns {Promise<Array>} - Array of message objects
  */
 ChatStorageManager.prototype.loadHistory = function (url) {
-    return new Promise((resolve, reject) => {
-        const key = this._getKey(url);
-
-        chrome.storage.local.get([key], (result) => {
-            if (chrome.runtime.lastError) {
-                reject(chrome.runtime.lastError);
-                return;
-            }
-
-            resolve(result[key] || []);
-        });
-    });
+    return this._store.load(url);
 };
 
 /**
@@ -45,31 +35,7 @@ ChatStorageManager.prototype.loadHistory = function (url) {
  * @returns {Promise<void>}
  */
 ChatStorageManager.prototype.saveMessage = function (url, message) {
-    return new Promise((resolve, reject) => {
-        const key = this._getKey(url);
-
-        chrome.storage.local.get([key], (result) => {
-            if (chrome.runtime.lastError) {
-                reject(chrome.runtime.lastError);
-                return;
-            }
-
-            let messages = result[key] || [];
-            messages.push({ role: message.role, content: message.content });
-
-            if (messages.length > this._maxMessages) {
-                messages = messages.slice(-this._maxMessages);
-            }
-
-            chrome.storage.local.set({ [key]: messages }, () => {
-                if (chrome.runtime.lastError) {
-                    reject(chrome.runtime.lastError);
-                    return;
-                }
-                resolve();
-            });
-        });
-    });
+    return this._store.append(url, message);
 };
 
 /**
@@ -78,17 +44,7 @@ ChatStorageManager.prototype.saveMessage = function (url, message) {
  * @returns {Promise<void>}
  */
 ChatStorageManager.prototype.clearHistory = function (url) {
-    return new Promise((resolve, reject) => {
-        const key = this._getKey(url);
-
-        chrome.storage.local.remove([key], () => {
-            if (chrome.runtime.lastError) {
-                reject(chrome.runtime.lastError);
-                return;
-            }
-            resolve();
-        });
-    });
+    return this._store.clear(url);
 };
 
 module.exports = ChatStorageManager;
