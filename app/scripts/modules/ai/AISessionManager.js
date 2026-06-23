@@ -1,5 +1,7 @@
 'use strict';
 
+var PromptBuilder = require('./PromptBuilder.js');
+
 /**
  * AISessionManager - Proxy for communicating with background script for Prompt API.
  * Uses chrome.runtime.connect to establish a long-lived port connection.
@@ -10,6 +12,7 @@ function AISessionManager() {
     this._messageHandlers = {};
     this._isConnected = false;
     this._hasActiveSession = false;
+    this._promptBuilder = new PromptBuilder();
 }
 
 /**
@@ -136,44 +139,6 @@ AISessionManager.prototype.downloadModel = function (onProgress) {
 };
 
 /**
- * Get default system prompt for UI5 expert assistant.
- * @private
- * @param {Object} appInfo - Application information
- * @returns {string}
- */
-AISessionManager.prototype._getDefaultSystemPrompt = function (appInfo) {
-    let prompt = `You are an AI assistant embedded in the UI5 Inspector, specialized in SAP UI5, OpenUI5, and UI5 Web Components. Your role is to help developers understand, debug, and build UI5-based applications.
-Provide clear, accurate, and practical guidance on components, APIs, accessibility, theming, layout, performance, and best practices. Prefer concise answers, but explain reasoning when needed. Use code snippets where helpful and format code clearly.
-Assume familiarity with JavaScript, HTML, and modern frameworks. When information is uncertain or version-dependent, say so clearly. Do not invent APIs or unsupported features.
-You cannot browse the web or open links. If external content is required, ask the user to paste it.
-Be neutral, direct, and developer-focused. Avoid marketing language, unnecessary filler, and generic disclaimers. Respond in the user's language and adapt tone to the context.`;
-
-    if (appInfo) {
-        prompt += '\n\nCurrent Application Context:\n';
-
-        if (appInfo.common && appInfo.common.data) {
-            const frameworkInfo = appInfo.common.data.OpenUI5 || appInfo.common.data.SAPUI5;
-            if (frameworkInfo) {
-                prompt += `- Framework: ${frameworkInfo}\n`;
-            }
-        }
-
-        if (appInfo.configurationComputed && appInfo.configurationComputed.data && appInfo.configurationComputed.data.theme) {
-            prompt += `- Theme: ${appInfo.configurationComputed.data.theme}\n`;
-        }
-
-        if (appInfo.loadedLibraries && appInfo.loadedLibraries.data) {
-            const libraries = Object.keys(appInfo.loadedLibraries.data);
-            if (libraries.length > 0) {
-                prompt += `- Loaded Libraries: ${libraries.join(', ')}\n`;
-            }
-        }
-    }
-
-    return prompt;
-};
-
-/**
  * Create a new AI session with optional initial prompts (system + history).
  * @param {Array} initialPrompts - Optional [{role, content}, ...]; first should be 'system'.
  * @returns {Promise<boolean>} - True if session created successfully
@@ -208,107 +173,24 @@ AISessionManager.prototype.createSession = function (initialPrompts) {
 };
 
 /**
- * Truncate JSON string if needed.
- * @private
- * @param {Object} data - Data to stringify
- * @param {number} maxLength - Maximum length
- * @returns {string}
- */
-AISessionManager.prototype._truncateJson = function (data, maxLength) {
-    try {
-        var json = JSON.stringify(data, null, 2);
-        if (json.length > maxLength) {
-            return json.substring(0, maxLength) + '... [truncated]';
-        }
-        return json;
-    } catch (e) {
-        return '(Data available but cannot serialize)';
-    }
-};
-
-/**
- * Add properties to context string.
- * @private
- */
-AISessionManager.prototype._addPropertiesContext = function (control, maxLength) {
-    var props = control.properties;
-    if (!props || !props.own || !props.own.data) {
-        return '';
-    }
-    var keys = Object.keys(props.own.data);
-    if (keys.length === 0) {
-        return '';
-    }
-    var propsJson = JSON.stringify(props.own.data);
-    if (propsJson.length > maxLength) {
-        propsJson = propsJson.substring(0, maxLength) + '... [truncated]';
-    }
-    return '- Properties: ' + propsJson + '\n';
-};
-
-/**
- * Add bindings to context string.
- * @private
- */
-AISessionManager.prototype._addBindingsContext = function (bindings, maxLength) {
-    if (!bindings || Object.keys(bindings).length === 0) {
-        return '';
-    }
-    var result = '- Bindings (' + Object.keys(bindings).length + '):\n';
-    result += this._truncateJson(bindings, maxLength) + '\n';
-    return result;
-};
-
-/**
- * Add aggregations to context string.
- * @private
- */
-AISessionManager.prototype._addAggregationsContext = function (aggregations, maxLength) {
-    if (!aggregations || !aggregations.own || !aggregations.own.data) {
-        return '';
-    }
-    var keys = Object.keys(aggregations.own.data);
-    if (keys.length === 0) {
-        return '';
-    }
-    var result = '- Aggregations (' + keys.length + '):\n';
-    result += this._truncateJson(aggregations.own.data, maxLength) + '\n';
-    return result;
-};
-
-/**
- * Format prompt with optional context.
- * @private
- * @param {string} prompt - User prompt
- * @param {Object} context - Optional context
- * @returns {string}
- */
-AISessionManager.prototype._formatPrompt = function (prompt, context) {
-    var MAX_SECTION_LENGTH = 2000;
-
-    if (!context || !context.control) {
-        return prompt;
-    }
-
-    var control = context.control;
-    var contextString = 'Current UI5 Control Context:\n';
-    contextString += '- Type: ' + (control.type || 'Unknown') + '\n';
-    contextString += '- ID: ' + (control.id || 'None') + '\n';
-
-    contextString += this._addPropertiesContext(control, MAX_SECTION_LENGTH);
-    contextString += this._addBindingsContext(control.bindings, MAX_SECTION_LENGTH);
-    contextString += this._addAggregationsContext(control.aggregations, MAX_SECTION_LENGTH);
-
-    return contextString + '\nUser Question: ' + prompt;
-};
-
-/**
  * Build the system prompt content for a given app context.
- * @param {Object} appInfo - Application information
+ * @param {Object} [appInfo] - Optional application metadata snapshot.
  * @returns {string}
  */
 AISessionManager.prototype.buildSystemPrompt = function (appInfo) {
-    return this._getDefaultSystemPrompt(appInfo);
+    return this._promptBuilder.buildSystemPrompt(appInfo);
+};
+
+/**
+ * Build the seed message array used to create a new local AI session.
+ * Delegates to the PromptBuilder so the textual shape of system prompt and
+ * Conversation Memory replay is owned in a single place.
+ * @param {Object} [appInfo] - Optional application metadata snapshot.
+ * @param {Array} [conversationMemory] - Prior chat turns ({role, content}) to replay.
+ * @returns {Array<{role: string, content: string}>}
+ */
+AISessionManager.prototype.buildSeedMessages = function (appInfo, conversationMemory) {
+    return this._promptBuilder.buildSeedMessages(appInfo, conversationMemory);
 };
 
 /**
@@ -329,7 +211,7 @@ AISessionManager.prototype.promptStreaming = function (userMessage, context) {
             return;
         }
 
-        const formattedMessage = this._formatPrompt(userMessage, context);
+        const formattedMessage = this._promptBuilder.buildUserPrompt(userMessage, context);
         let streamHandlers = {
             onChunk: null,
             onComplete: null,

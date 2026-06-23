@@ -223,17 +223,7 @@ AIChat.prototype._initializeSession = async function () {
             appInfo = this._currentContext.appInfo;
         }
 
-        const initialPrompts = [
-            { role: 'system', content: this._sessionManager.buildSystemPrompt(appInfo) }
-        ];
-
-        // Replay prior user/assistant turns; skip UI-only 'system' notices
-        // and empty placeholders (e.g. the assistant slot added mid-stream).
-        this._messages.forEach(m => {
-            if ((m.role === 'user' || m.role === 'assistant') && m.content) {
-                initialPrompts.push({ role: m.role, content: m.content });
-            }
-        });
+        const initialPrompts = this._sessionManager.buildSeedMessages(appInfo, this._messages);
 
         await this._sessionManager.createSession(initialPrompts);
         document.getElementById('ai-clear-history-button').style.display = 'inline-block';
