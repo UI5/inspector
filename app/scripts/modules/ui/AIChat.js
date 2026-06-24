@@ -1,29 +1,42 @@
 'use strict';
 
-var AISessionManager = require('../ai/AISessionManager.js');
-var ChatStorageManager = require('../ai/ChatStorageManager.js');
+var AssistantController = require('../ai/AssistantController.js');
 
 /**
- * AIChat - UI component for AI chat interface.
- * @param {string} containerId - ID of container element
- * @param {Object} options - Configuration options
+ * AIChat - thin view over the Inspector AI Assistant.
+ *
+ * After Assistant Architecture V1, AIChat owns rendering, markdown,
+ * JSON/code viewers, dialogs, scroll behavior, and clipboard helpers. It
+ * does not own session lifecycle, streaming orchestration, history
+ * persistence, or Inspection Context injection — those are delegated to
+ * the {@link AssistantController}, which is the single integration point
+ * for Inspector AI Assistant behavior.
+ *
+ * @param {string} containerId - ID of container element.
+ * @param {Object} [options]
+ * @param {Function} [options.getAppInfo] - Returns the current UI5 application
+ *     metadata snapshot for the Prompt Builder.
+ * @param {AssistantController} [options.controller] - Pre-built controller
+ *     for tests; defaults to a fresh AssistantController wired to the real
+ *     PromptBuilder, PromptClient, and ConversationStore.
  * @constructor
  */
 function AIChat(containerId, options) {
     this._container = document.getElementById(containerId);
     this._options = options || {};
 
-    this._sessionManager = new AISessionManager();
-    this._storageManager = new ChatStorageManager();
+    this._getAppInfo = this._options.getAppInfo || null;
+    this._controller = this._options.controller || new AssistantController({
+        getAppInfo: this._getAppInfo || function () { return null; }
+    });
 
     this._currentUrl = null;
     this._currentContext = null;
     this._messages = [];
     this._isStreaming = false;
-    this._isReseedingSession = false;
     this._streamingMessageElement = null;
     this._streamingMessageHeader = null;
-    this._getAppInfo = options.getAppInfo || null;
+    this._streamingFullText = '';
     this._hasShownUsageWarning = false;
     this._maxJsonDepth = 10;
     this._renderDebounceTimer = null;
@@ -38,6 +51,7 @@ function AIChat(containerId, options) {
 AIChat.prototype.init = function () {
     this._render();
     this._attachEventListeners();
+    this._attachControllerListeners();
     this._checkModelAvailability();
 };
 
@@ -122,12 +136,10 @@ AIChat.prototype._attachEventListeners = function () {
     const clearHistoryButton = document.getElementById('ai-clear-history-button');
     const contextClearButton = document.getElementById('ai-context-clear-button');
 
-    // Send message on button click
     sendButton.addEventListener('click', () => {
         this._handleSendMessage();
     });
 
-    // Send message on Enter
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
@@ -135,29 +147,24 @@ AIChat.prototype._attachEventListeners = function () {
         }
     });
 
-    // Enable/disable send button based on input
     input.addEventListener('input', () => {
         const hasText = input.value.trim().length > 0;
         const canSend = hasText && !this._isStreaming;
         sendButton.disabled = !canSend;
     });
 
-    // Download model button
     downloadButton.addEventListener('click', () => {
         this._handleDownloadModel();
     });
 
-    // Clear history button
     clearHistoryButton.addEventListener('click', () => {
         this._handleClearHistory();
     });
 
-    // Clear context button
     contextClearButton.addEventListener('click', () => {
         this._clearContext();
     });
 
-    // Confirmation dialog buttons
     const confirmOk = document.getElementById('ai-confirm-ok');
     const confirmCancel = document.getElementById('ai-confirm-cancel');
     const confirmDialog = document.getElementById('ai-confirm-dialog');
@@ -171,12 +178,10 @@ AIChat.prototype._attachEventListeners = function () {
         this._hideConfirmDialog();
     });
 
-    // Click on overlay to cancel
     confirmDialog.querySelector('.confirm-overlay').addEventListener('click', () => {
         this._hideConfirmDialog();
     });
 
-    // ESC key to close dialog
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             const dialog = document.getElementById('ai-confirm-dialog');
@@ -188,94 +193,135 @@ AIChat.prototype._attachEventListeners = function () {
 };
 
 /**
- * Check model availability and update UI.
+ * Subscribe to {@link AssistantController} events and translate them into
+ * DOM updates. The controller owns capability resolution, streaming, and
+ * history; the view only reacts.
  * @private
  */
-AIChat.prototype._checkModelAvailability = async function () {
-    try {
-        const availability = await this._sessionManager.checkAvailability();
+AIChat.prototype._attachControllerListeners = function () {
+    this._controller.on('capability-state-changed', (state) => {
+        this._onCapabilityStateChanged(state);
+    });
 
-        if (availability.status === 'ready') {
-            this._renderModelStatus('ready', 0, 'Gemini Nano is ready');
-            // Initialize session to show token counter
-            await this._initializeSession();
-        } else if (availability.status === 'needs-download') {
-            this._renderModelStatus('needs-download', 0, availability.message);
-        } else {
-            this._renderModelStatus('unavailable', 0, availability.message);
+    this._controller.on('conversation-loaded', (turns) => {
+        this._renderConversationMemory(turns);
+    });
+
+    this._controller.on('stream-chunk', (chunk) => {
+        this._streamingFullText += chunk;
+        this._debouncedRender(this._streamingFullText);
+    });
+
+    this._controller.on('stream-complete', (payload) => {
+        this._finalizeStreamingMessage(payload.content);
+    });
+
+    this._controller.on('stream-failed', (err) => {
+        this._isStreaming = false;
+        this._streamingMessageElement = null;
+        this._streamingMessageHeader = null;
+        this._streamingFullText = '';
+        this._addSystemMessage('Error: ' + (err && err.message ? err.message : 'streaming failed'));
+    });
+
+    this._controller.on('conversation-cleared', () => {
+        this._messages = [];
+        const messagesContainer = document.getElementById('ai-messages-container');
+        messagesContainer.innerHTML = `
+            <div class="ai-welcome-message">
+                <h3>UI5 AI Assistant</h3>
+                <p>Chat history cleared. Ask me anything!</p>
+            </div>
+        `;
+        this._hasShownUsageWarning = false;
+        this._addSystemMessage('Chat history cleared');
+    });
+};
+
+/**
+ * Render any Conversation Memory loaded by the controller into the DOM.
+ * @private
+ * @param {Array<{role: string, content: string}>} turns
+ */
+AIChat.prototype._renderConversationMemory = function (turns) {
+    this._messages = [];
+    const messagesContainer = document.getElementById('ai-messages-container');
+    messagesContainer.innerHTML = '';
+    if (turns && turns.length > 0) {
+        turns.forEach((msg) => {
+            this._addMessage(msg.role, msg.content);
+        });
+        const clearButton = document.getElementById('ai-clear-history-button');
+        if (clearButton) {
+            clearButton.style.display = 'inline-block';
         }
-    } catch (error) {
-        this._renderModelStatus('error', 0, `Error: ${error.message}`);
+        this._scrollToBottom(true);
     }
 };
 
 /**
- * Initialize AI session, seeding system prompt + any prior conversation
- * (so the model "remembers" history loaded from storage).
+ * React to an Assistant Capability State change from the controller.
  * @private
+ * @param {{status: string, message: string, progress: number}} state
  */
-AIChat.prototype._initializeSession = async function () {
-    try {
-        var appInfo = null;
-        if (this._getAppInfo) {
-            appInfo = this._getAppInfo();
-        } else if (this._currentContext) {
-            appInfo = this._currentContext.appInfo;
+AIChat.prototype._onCapabilityStateChanged = function (state) {
+    if (state.status === 'ready') {
+        this._renderModelStatus('ready', state.progress || 0, state.message || 'Gemini Nano is ready');
+        const clearButton = document.getElementById('ai-clear-history-button');
+        if (clearButton) {
+            clearButton.style.display = 'inline-block';
         }
-
-        const initialPrompts = this._sessionManager.buildSeedMessages(appInfo, this._messages);
-
-        await this._sessionManager.createSession(initialPrompts);
-        document.getElementById('ai-clear-history-button').style.display = 'inline-block';
         this._updateTokenCounter();
-    } catch (error) {
-        this._addSystemMessage(`Error initializing session: ${error.message}`);
+    } else if (state.status === 'downloadable') {
+        this._renderModelStatus('needs-download', 0, state.message);
+    } else if (state.status === 'downloading') {
+        const percent = Math.round((state.progress || 0) * 100);
+        this._renderModelStatus('downloading', state.progress || 0, percent === 0 ? state.message : 'Downloading: ' + percent + '%');
+    } else if (state.status !== 'streaming-failed') {
+        // streaming-failed leaves the banner alone; the system message
+        // surfaced via stream-failed already informs the developer.
+        this._renderModelStatus('unavailable', 0, state.message || '');
     }
 };
 
 /**
- * Handle model download.
+ * Drive the initial capability resolution through the controller.
  * @private
  */
-AIChat.prototype._handleDownloadModel = async function () {
+AIChat.prototype._checkModelAvailability = function () {
+    this._controller.initialize().catch((error) => {
+        this._renderModelStatus('error', 0, 'Error: ' + (error && error.message ? error.message : error));
+    });
+};
+
+/**
+ * Handle model download via the controller.
+ * @private
+ */
+AIChat.prototype._handleDownloadModel = function () {
     const downloadButton = document.getElementById('ai-download-button');
     const input = document.getElementById('ai-input');
     const sendButton = document.getElementById('ai-send-button');
 
-    // Disable UI during download
     downloadButton.disabled = true;
     input.disabled = true;
     sendButton.disabled = true;
 
-    try {
-        this._renderModelStatus('downloading', 0, 'Starting download...');
-
-        await this._sessionManager.downloadModel((progress) => {
-            const percent = Math.round(progress * 100);
-            this._renderModelStatus('downloading', progress, `Downloading: ${percent}%`);
-        });
-
-        this._renderModelStatus('ready', 1, 'Model ready!');
-
-        // Initialize session after download
-        await this._initializeSession();
-
-        // Re-enable UI after successful download
+    this._controller.downloadModel().then(() => {
         input.disabled = false;
         sendButton.disabled = !input.value.trim().length;
-
-    } catch (error) {
-        this._renderModelStatus('error', 0, `Download failed: ${error.message}`);
+    }, (error) => {
+        this._renderModelStatus('error', 0, 'Download failed: ' + (error && error.message ? error.message : error));
         downloadButton.disabled = false;
         input.disabled = false;
-    }
+    });
 };
 
 /**
- * Handle send message.
+ * Handle the user sending a message via the controller.
  * @private
  */
-AIChat.prototype._handleSendMessage = async function () {
+AIChat.prototype._handleSendMessage = function () {
     const input = document.getElementById('ai-input');
     const userMessage = input.value.trim();
 
@@ -283,116 +329,67 @@ AIChat.prototype._handleSendMessage = async function () {
         return;
     }
 
-    if (!this._sessionManager.hasActiveSession()) {
-        try {
-            await this._initializeSession();
-        } catch (error) {
-            this._addSystemMessage(`Failed to create session: ${error.message}`);
-            return;
-        }
-    }
-
-    // Clear input
     input.value = '';
     document.getElementById('ai-send-button').disabled = true;
 
-    // Add user message to UI
     this._addMessage('user', userMessage);
 
-    // Save user message to storage
-    await this._storageManager.saveMessage(this._currentUrl, {
-        role: 'user',
-        content: userMessage,
-        timestamp: Date.now()
+    this._isStreaming = true;
+    this._streamingFullText = '';
+    const messageElement = this._addMessage('assistant', '', false);
+    this._streamingMessageElement = messageElement.querySelector('.message-content');
+    this._streamingMessageHeader = messageElement.querySelector('.message-header');
+
+    const loadingIndicator = document.createElement('span');
+    loadingIndicator.className = 'loading-indicator';
+    loadingIndicator.textContent = 'Thinking';
+    const loadingDots = document.createElement('span');
+    loadingDots.className = 'loading-dots';
+    loadingIndicator.appendChild(loadingDots);
+    this._streamingMessageElement.appendChild(loadingIndicator);
+
+    // The controller already owns Inspection Context. The view notifies the
+    // controller via updateContext()/_clearContext.
+    this._controller.sendUserMessage(userMessage).catch(() => {
+        // stream-failed event handler already surfaces the error.
     });
+};
 
-    // Get AI response
-    try {
-        this._isStreaming = true;
-
-        // Create placeholder for AI response without copy button (will add after completion)
-        const messageElement = this._addMessage('assistant', '', false);
-        this._streamingMessageElement = messageElement.querySelector('.message-content');
-        this._streamingMessageHeader = messageElement.querySelector('.message-header');
-
-        // Add loading indicator as DOM elements (not HTML string to avoid escaping)
-        const loadingIndicator = document.createElement('span');
-        loadingIndicator.className = 'loading-indicator';
-        loadingIndicator.textContent = 'Thinking';
-        const loadingDots = document.createElement('span');
-        loadingDots.className = 'loading-dots';
-        loadingIndicator.appendChild(loadingDots);
-        this._streamingMessageElement.appendChild(loadingIndicator);
-
-        // Get app info for context
-        var appInfo = null;
-        if (this._getAppInfo) {
-            appInfo = this._getAppInfo();
-        } else if (this._currentContext) {
-            appInfo = this._currentContext.appInfo;
-        }
-
-        // Build context object
-        const context = {
-            control: this._currentContext ? this._currentContext.control : null,
-            appInfo: appInfo
-        };
-
-        // Get streaming response — session retains history internally.
-        const stream = await this._sessionManager.promptStreaming(
-            userMessage,
-            context
-        );
-
-        let fullResponse = '';
-
-        // Process stream
-        // Note: Chrome Prompt API returns delta chunks (not cumulative text)
-        // in Chrome 132+, so we accumulate with +=
-        for await (const chunk of stream) {
-            fullResponse += chunk;
-            this._debouncedRender(fullResponse);
-        }
-
-        // Final render after stream completes
-        if (this._renderDebounceTimer) {
-            clearTimeout(this._renderDebounceTimer);
-            this._renderDebounceTimer = null;
-        }
-        this._streamingMessageElement.innerHTML = this._parseMarkdown(fullResponse);
-        this._initializeJsonViewers(this._streamingMessageElement);
-
-        // Add copy button now that response is complete
-        const copyButton = document.createElement('button');
-        copyButton.className = 'copy-response-button';
-        copyButton.title = 'Copy response';
-        copyButton.setAttribute('aria-label', 'Copy response');
-        copyButton.textContent = 'Copy';
-        copyButton.addEventListener('click', (e) => {
-            this._copyToClipboard(fullResponse, e.currentTarget);
-        });
-        this._streamingMessageHeader.appendChild(copyButton);
-
-        // Save AI response to storage
-        await this._storageManager.saveMessage(this._currentUrl, {
-            role: 'assistant',
-            content: fullResponse,
-            timestamp: Date.now()
-        });
-
+/**
+ * Finalize a streaming assistant message once the controller reports
+ * stream completion.
+ * @private
+ * @param {string} fullResponse
+ */
+AIChat.prototype._finalizeStreamingMessage = function (fullResponse) {
+    if (!this._streamingMessageElement) {
+        // Nothing in the DOM to finalize; controller-driven update without view.
         this._isStreaming = false;
-        this._streamingMessageElement = null;
-        this._streamingMessageHeader = null;
-
-        // Update token counter
-        this._updateTokenCounter();
-
-    } catch (error) {
-        this._addSystemMessage(`Error: ${error.message}`);
-        this._isStreaming = false;
-        this._streamingMessageElement = null;
-        this._streamingMessageHeader = null;
+        return;
     }
+    if (this._renderDebounceTimer) {
+        clearTimeout(this._renderDebounceTimer);
+        this._renderDebounceTimer = null;
+    }
+    this._streamingMessageElement.innerHTML = this._parseMarkdown(fullResponse);
+    this._initializeJsonViewers(this._streamingMessageElement);
+
+    const copyButton = document.createElement('button');
+    copyButton.className = 'copy-response-button';
+    copyButton.title = 'Copy response';
+    copyButton.setAttribute('aria-label', 'Copy response');
+    copyButton.textContent = 'Copy';
+    copyButton.addEventListener('click', (e) => {
+        this._copyToClipboard(fullResponse, e.currentTarget);
+    });
+    this._streamingMessageHeader.appendChild(copyButton);
+
+    this._isStreaming = false;
+    this._streamingMessageElement = null;
+    this._streamingMessageHeader = null;
+    this._streamingFullText = '';
+
+    this._updateTokenCounter();
 };
 
 /**
@@ -411,10 +408,8 @@ AIChat.prototype._showConfirmDialog = function () {
     const dialog = document.getElementById('ai-confirm-dialog');
     dialog.style.display = 'flex';
 
-    // Store the element that had focus
     this._previousFocus = document.activeElement;
 
-    // Focus the cancel button (safer default)
     const cancelButton = document.getElementById('ai-confirm-cancel');
     if (cancelButton) {
         cancelButton.focus();
@@ -429,42 +424,19 @@ AIChat.prototype._hideConfirmDialog = function () {
     const dialog = document.getElementById('ai-confirm-dialog');
     dialog.style.display = 'none';
 
-    // Restore focus to the element that had focus before dialog opened
     if (this._previousFocus) {
         this._previousFocus.focus();
     }
 };
 
 /**
- * Perform clear history action.
+ * Perform clear history action via the controller.
  * @private
  */
-AIChat.prototype._performClearHistory = async function () {
-    try {
-        await this._storageManager.clearHistory(this._currentUrl);
-
-        // Clear messages from UI
-        this._messages = [];
-        const messagesContainer = document.getElementById('ai-messages-container');
-        messagesContainer.innerHTML = `
-            <div class="ai-welcome-message">
-                <h3>UI5 AI Assistant</h3>
-                <p>Chat history cleared. Ask me anything!</p>
-            </div>
-        `;
-
-        // Destroy and recreate session to reset token counter
-        this._sessionManager.destroy();
-        await this._initializeSession();
-
-        // Reset usage warning flag
-        this._hasShownUsageWarning = false;
-
-        this._addSystemMessage('Chat history cleared');
-
-    } catch (error) {
-        this._addSystemMessage(`Error clearing history: ${error.message}`);
-    }
+AIChat.prototype._performClearHistory = function () {
+    this._controller.clearConversation().catch((error) => {
+        this._addSystemMessage('Error clearing history: ' + (error && error.message ? error.message : error));
+    });
 };
 
 /**
@@ -481,7 +453,6 @@ AIChat.prototype._renderModelStatus = function (status, progress, message) {
     banner.className = 'ai-status-banner status-' + status;
     statusText.textContent = message;
 
-    // Show/hide download button
     if (status === 'needs-download') {
         downloadButton.style.display = 'inline-block';
         downloadButton.disabled = false;
@@ -503,7 +474,6 @@ AIChat.prototype._renderModelStatus = function (status, progress, message) {
 AIChat.prototype._addMessage = function (role, content, showCopyButton) {
     const messagesContainer = document.getElementById('ai-messages-container');
 
-    // Remove welcome message if it exists
     const welcomeMessage = messagesContainer.querySelector('.ai-welcome-message');
     if (welcomeMessage) {
         welcomeMessage.remove();
@@ -512,10 +482,8 @@ AIChat.prototype._addMessage = function (role, content, showCopyButton) {
     const messageElement = document.createElement('div');
     messageElement.className = 'ai-message message-' + role;
 
-    // Use markdown rendering for AI responses, escape HTML for user/system messages
     const formattedContent = role === 'assistant' ? this._parseMarkdown(content) : this._escapeHtml(content);
 
-    // Default showCopyButton to true for assistant messages
     const shouldShowCopyButton = role === 'assistant' && (showCopyButton === undefined || showCopyButton === true);
 
     messageElement.innerHTML = `
@@ -528,12 +496,10 @@ AIChat.prototype._addMessage = function (role, content, showCopyButton) {
 
     messagesContainer.appendChild(messageElement);
 
-    // Initialize JSON viewers if this is an assistant message
     if (role === 'assistant') {
         const contentElement = messageElement.querySelector('.message-content');
         this._initializeJsonViewers(contentElement);
 
-        // Add copy button event listener if button exists
         const copyButton = messageElement.querySelector('.copy-response-button');
         if (copyButton) {
             copyButton.addEventListener('click', (e) => {
@@ -542,7 +508,6 @@ AIChat.prototype._addMessage = function (role, content, showCopyButton) {
         }
     }
 
-    // Force scroll to bottom when adding new message
     this._scrollToBottom(true);
 
     this._messages.push({ role, content });
@@ -579,23 +544,17 @@ AIChat.prototype._escapeHtml = function (text) {
 AIChat.prototype._parseMarkdown = function (text) {
     const placeholders = { codeBlocks: [], inlineCode: [] };
 
-    // Step 1: Extract code blocks and inline code
     let html = this._extractCodeBlocks(text, placeholders);
     html = this._extractInlineCode(html, placeholders);
 
-    // Step 2: Escape HTML
     html = this._escapeHtml(html);
 
-    // Step 3: Apply markdown formatting
     html = this._applyMarkdownFormatting(html);
 
-    // Step 4: Trim trailing whitespace before converting line breaks
     html = html.trimEnd();
 
-    // Step 5: Convert line breaks BEFORE restoring code (so <br> doesn't appear inside <code> tags)
     html = html.replace(/\n/g, '<br>');
 
-    // Step 6: Restore code (after line breaks so code blocks keep their original formatting)
     html = this._restoreInlineCode(html, placeholders.inlineCode);
     html = this._restoreCodeBlocks(html, placeholders.codeBlocks);
 
@@ -644,10 +603,10 @@ AIChat.prototype._extractInlineCode = function (text, placeholders) {
  */
 AIChat.prototype._applyMarkdownFormatting = function (text) {
     return text
-        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')  // Bold
-        .replace(/\b__([^_]+)__\b/g, '<strong>$1</strong>')   // Bold (alt)
-        .replace(/(?<!\*)\*(?!\*)([^*<>]+)(?<!\*)\*(?!\*)/g, '<em>$1</em>')  // Italic
-        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');  // Links
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\b__([^_]+)__\b/g, '<strong>$1</strong>')
+        .replace(/(?<!\*)\*(?!\*)([^*<>]+)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 };
 
 /**
@@ -671,7 +630,6 @@ AIChat.prototype._restoreCodeBlocks = function (text, codeBlocks) {
         if (block.type === 'json') {
             replacement = this._createJsonViewer(block.data);
         } else {
-            // Use data attribute approach like JSON viewer
             replacement = this._createCodeViewer(block.code, block.lang);
         }
         text = text.replace(`___CODEBLOCK_${index}___`, replacement);
@@ -792,7 +750,6 @@ AIChat.prototype._renderJsonLine = function (key, content) {
  * @private
  */
 AIChat.prototype._initializeJsonViewers = function (element) {
-    // Initialize JSON viewers
     element.querySelectorAll('.json-viewer').forEach(viewer => {
         const jsonData = viewer.getAttribute('data-json');
         if (!jsonData) {
@@ -808,7 +765,6 @@ AIChat.prototype._initializeJsonViewers = function (element) {
 
             this._setupJsonToggleHandlers(viewer);
 
-            // Add copy button event listener
             const copyButton = viewer.querySelector('.copy-code-button');
             if (copyButton) {
                 copyButton.addEventListener('click', (e) => {
@@ -817,11 +773,9 @@ AIChat.prototype._initializeJsonViewers = function (element) {
             }
         } catch (e) {
             viewer.textContent = `Error rendering JSON: ${e.message}`;
-            console.error('JSON viewer error:', e);
         }
     });
 
-    // Initialize code viewers
     element.querySelectorAll('.code-viewer').forEach(viewer => {
         const code = viewer.getAttribute('data-code');
         const lang = viewer.getAttribute('data-lang');
@@ -832,7 +786,6 @@ AIChat.prototype._initializeJsonViewers = function (element) {
         try {
             viewer.innerHTML = this._renderCodeBlock(code, lang);
 
-            // Add copy button event listener
             const copyButton = viewer.querySelector('.copy-code-button');
             if (copyButton) {
                 copyButton.addEventListener('click', (e) => {
@@ -841,7 +794,6 @@ AIChat.prototype._initializeJsonViewers = function (element) {
             }
         } catch (e) {
             viewer.textContent = `Error rendering code: ${e.message}`;
-            console.error('Code viewer error:', e);
         }
     });
 };
@@ -894,7 +846,7 @@ AIChat.prototype._isScrolledToBottom = function () {
         return true;
     }
 
-    const threshold = 100; // pixels from bottom
+    const threshold = 100;
     const scrollPosition = messagesContainer.scrollTop + messagesContainer.clientHeight;
     const scrollHeight = messagesContainer.scrollHeight;
 
@@ -912,7 +864,6 @@ AIChat.prototype._scrollToBottom = function (force) {
         return;
     }
 
-    // Only auto-scroll if user is already at bottom, or if forced
     if (force || this._isScrolledToBottom()) {
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
@@ -934,29 +885,29 @@ AIChat.prototype._debouncedRender = function (content) {
         if (this._pendingRender && this._streamingMessageElement) {
             this._streamingMessageElement.innerHTML = this._parseMarkdown(this._pendingRender);
             this._initializeJsonViewers(this._streamingMessageElement);
-            // Don't force scroll during streaming - let user scroll freely
             this._scrollToBottom(false);
         }
         this._renderDebounceTimer = null;
-    }, 50); // 50ms debounce
+    }, 50);
 };
 
 /**
  * Update token counter display.
  * @private
  */
-AIChat.prototype._updateTokenCounter = async function () {
+AIChat.prototype._updateTokenCounter = function () {
     const counter = document.getElementById('ai-token-counter');
     const input = document.getElementById('ai-input');
     const sendButton = document.getElementById('ai-send-button');
 
-    try {
-        const usageInfo = await this._sessionManager.getUsageInfo();
+    if (!counter) {
+        return;
+    }
 
+    this._controller.getUsageInfo().then((usageInfo) => {
         if (usageInfo) {
-            counter.textContent = `Tokens: ${usageInfo.inputUsage}/${usageInfo.inputQuota} (${usageInfo.percentUsed}%)`;
+            counter.textContent = 'Tokens: ' + usageInfo.inputUsage + '/' + usageInfo.inputQuota + ' (' + usageInfo.percentUsed + '%)';
 
-            // Remove all warning classes first
             counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
 
             if (usageInfo.percentUsed >= 100) {
@@ -970,14 +921,13 @@ AIChat.prototype._updateTokenCounter = async function () {
                 counter.classList.add('warning');
             }
 
-            // Show usage warning when reaching 70% (only once per session)
             this._checkTokenUsageWarning(usageInfo.percentUsed);
         } else {
             counter.textContent = '';
         }
-    } catch (error) {
+    }, () => {
         counter.textContent = '';
-    }
+    });
 };
 
 /**
@@ -986,7 +936,6 @@ AIChat.prototype._updateTokenCounter = async function () {
  * @param {number} percentUsed - Percentage of token quota used
  */
 AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
-    // Show warning at 70% usage, only once per session
     if (percentUsed >= 70 && !this._hasShownUsageWarning) {
         this._hasShownUsageWarning = true;
 
@@ -999,31 +948,32 @@ AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
 };
 
 /**
- * Clear current context.
+ * Clear current Inspection Context.
  * @private
  */
 AIChat.prototype._clearContext = function () {
     this._currentContext = null;
+    this._controller.updateInspectionContext(null);
     const contextInfo = document.getElementById('ai-context-info');
     contextInfo.style.display = 'none';
 
-    // Add a system message to inform AI that context was cleared
     this._addSystemMessage('❌ Context cleared - no control is currently selected');
 };
 
 /**
- * Update current context (control and app info).
+ * Update current Inspection Context (control and app info).
  * @param {Object} context - {control, appInfo}
  */
 AIChat.prototype.updateContext = function (context) {
     this._currentContext = context;
+    this._controller.updateInspectionContext(context);
 
     const contextInfo = document.getElementById('ai-context-info');
     const contextText = contextInfo.querySelector('.context-text');
 
     if (context && context.control) {
         contextInfo.style.display = 'flex';
-        contextText.textContent = `Context: ${context.control.type || 'Control'} (${context.control.id || 'no ID'})`;
+        contextText.textContent = 'Context: ' + (context.control.type || 'Control') + ' (' + (context.control.id || 'no ID') + ')';
     } else {
         contextInfo.style.display = 'none';
     }
@@ -1033,12 +983,6 @@ AIChat.prototype.updateContext = function (context) {
  * Called when AI tab is activated.
  */
 AIChat.prototype.onTabActivated = function () {
-    // Load chat history if we have a URL
-    if (this._currentUrl) {
-        this._loadHistory();
-    }
-
-    // Force scroll to bottom when context changes
     this._scrollToBottom(true);
 };
 
@@ -1049,51 +993,8 @@ AIChat.prototype.onTabActivated = function () {
 AIChat.prototype.setUrl = function (url) {
     if (this._currentUrl !== url) {
         this._currentUrl = url;
-        this._loadHistory();
-    }
-};
-
-/**
- * Load chat history from storage.
- * @private
- */
-AIChat.prototype._loadHistory = async function () {
-    if (this._isStreaming || this._isReseedingSession) {
-        return;
-    }
-    try {
-        const messages = await this._storageManager.loadHistory(this._currentUrl);
-
-        // Reset in-memory state before repopulating from storage —
-        // _addMessage always pushes, so without this every tab switch duplicates.
-        this._messages = [];
-        const messagesContainer = document.getElementById('ai-messages-container');
-        messagesContainer.innerHTML = '';
-
-        if (messages.length > 0) {
-            messages.forEach(msg => {
-                this._addMessage(msg.role, msg.content);
-            });
-
-            document.getElementById('ai-clear-history-button').style.display = 'inline-block';
-            // Force scroll to bottom when loading history
-            this._scrollToBottom(true);
-        }
-
-        // Re-seed session regardless of history length: a fresh app context
-        // (different framework version, theme, libraries) needs a new system prompt.
-        if (this._sessionManager.hasActiveSession()) {
-            this._isReseedingSession = true;
-            try {
-                this._sessionManager.destroy();
-                await this._initializeSession();
-            } finally {
-                this._isReseedingSession = false;
-            }
-        }
-    } catch (error) {
-        this._isReseedingSession = false;
-        // Fail silently
+        // Controller owns the actual session reseed; the view just notifies it.
+        this._controller.setUrl(url);
     }
 };
 
@@ -1104,47 +1005,37 @@ AIChat.prototype._loadHistory = async function () {
  * @param {HTMLElement} button - The button element that triggered the copy
  */
 AIChat.prototype._copyToClipboard = function (text, button) {
-    // Create temporary textarea (must be visible for copy to work)
     const textarea = document.createElement('textarea');
     textarea.value = text;
-    // Position off-screen but keep visible (opacity 0 can block copy in some contexts)
     textarea.style.position = 'fixed';
     textarea.style.top = '-9999px';
     textarea.style.left = '-9999px';
     textarea.setAttribute('readonly', '');
     document.body.appendChild(textarea);
 
-    // Select the text
     textarea.focus();
     textarea.select();
 
-    // For iOS compatibility
     textarea.setSelectionRange(0, text.length);
 
     try {
-        // Execute copy command
         const successful = document.execCommand('copy');
 
         if (successful) {
-            // Change button text to "Copied!"
             const originalText = button.textContent;
             button.textContent = 'Copied!';
             button.disabled = true;
 
-            // Revert back after 1.5 seconds
             setTimeout(() => {
                 button.textContent = originalText;
                 button.disabled = false;
             }, 1500);
         } else {
-            console.error('execCommand returned false');
             this._addSystemMessage('Failed to copy to clipboard');
         }
     } catch (err) {
-        console.error('Copy failed:', err);
         this._addSystemMessage('Failed to copy to clipboard');
     } finally {
-        // Clean up
         document.body.removeChild(textarea);
     }
 };
@@ -1153,7 +1044,7 @@ AIChat.prototype._copyToClipboard = function (text, button) {
  * Destroy the component and cleanup.
  */
 AIChat.prototype.destroy = function () {
-    this._sessionManager.destroy();
+    this._controller.destroy();
 };
 
 module.exports = AIChat;
