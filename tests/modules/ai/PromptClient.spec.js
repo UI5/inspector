@@ -145,7 +145,7 @@ describe('PromptClient', function () {
             return promise;
         });
 
-        it('should preserve the previously-active session when a subsequent createSession fails so the background can keep the prior session usable on init failure', function () {
+        it('should keep the active session flag set when a subsequent createSession fails', async function () {
             var fake = createFakePort();
             var client = new PromptClient({
                 portFactory: function () {
@@ -153,21 +153,20 @@ describe('PromptClient', function () {
                 }
             });
 
-            var first = client.createSession([]).then(function () {
-                client.hasActiveSession().should.be.true;
-            });
+            var first = client.createSession([]);
             fake.emit({ type: 'session-created' });
+            await first;
+            client.hasActiveSession().should.be.true;
 
-            return first.then(function () {
-                var second = client.createSession([]).then(function () {
-                    throw new Error('Expected second createSession to reject');
-                }, function (err) {
-                    err.message.should.equal('Session init failed');
-                    client.hasActiveSession().should.be.true;
-                });
-                fake.emit({ type: 'error', message: 'Session init failed' });
-                return second;
-            });
+            var second = client.createSession([]);
+            fake.emit({ type: 'error', message: 'Session init failed' });
+            try {
+                await second;
+                throw new Error('Expected second createSession to reject');
+            } catch (err) {
+                err.message.should.equal('Session init failed');
+            }
+            client.hasActiveSession().should.be.true;
         });
     });
 

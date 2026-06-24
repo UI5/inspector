@@ -34,7 +34,6 @@ function AIChat(containerId, options) {
     this._currentContext = null;
     this._messages = [];
     this._isStreaming = false;
-    this._isReseedingSession = false;
     this._streamingMessageElement = null;
     this._streamingMessageHeader = null;
     this._streamingFullText = '';

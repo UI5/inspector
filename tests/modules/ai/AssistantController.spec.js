@@ -394,7 +394,7 @@ describe('AssistantController', function () {
             });
         });
 
-        it('should not replay empty assistant placeholders from Conversation Memory into the session seed so an interrupted mid-stream slot never reseeds as a blank turn', function () {
+        it('should skip empty assistant placeholders when seeding from Conversation Memory', function () {
             var harness = createController();
             harness.conversationStore.data['https://example.com'] = [
                 { role: 'user', content: 'previous question' },
