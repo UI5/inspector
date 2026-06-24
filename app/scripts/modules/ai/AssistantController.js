@@ -34,7 +34,13 @@ function AssistantController(options) {
     this._conversationStore = options.conversationStore || new ConversationStore();
     this._getAppInfo = options.getAppInfo || function () { return null; };
 
-    this._capabilityState = { status: 'unknown', message: '', progress: 0 };
+    // Seed with a canonical PRD Assistant Capability State. The Inspector
+    // AI Assistant cannot serve prompts until `initialize()` has resolved
+    // the real availability from the Prompt Client; `unavailable` is the
+    // PRD vocabulary for "local AI cannot be used right now" and is the
+    // safest no-op state to surface before initialization runs. It is
+    // overwritten by the first real capability resolution.
+    this._capabilityState = { status: 'unavailable', message: 'Checking model status...', progress: 0 };
     this._listeners = {};
     this._currentUrl = null;
     this._conversationMemory = [];

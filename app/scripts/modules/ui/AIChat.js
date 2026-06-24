@@ -266,53 +266,107 @@ AIChat.prototype._renderConversationMemory = function (turns) {
 /**
  * React to an Assistant Capability State change from the controller.
  *
- * `unknown` (pre-initialize seed) and `streaming-failed` intentionally do
- * not change the banner: `unknown` should never reach a developer's eyes,
- * and `streaming-failed` is already surfaced as a system message via the
- * `stream-failed` event — the banner stays on its prior `ready` state so
- * the developer sees the assistant recover on the next send.
+ * `streaming-failed` intentionally does not change the banner: it is
+ * already surfaced as a system message via the `stream-failed` event,
+ * and the banner stays on its prior `ready` state so the developer
+ * sees the assistant recover on the next send (PRD user story #8).
+ *
+ * Any state with no dedicated renderer falls back to the unavailable
+ * banner so a future canonical Assistant Capability State introduced
+ * by the controller (for example a new state added in slice 05) never
+ * disappears silently from the developer's view. The fallback also
+ * logs a console warning so the missing handler is detectable during
+ * development without changing user-visible behavior.
  *
  * @private
  * @param {{status: string, message: string, progress: number}} state
  */
 AIChat.prototype._onCapabilityStateChanged = function (state) {
+    if (state.status === 'streaming-failed') {
+        return;
+    }
     const handler = this._capabilityStateHandlers[state.status];
     if (handler) {
         handler.call(this, state);
+        return;
     }
+    console.warn('AIChat: unmapped Assistant Capability State "' + state.status + '"; routing to unavailable banner');
+    this._renderModelStatus('unavailable', 0, state.message || '');
 };
 
 /**
- * Lookup of capability-state -> banner renderer. Defined as a prototype
- * map so each handler stays small and `_onCapabilityStateChanged` does
- * not balloon in cyclomatic complexity as new states are added in slice 05.
+ * Render the `ready` Assistant Capability State: surface a ready banner,
+ * reveal the clear-history affordance, and refresh the token counter so
+ * the developer can see how much session quota is in use.
+ * @private
+ * @param {{message: string, progress: number}} state
+ */
+AIChat.prototype._renderReadyCapabilityState = function (state) {
+    this._renderModelStatus('ready', state.progress || 0, state.message || 'Gemini Nano is ready');
+    const clearButton = document.getElementById('ai-clear-history-button');
+    if (clearButton) {
+        clearButton.style.display = 'inline-block';
+    }
+    this._updateTokenCounter();
+};
+
+/**
+ * Render the `downloadable` Assistant Capability State: surface a
+ * needs-download banner with the download-model action exposed.
+ * @private
+ * @param {{message: string}} state
+ */
+AIChat.prototype._renderDownloadableCapabilityState = function (state) {
+    this._renderModelStatus('needs-download', 0, state.message);
+};
+
+/**
+ * Render the `downloading` Assistant Capability State: surface a
+ * downloading banner with the current progress percentage.
+ * @private
+ * @param {{message: string, progress: number}} state
+ */
+AIChat.prototype._renderDownloadingCapabilityState = function (state) {
+    const percent = Math.round((state.progress || 0) * 100);
+    this._renderModelStatus('downloading', state.progress || 0, percent === 0 ? state.message : 'Downloading: ' + percent + '%');
+};
+
+/**
+ * Render the `session-failed` Assistant Capability State: surface an
+ * error banner explaining that local AI session creation failed.
+ * @private
+ * @param {{message: string}} state
+ */
+AIChat.prototype._renderSessionFailedCapabilityState = function (state) {
+    this._renderModelStatus('error', 0, 'Session failed: ' + (state.message || 'unable to create local AI session'));
+};
+
+/**
+ * Render an unavailable Assistant Capability State (either `unsupported`
+ * or `unavailable`): surface the unavailable banner with the controller's
+ * supplied explanation.
+ * @private
+ * @param {{message: string}} state
+ */
+AIChat.prototype._renderUnavailableCapabilityState = function (state) {
+    this._renderModelStatus('unavailable', 0, state.message || '');
+};
+
+/**
+ * Lookup of canonical Assistant Capability State -> banner renderer.
+ * Defined as a prototype map so each renderer stays small and
+ * `_onCapabilityStateChanged` does not balloon in cyclomatic complexity
+ * as new canonical states are added in slice 05. Renderers are bound
+ * via `.call(this, state)` from the dispatcher.
  * @private
  */
 AIChat.prototype._capabilityStateHandlers = {
-    ready: function (state) {
-        this._renderModelStatus('ready', state.progress || 0, state.message || 'Gemini Nano is ready');
-        const clearButton = document.getElementById('ai-clear-history-button');
-        if (clearButton) {
-            clearButton.style.display = 'inline-block';
-        }
-        this._updateTokenCounter();
-    },
-    downloadable: function (state) {
-        this._renderModelStatus('needs-download', 0, state.message);
-    },
-    downloading: function (state) {
-        const percent = Math.round((state.progress || 0) * 100);
-        this._renderModelStatus('downloading', state.progress || 0, percent === 0 ? state.message : 'Downloading: ' + percent + '%');
-    },
-    'session-failed': function (state) {
-        this._renderModelStatus('error', 0, 'Session failed: ' + (state.message || 'unable to create local AI session'));
-    },
-    unsupported: function (state) {
-        this._renderModelStatus('unavailable', 0, state.message || '');
-    },
-    unavailable: function (state) {
-        this._renderModelStatus('unavailable', 0, state.message || '');
-    }
+    ready: AIChat.prototype._renderReadyCapabilityState,
+    downloadable: AIChat.prototype._renderDownloadableCapabilityState,
+    downloading: AIChat.prototype._renderDownloadingCapabilityState,
+    'session-failed': AIChat.prototype._renderSessionFailedCapabilityState,
+    unsupported: AIChat.prototype._renderUnavailableCapabilityState,
+    unavailable: AIChat.prototype._renderUnavailableCapabilityState
 };
 
 /**

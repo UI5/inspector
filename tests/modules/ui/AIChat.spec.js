@@ -326,4 +326,63 @@ describe('AIChat', function () {
             button.should.exist;
         });
     });
+
+    describe('Assistant Capability State routing', function () {
+        /**
+         * Build a minimal AssistantController-shaped fake that records
+         * event registrations so a test can synchronously fire any event
+         * the AIChat view subscribes to. Avoids the real controller's
+         * Chrome runtime / storage dependencies.
+         * @returns {{fire: Function, on: Function, initialize: Function,
+         *           getUsageInfo: Function, updateInspectionContext: Function,
+         *           setUrl: Function, destroy: Function}}
+         */
+        function createFakeController() {
+            var listeners = {};
+            return {
+                listeners: listeners,
+                on: function (event, handler) {
+                    listeners[event] = listeners[event] || [];
+                    listeners[event].push(handler);
+                },
+                fire: function (event, payload) {
+                    (listeners[event] || []).forEach(function (h) { h(payload); });
+                },
+                initialize: function () { return Promise.resolve(); },
+                getUsageInfo: function () { return Promise.resolve(null); },
+                updateInspectionContext: function () {},
+                setUrl: function () {},
+                destroy: function () {}
+            };
+        }
+
+        var fakeController;
+        var localAiChat;
+
+        beforeEach(function () {
+            fixtures.innerHTML = '<div id="ai-chat"></div>';
+            fakeController = createFakeController();
+            localAiChat = new AIChat('ai-chat', {
+                getAppInfo: function () { return null; },
+                controller: fakeController
+            });
+        });
+
+        afterEach(function () {
+            localAiChat = null;
+            fixtures.innerHTML = '';
+        });
+
+        it('should route an unmapped Assistant Capability State to the unavailable banner instead of silently dropping it, so a future canonical state never disappears from the developer\'s view', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'some-new-canonical-state-not-yet-mapped',
+                message: 'something happened',
+                progress: 0
+            });
+
+            var banner = document.getElementById('ai-status-banner');
+            banner.className.should.contain('status-unavailable');
+            banner.querySelector('.status-text').textContent.should.equal('something happened');
+        });
+    });
 });

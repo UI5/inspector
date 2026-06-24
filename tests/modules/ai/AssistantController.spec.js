@@ -239,17 +239,28 @@ function initializedReady(harness) {
  * `sendUserMessage()` reaches `promptStreaming` only after the awaited
  * `append`/`Promise.resolve(stream)` chain has flushed.
  *
+ * Bounded by `maxAttempts` so a test in which production code never
+ * reaches `promptStreaming` fails fast with a descriptive error rather
+ * than hanging until Mocha's suite-level timeout.
+ *
  * @param {Object} fakePromptClient - The fake from `createFakePromptClient()`.
+ * @param {number} [maxAttempts=500] - Maximum 1ms polls before giving up.
  * @returns {Promise<{emitChunk: Function, emitComplete: Function, emitError: Function}>}
  */
-function awaitStreamController(fakePromptClient) {
-    return new Promise(function (resolve) {
+function awaitStreamController(fakePromptClient, maxAttempts) {
+    var attemptsLeft = typeof maxAttempts === 'number' ? maxAttempts : 500;
+    return new Promise(function (resolve, reject) {
         function poll() {
             if (fakePromptClient.pendingStreamControllers.length > 0) {
                 resolve(fakePromptClient.pendingStreamControllers.shift());
-            } else {
-                setTimeout(poll, 1);
+                return;
             }
+            attemptsLeft -= 1;
+            if (attemptsLeft <= 0) {
+                reject(new Error('awaitStreamController: production code never called promptStreaming() within the poll budget'));
+                return;
+            }
+            setTimeout(poll, 1);
         }
         poll();
     });
@@ -257,10 +268,11 @@ function awaitStreamController(fakePromptClient) {
 
 describe('AssistantController', function () {
     describe('initial Assistant Capability State', function () {
-        it('should report an unknown Assistant Capability State before initialization', function () {
+        it('should seed the Assistant Capability State to a canonical PRD state (not the ad-hoc string \'unknown\') before initialization runs', function () {
             var harness = createController();
 
-            harness.controller.getCapabilityState().status.should.equal('unknown');
+            var canonicalStates = ['unsupported', 'unavailable', 'downloadable', 'downloading', 'ready', 'session-failed', 'streaming-failed'];
+            canonicalStates.should.include(harness.controller.getCapabilityState().status);
         });
     });
 
