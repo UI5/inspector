@@ -1,6 +1,6 @@
 # 02 — Reshape session manager into Prompt Client interface
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 

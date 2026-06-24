@@ -1,6 +1,6 @@
 # 03 — Introduce Conversation Store boundary
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 
