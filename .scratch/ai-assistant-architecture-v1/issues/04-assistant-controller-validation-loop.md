@@ -1,6 +1,6 @@
 # 04 — Introduce Assistant Controller and the V1 Agent Validation Loop
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 
