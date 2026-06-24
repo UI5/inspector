@@ -393,6 +393,26 @@ describe('AssistantController', function () {
                 harness.controller.getCapabilityState().message.should.equal('Session create failed');
             });
         });
+
+        it('should not replay empty assistant placeholders from Conversation Memory into the session seed so an interrupted mid-stream slot never reseeds as a blank turn', function () {
+            var harness = createController();
+            harness.conversationStore.data['https://example.com'] = [
+                { role: 'user', content: 'previous question' },
+                { role: 'assistant', content: 'previous answer' },
+                { role: 'user', content: 'second question' },
+                { role: 'assistant', content: '' }
+            ];
+            harness.controller.setUrl('https://example.com');
+
+            return harness.controller.initialize().then(function () {
+                var seed = harness.promptClient.seedMessagesByCall[0];
+                seed.should.have.length(4);
+                seed[0].role.should.equal('system');
+                seed[1].should.deep.equal({ role: 'user', content: 'previous question' });
+                seed[2].should.deep.equal({ role: 'assistant', content: 'previous answer' });
+                seed[3].should.deep.equal({ role: 'user', content: 'second question' });
+            });
+        });
     });
 
     describe('#sendUserMessage() — Agent Validation Loop streaming', function () {
