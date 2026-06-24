@@ -62,6 +62,14 @@ AssistantController.prototype.isStreaming = function () {
  *  - `stream-failed` (Error)
  *  - `conversation-cleared`
  *
+ * This is a deliberate local, in-process event bus — not a `chrome.runtime`
+ * message dispatch like the rest of the inspector. The Assistant Controller
+ * and the AIChat view live in the same DevTools panel page; routing their
+ * coupling through the background service worker would add latency, hide
+ * the seam behind the message router, and make the controller untestable
+ * without a real Chrome extension. The cross-process port protocol is
+ * still owned exclusively by PromptClient.
+ *
  * @param {string} event
  * @param {Function} handler
  */
@@ -145,10 +153,25 @@ AssistantController.prototype.initialize = function () {
         that._setCapabilityState(mapped.status, mapped.message, 0);
         return that._loadConversationMemory().then(function () {
             if (mapped.status === 'ready') {
-                return that._seedSession();
+                return that._seedSessionOrFail();
             }
             return undefined;
         });
+    });
+};
+
+/**
+ * Create a fresh local AI session and translate any failure into a
+ * `session-failed` Assistant Capability State rather than letting the
+ * error propagate. PRD treats session creation failure as a normal
+ * product state, not an exceptional throw.
+ * @private
+ * @returns {Promise<void>}
+ */
+AssistantController.prototype._seedSessionOrFail = function () {
+    var that = this;
+    return this._seedSession().then(undefined, function (err) {
+        that._setCapabilityState('session-failed', err && err.message ? err.message : 'Session creation failed', 0);
     });
 };
 
@@ -184,21 +207,33 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
 
     this._isStreaming = true;
 
-    return this._conversationStore.append(this._currentUrl, {
-        role: 'user',
-        content: userMessage
-    }).then(function () {
-        return that._promptClient.promptStreaming(formatted);
-    }).then(function (stream) {
+    return this._promptClient.promptStreaming(formatted).then(function (stream) {
         return that._consumeStream(stream);
     }).then(function (fullText) {
+        // Persist only completed turns. Appending the user turn before the
+        // stream finishes would leave an orphan user message in Conversation
+        // Memory on streaming failure, which would then leak into the next
+        // session seed and bias future answers.
         return that._conversationStore.append(that._currentUrl, {
-            role: 'assistant',
-            content: fullText
+            role: 'user',
+            content: userMessage
+        }).then(function () {
+            return that._conversationStore.append(that._currentUrl, {
+                role: 'assistant',
+                content: fullText
+            });
         }).then(function () {
             that._conversationMemory.push({ role: 'user', content: userMessage });
             that._conversationMemory.push({ role: 'assistant', content: fullText });
             that._isStreaming = false;
+            // A successful turn after a prior streaming-failed state means
+            // the session has recovered; resurface a `ready` Assistant
+            // Capability State so the view does not stay stuck on a
+            // failure banner — see PRD user story #8 (graceful recovery,
+            // no permanent "thinking" state).
+            if (that._capabilityState.status === 'streaming-failed') {
+                that._setCapabilityState('ready', 'Gemini Nano is ready', 0);
+            }
             that._emit('stream-complete', { content: fullText });
             return { content: fullText };
         });
@@ -261,7 +296,7 @@ AssistantController.prototype.setUrl = function (url) {
     var that = this;
     return this._loadConversationMemory().then(function () {
         that._promptClient.destroy();
-        return that._seedSession();
+        return that._seedSessionOrFail();
     });
 };
 
@@ -289,7 +324,7 @@ AssistantController.prototype.clearConversation = function () {
         that._conversationMemory = [];
         that._promptClient.destroy();
         that._emit('conversation-cleared');
-        return that._seedSession();
+        return that._seedSessionOrFail();
     });
 };
 
@@ -308,7 +343,7 @@ AssistantController.prototype.downloadModel = function () {
         that._setCapabilityState('downloading', 'Downloading model', progress);
     }).then(function () {
         that._setCapabilityState('ready', 'Model ready', 1);
-        return that._seedSession();
+        return that._seedSessionOrFail();
     }, function (err) {
         that._setCapabilityState('unavailable', err && err.message ? err.message : 'Download failed', 0);
         throw err;

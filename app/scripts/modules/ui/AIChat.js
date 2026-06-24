@@ -227,6 +227,10 @@ AIChat.prototype._attachControllerListeners = function () {
     this._controller.on('conversation-cleared', () => {
         this._messages = [];
         const messagesContainer = document.getElementById('ai-messages-container');
+        // Safe to use innerHTML with this literal: no user-controlled or
+        // model-controlled content is interpolated. Any user message goes
+        // through _addMessage, which routes user/system text through
+        // _escapeHtml and assistant text through _parseMarkdown.
         messagesContainer.innerHTML = `
             <div class="ai-welcome-message">
                 <h3>UI5 AI Assistant</h3>
@@ -261,25 +265,52 @@ AIChat.prototype._renderConversationMemory = function (turns) {
 
 /**
  * React to an Assistant Capability State change from the controller.
+ *
+ * `unknown` (pre-initialize seed) and `streaming-failed` intentionally do
+ * not change the banner: `unknown` should never reach a developer's eyes,
+ * and `streaming-failed` is already surfaced as a system message via the
+ * `stream-failed` event — the banner stays on its prior `ready` state so
+ * the developer sees the assistant recover on the next send.
+ *
  * @private
  * @param {{status: string, message: string, progress: number}} state
  */
 AIChat.prototype._onCapabilityStateChanged = function (state) {
-    if (state.status === 'ready') {
+    const handler = this._capabilityStateHandlers[state.status];
+    if (handler) {
+        handler.call(this, state);
+    }
+};
+
+/**
+ * Lookup of capability-state -> banner renderer. Defined as a prototype
+ * map so each handler stays small and `_onCapabilityStateChanged` does
+ * not balloon in cyclomatic complexity as new states are added in slice 05.
+ * @private
+ */
+AIChat.prototype._capabilityStateHandlers = {
+    ready: function (state) {
         this._renderModelStatus('ready', state.progress || 0, state.message || 'Gemini Nano is ready');
         const clearButton = document.getElementById('ai-clear-history-button');
         if (clearButton) {
             clearButton.style.display = 'inline-block';
         }
         this._updateTokenCounter();
-    } else if (state.status === 'downloadable') {
+    },
+    downloadable: function (state) {
         this._renderModelStatus('needs-download', 0, state.message);
-    } else if (state.status === 'downloading') {
+    },
+    downloading: function (state) {
         const percent = Math.round((state.progress || 0) * 100);
         this._renderModelStatus('downloading', state.progress || 0, percent === 0 ? state.message : 'Downloading: ' + percent + '%');
-    } else if (state.status !== 'streaming-failed') {
-        // streaming-failed leaves the banner alone; the system message
-        // surfaced via stream-failed already informs the developer.
+    },
+    'session-failed': function (state) {
+        this._renderModelStatus('error', 0, 'Session failed: ' + (state.message || 'unable to create local AI session'));
+    },
+    unsupported: function (state) {
+        this._renderModelStatus('unavailable', 0, state.message || '');
+    },
+    unavailable: function (state) {
         this._renderModelStatus('unavailable', 0, state.message || '');
     }
 };

@@ -212,6 +212,49 @@ function createController(overrides) {
     };
 }
 
+/**
+ * Drive a freshly built harness into the `ready` Assistant Capability State
+ * by configuring its fake Prompt Client to report a ready local model, then
+ * pointing the controller at the canonical test URL and running
+ * `initialize()`. After this resolves the controller has created a session
+ * with the seed messages from PromptBuilder and is ready to accept
+ * `sendUserMessage()` calls.
+ *
+ * @param {Object} harness - The result of `createController()`.
+ * @returns {Promise<void>}
+ */
+function initializedReady(harness) {
+    harness.promptClient.availabilityResult = {
+        available: true, status: 'ready', message: 'ready'
+    };
+    harness.controller.setUrl('https://example.com');
+    return harness.controller.initialize();
+}
+
+/**
+ * Wait until the fake Prompt Client has registered a streaming call, then
+ * return its controller object so the test can drive chunks, completion,
+ * or error deterministically. The fake records a controller every time
+ * the production code calls `promptStreaming()`; this helper polls because
+ * `sendUserMessage()` reaches `promptStreaming` only after the awaited
+ * `append`/`Promise.resolve(stream)` chain has flushed.
+ *
+ * @param {Object} fakePromptClient - The fake from `createFakePromptClient()`.
+ * @returns {Promise<{emitChunk: Function, emitComplete: Function, emitError: Function}>}
+ */
+function awaitStreamController(fakePromptClient) {
+    return new Promise(function (resolve) {
+        function poll() {
+            if (fakePromptClient.pendingStreamControllers.length > 0) {
+                resolve(fakePromptClient.pendingStreamControllers.shift());
+            } else {
+                setTimeout(poll, 1);
+            }
+        }
+        poll();
+    });
+}
+
 describe('AssistantController', function () {
     describe('initial Assistant Capability State', function () {
         it('should report an unknown Assistant Capability State before initialization', function () {
@@ -325,36 +368,22 @@ describe('AssistantController', function () {
                 harness.promptClient.seedMessagesByCall.should.have.length(0);
             });
         });
-    });
 
-    describe('#sendUserMessage() — Agent Validation Loop streaming', function () {
-        function initializedReady(harness) {
+        it('should resolve the Assistant Capability State to session-failed when the Prompt Client reports ready but session creation throws', function () {
+            var harness = createController();
             harness.promptClient.availabilityResult = {
                 available: true, status: 'ready', message: 'ready'
             };
-            harness.controller.setUrl('https://example.com');
-            return harness.controller.initialize();
-        }
+            harness.promptClient.createSessionError = new Error('Session create failed');
 
-        /**
-         * Wait until the fake Prompt Client has registered a streaming call,
-         * then return its controller so the test can drive chunks deterministically.
-         * @param {Object} fakePromptClient
-         * @returns {Promise<Object>}
-         */
-        function awaitStreamController(fakePromptClient) {
-            return new Promise(function (resolve) {
-                function poll() {
-                    if (fakePromptClient.pendingStreamControllers.length > 0) {
-                        resolve(fakePromptClient.pendingStreamControllers.shift());
-                    } else {
-                        setTimeout(poll, 1);
-                    }
-                }
-                poll();
+            return harness.controller.initialize().then(function () {
+                harness.controller.getCapabilityState().status.should.equal('session-failed');
+                harness.controller.getCapabilityState().message.should.equal('Session create failed');
             });
-        }
+        });
+    });
 
+    describe('#sendUserMessage() — Agent Validation Loop streaming', function () {
         it('should forward the Prompt Builder-formatted user prompt to the Prompt Client and emit streamed chunks and a complete event with the joined response', function () {
             var harness = createController();
 
@@ -405,27 +434,6 @@ describe('AssistantController', function () {
     });
 
     describe('streaming failure recovery', function () {
-        function initializedReady(harness) {
-            harness.promptClient.availabilityResult = {
-                available: true, status: 'ready', message: 'ready'
-            };
-            harness.controller.setUrl('https://example.com');
-            return harness.controller.initialize();
-        }
-
-        function awaitStreamController(fakePromptClient) {
-            return new Promise(function (resolve) {
-                function poll() {
-                    if (fakePromptClient.pendingStreamControllers.length > 0) {
-                        resolve(fakePromptClient.pendingStreamControllers.shift());
-                    } else {
-                        setTimeout(poll, 1);
-                    }
-                }
-                poll();
-            });
-        }
-
         it('should surface a streaming-failed Assistant Capability State and clear the thinking state when the Prompt Client throws mid-stream', function () {
             var harness = createController();
 
@@ -451,7 +459,7 @@ describe('AssistantController', function () {
             });
         });
 
-        it('should not persist an assistant turn when streaming fails before completion', function () {
+        it('should leave Conversation Memory untouched when streaming fails — neither the user turn nor the assistant turn should be persisted, so reseed never replays an orphan user message', function () {
             var harness = createController();
 
             return initializedReady(harness).then(function () {
@@ -463,37 +471,37 @@ describe('AssistantController', function () {
                         // expected
                     });
                 }).then(function () {
-                    var assistantAppends = harness.conversationStore.appended.filter(function (e) {
-                        return e.message.role === 'assistant';
+                    var stored = harness.conversationStore.data['https://example.com'];
+                    (stored === undefined || stored.length === 0).should.be.true;
+                });
+            });
+        });
+
+        it('should recover the Assistant Capability State to ready when a subsequent sendUserMessage succeeds after a prior streaming failure, so the tab does not get stuck on a failure banner', function () {
+            var harness = createController();
+
+            return initializedReady(harness).then(function () {
+                var firstSend = harness.controller.sendUserMessage('First, will crash');
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    streamCtrl.emitError(new Error('model crashed'));
+                    return firstSend.catch(function () { /* expected */ });
+                }).then(function () {
+                    harness.controller.getCapabilityState().status.should.equal('streaming-failed');
+
+                    var secondSend = harness.controller.sendUserMessage('Second, will succeed');
+                    return awaitStreamController(harness.promptClient).then(function (streamCtrl2) {
+                        streamCtrl2.emitChunk('ok');
+                        streamCtrl2.emitComplete();
+                        return secondSend;
                     });
-                    assistantAppends.should.have.length(0);
+                }).then(function () {
+                    harness.controller.getCapabilityState().status.should.equal('ready');
                 });
             });
         });
     });
 
     describe('#updateInspectionContext()', function () {
-        function initializedReady(harness) {
-            harness.promptClient.availabilityResult = {
-                available: true, status: 'ready', message: 'ready'
-            };
-            harness.controller.setUrl('https://example.com');
-            return harness.controller.initialize();
-        }
-
-        function awaitStreamController(fakePromptClient) {
-            return new Promise(function (resolve) {
-                function poll() {
-                    if (fakePromptClient.pendingStreamControllers.length > 0) {
-                        resolve(fakePromptClient.pendingStreamControllers.shift());
-                    } else {
-                        setTimeout(poll, 1);
-                    }
-                }
-                poll();
-            });
-        }
-
         it('should inject the selected-control Inspection Context into the next sendUserMessage prompt only', function () {
             var harness = createController();
 
@@ -548,14 +556,6 @@ describe('AssistantController', function () {
     });
 
     describe('#clearConversation()', function () {
-        function initializedReady(harness) {
-            harness.promptClient.availabilityResult = {
-                available: true, status: 'ready', message: 'ready'
-            };
-            harness.controller.setUrl('https://example.com');
-            return harness.controller.initialize();
-        }
-
         it('should clear stored Conversation Memory for the inspected URL, destroy the active session, and reseed a fresh session without prior turns', function () {
             var harness = createController();
             harness.conversationStore.data['https://example.com'] = [
@@ -657,6 +657,44 @@ describe('AssistantController', function () {
                 });
                 downloadingStates.length.should.be.at.least(1);
                 downloadingStates[downloadingStates.length - 1].progress.should.equal(1.0);
+            });
+        });
+    });
+
+    describe('session reseed failures', function () {
+        it('should resolve the Assistant Capability State to session-failed when clearConversation cannot reseed the session', function () {
+            var harness = createController();
+
+            return initializedReady(harness).then(function () {
+                harness.promptClient.createSessionError = new Error('reseed failed after clear');
+                return harness.controller.clearConversation();
+            }).then(function () {
+                harness.controller.getCapabilityState().status.should.equal('session-failed');
+            });
+        });
+
+        it('should resolve the Assistant Capability State to session-failed when setUrl reseed fails for the new inspected URL', function () {
+            var harness = createController();
+
+            return initializedReady(harness).then(function () {
+                harness.promptClient.createSessionError = new Error('reseed failed after url change');
+                return harness.controller.setUrl('https://other.example.com');
+            }).then(function () {
+                harness.controller.getCapabilityState().status.should.equal('session-failed');
+            });
+        });
+
+        it('should resolve the Assistant Capability State to session-failed when downloadModel succeeds but reseed afterwards fails', function () {
+            var harness = createController();
+            harness.promptClient.availabilityResult = {
+                available: true, status: 'needs-download', message: 'Needs download'
+            };
+
+            return harness.controller.initialize().then(function () {
+                harness.promptClient.createSessionError = new Error('reseed failed after download');
+                return harness.controller.downloadModel();
+            }).then(function () {
+                harness.controller.getCapabilityState().status.should.equal('session-failed');
             });
         });
     });
