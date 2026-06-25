@@ -2,19 +2,61 @@
 
 var AIChat = require('../../../app/scripts/modules/ui/AIChat.js');
 
+/**
+ * Build a minimal AssistantController-shaped fake. The view talks only
+ * to the controller surface, so the fake records event registrations and
+ * exposes a `fire` helper that synchronously dispatches any event the
+ * view subscribes to. The fake has no Chrome runtime, no storage, and no
+ * capability behavior — which is exactly the AIChat test boundary the
+ * Architecture V1 PRD demands ("must not depend on real session, storage,
+ * or capability behavior").
+ * @returns {{listeners: Object, on: Function, fire: Function,
+ *           initialize: Function, getUsageInfo: Function,
+ *           updateInspectionContext: Function, setUrl: Function,
+ *           downloadModel: Function, sendUserMessage: Function,
+ *           clearConversation: Function, destroy: Function}}
+ */
+function createFakeController() {
+    var listeners = {};
+    return {
+        listeners: listeners,
+        on: function (event, handler) {
+            listeners[event] = listeners[event] || [];
+            listeners[event].push(handler);
+        },
+        fire: function (event, payload) {
+            (listeners[event] || []).forEach(function (h) { h(payload); });
+        },
+        initialize: function () { return Promise.resolve(); },
+        getUsageInfo: function () { return Promise.resolve(null); },
+        updateInspectionContext: function () {},
+        setUrl: function () {},
+        downloadModel: function () { return Promise.resolve(); },
+        sendUserMessage: function () { return Promise.resolve(); },
+        clearConversation: function () { return Promise.resolve(); },
+        destroy: function () {}
+    };
+}
+
 describe('AIChat', function () {
     var fixtures = document.getElementById('fixtures');
     var aiChat;
+    var fakeController;
 
     beforeEach(function () {
         fixtures.innerHTML = '<div id="ai-chat"></div>';
-        aiChat = new AIChat('ai-chat', { getAppInfo: function () { return null; } });
+        fakeController = createFakeController();
+        aiChat = new AIChat('ai-chat', {
+            getAppInfo: function () { return null; },
+            controller: fakeController
+        });
     });
 
     afterEach(function () {
         if (aiChat) {
             aiChat = null;
         }
+        fakeController = null;
         fixtures.innerHTML = '';
     });
 
@@ -25,9 +67,6 @@ describe('AIChat', function () {
         });
 
         it('should set default values', function () {
-            (aiChat._currentUrl === null).should.be.true;
-            (aiChat._currentContext === null).should.be.true;
-            aiChat._messages.should.be.an('array').with.lengthOf(0);
             aiChat._isStreaming.should.be.false;
             aiChat._maxJsonDepth.should.equal(10);
         });
@@ -328,51 +367,6 @@ describe('AIChat', function () {
     });
 
     describe('Assistant Capability State routing', function () {
-        /**
-         * Build a minimal AssistantController-shaped fake that records
-         * event registrations so a test can synchronously fire any event
-         * the AIChat view subscribes to. Avoids the real controller's
-         * Chrome runtime / storage dependencies.
-         * @returns {{fire: Function, on: Function, initialize: Function,
-         *           getUsageInfo: Function, updateInspectionContext: Function,
-         *           setUrl: Function, destroy: Function}}
-         */
-        function createFakeController() {
-            var listeners = {};
-            return {
-                listeners: listeners,
-                on: function (event, handler) {
-                    listeners[event] = listeners[event] || [];
-                    listeners[event].push(handler);
-                },
-                fire: function (event, payload) {
-                    (listeners[event] || []).forEach(function (h) { h(payload); });
-                },
-                initialize: function () { return Promise.resolve(); },
-                getUsageInfo: function () { return Promise.resolve(null); },
-                updateInspectionContext: function () {},
-                setUrl: function () {},
-                destroy: function () {}
-            };
-        }
-
-        var fakeController;
-        var localAiChat;
-
-        beforeEach(function () {
-            fixtures.innerHTML = '<div id="ai-chat"></div>';
-            fakeController = createFakeController();
-            localAiChat = new AIChat('ai-chat', {
-                getAppInfo: function () { return null; },
-                controller: fakeController
-            });
-        });
-
-        afterEach(function () {
-            localAiChat = null;
-            fixtures.innerHTML = '';
-        });
-
         it('should route an unmapped Assistant Capability State to the unavailable banner instead of silently dropping it, so a future canonical state never disappears from the developer\'s view', function () {
             fakeController.fire('capability-state-changed', {
                 status: 'some-new-canonical-state-not-yet-mapped',

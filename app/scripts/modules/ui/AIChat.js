@@ -30,9 +30,6 @@ function AIChat(containerId, options) {
         getAppInfo: this._getAppInfo || function () { return null; }
     });
 
-    this._currentUrl = null;
-    this._currentContext = null;
-    this._messages = [];
     this._isStreaming = false;
     this._streamingMessageElement = null;
     this._streamingMessageHeader = null;
@@ -225,7 +222,6 @@ AIChat.prototype._attachControllerListeners = function () {
     });
 
     this._controller.on('conversation-cleared', () => {
-        this._messages = [];
         const messagesContainer = document.getElementById('ai-messages-container');
         // Safe to use innerHTML with this literal: no user-controlled or
         // model-controlled content is interpolated. Any user message goes
@@ -248,7 +244,6 @@ AIChat.prototype._attachControllerListeners = function () {
  * @param {Array<{role: string, content: string}>} turns
  */
 AIChat.prototype._renderConversationMemory = function (turns) {
-    this._messages = [];
     const messagesContainer = document.getElementById('ai-messages-container');
     messagesContainer.innerHTML = '';
     if (turns && turns.length > 0) {
@@ -586,8 +581,6 @@ AIChat.prototype._addMessage = function (role, content, showCopyButton) {
     }
 
     this._scrollToBottom(true);
-
-    this._messages.push({ role, content });
 
     return messageElement;
 };
@@ -1029,7 +1022,6 @@ AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
  * @private
  */
 AIChat.prototype._clearContext = function () {
-    this._currentContext = null;
     this._controller.updateInspectionContext(null);
     const contextInfo = document.getElementById('ai-context-info');
     contextInfo.style.display = 'none';
@@ -1042,7 +1034,6 @@ AIChat.prototype._clearContext = function () {
  * @param {Object} context - {control, appInfo}
  */
 AIChat.prototype.updateContext = function (context) {
-    this._currentContext = context;
     this._controller.updateInspectionContext(context);
 
     const contextInfo = document.getElementById('ai-context-info');
@@ -1065,14 +1056,14 @@ AIChat.prototype.onTabActivated = function () {
 
 /**
  * Set current inspected URL.
+ *
+ * Delegates directly to the controller; the controller is responsible for
+ * deduping repeated calls with the same URL, loading Conversation Memory,
+ * destroying the active session, and reseeding with the new history.
  * @param {string} url
  */
 AIChat.prototype.setUrl = function (url) {
-    if (this._currentUrl !== url) {
-        this._currentUrl = url;
-        // Controller owns the actual session reseed; the view just notifies it.
-        this._controller.setUrl(url);
-    }
+    this._controller.setUrl(url);
 };
 
 /**
