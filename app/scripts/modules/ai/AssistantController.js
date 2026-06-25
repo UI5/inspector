@@ -150,7 +150,18 @@ AssistantController.prototype._mapAvailability = function (availability) {
 /**
  * Resolve the Assistant Capability State from the Prompt Client and broadcast it.
  *
- * @returns {Promise<void>}
+ * A rejected capability check is treated as a normal `unavailable`
+ * Assistant Capability State, not an exceptional throw — the AIChat
+ * view stays the canonical-state consumer and never sees a raw error
+ * from initialize.
+ *
+ * The returned promise therefore never rejects. Callers do not need a
+ * `.catch`; the canonical state has already been emitted by the time
+ * the promise settles, and downstream UI updates flow through the
+ * `capability-state-changed` event bus.
+ *
+ * @returns {Promise<void>} Always resolves; capability resolution
+ *     failure is surfaced via an emitted `unavailable` state.
  */
 AssistantController.prototype.initialize = function () {
     var that = this;
@@ -163,6 +174,8 @@ AssistantController.prototype.initialize = function () {
             }
             return undefined;
         });
+    }, function (err) {
+        that._setCapabilityState('unavailable', err && err.message ? err.message : 'Local AI is unavailable', 0);
     });
 };
 

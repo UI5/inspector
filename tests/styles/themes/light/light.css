@@ -1336,11 +1336,11 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
 .ai-status-banner.status-ready .status-indicator {
   background-color: #3879D9;
 }
-.ai-status-banner.status-needs-download {
+.ai-status-banner.status-downloadable {
   background-color: rgba(136, 18, 128, 0.15);
   border-color: #d4d4d4;
 }
-.ai-status-banner.status-needs-download .status-indicator {
+.ai-status-banner.status-downloadable .status-indicator {
   background-color: #881280;
 }
 .ai-status-banner.status-downloading {
@@ -1351,17 +1351,31 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
   background-color: #3879D9;
   animation: pulse 1.5s ease-in-out infinite;
 }
+.ai-status-banner.status-session-failed,
+.ai-status-banner.status-streaming-failed {
+  background-color: rgba(153, 69, 0, 0.15);
+  border-color: #d4d4d4;
+}
+.ai-status-banner.status-session-failed .status-indicator,
+.ai-status-banner.status-streaming-failed .status-indicator {
+  background-color: #994500;
+}
+.ai-status-banner.status-session-failed .status-text,
+.ai-status-banner.status-streaming-failed .status-text {
+  white-space: pre-line;
+  font-size: 11px;
+}
 .ai-status-banner.status-unavailable,
-.ai-status-banner.status-error {
+.ai-status-banner.status-unsupported {
   background-color: rgba(200, 0, 0, 0.15);
   border-color: #d4d4d4;
 }
 .ai-status-banner.status-unavailable .status-indicator,
-.ai-status-banner.status-error .status-indicator {
+.ai-status-banner.status-unsupported .status-indicator {
   background-color: #C80000;
 }
 .ai-status-banner.status-unavailable .status-text,
-.ai-status-banner.status-error .status-text {
+.ai-status-banner.status-unsupported .status-text {
   white-space: pre-line;
   font-size: 11px;
 }

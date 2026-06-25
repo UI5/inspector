@@ -1,6 +1,6 @@
 # 05 — First-class Assistant Capability State surface
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 

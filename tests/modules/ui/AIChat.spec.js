@@ -384,5 +384,124 @@ describe('AIChat', function () {
             banner.className.should.contain('status-unavailable');
             banner.querySelector('.status-text').textContent.should.equal('something happened');
         });
+
+        it('should apply a CSS class derived directly from the canonical ready Assistant Capability State, with no view-private status name translation', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'Gemini Nano is ready', progress: 0
+            });
+
+            var banner = document.getElementById('ai-status-banner');
+            banner.className.should.contain('status-ready');
+            banner.querySelector('.status-text').textContent.should.equal('Gemini Nano is ready');
+        });
+
+        it('should apply a status-downloadable CSS class (not a translated status-needs-download) when the Assistant Capability State is downloadable, so the view\'s class vocabulary matches the controller', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'downloadable', message: 'Model can be downloaded', progress: 0
+            });
+
+            var banner = document.getElementById('ai-status-banner');
+            banner.className.should.contain('status-downloadable');
+            banner.className.should.not.contain('status-needs-download');
+        });
+
+        it('should show the download button when the Assistant Capability State is downloadable', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'downloadable', message: 'Model can be downloaded', progress: 0
+            });
+
+            var downloadButton = document.getElementById('ai-download-button');
+            downloadButton.style.display.should.not.equal('none');
+            downloadButton.disabled.should.be.false;
+        });
+
+        it('should apply status-downloading and surface the progress percent message when the Assistant Capability State is downloading', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'downloading', message: 'Downloading model', progress: 0.42
+            });
+
+            var banner = document.getElementById('ai-status-banner');
+            banner.className.should.contain('status-downloading');
+            banner.querySelector('.status-text').textContent.should.contain('42');
+            var downloadButton = document.getElementById('ai-download-button');
+            downloadButton.style.display.should.not.equal('none');
+            downloadButton.disabled.should.be.true;
+        });
+
+        it('should apply a status-session-failed CSS class (not a translated status-error) when the controller reports session-failed', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'session-failed', message: 'unable to create local AI session', progress: 0
+            });
+
+            var banner = document.getElementById('ai-status-banner');
+            banner.className.should.contain('status-session-failed');
+            banner.className.should.not.contain('status-error');
+            banner.querySelector('.status-text').textContent.should.contain('unable to create local AI session');
+        });
+
+        it('should apply a status-unsupported CSS class when the controller reports an unsupported browser', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unsupported', message: 'Browser unsupported', progress: 0
+            });
+
+            var banner = document.getElementById('ai-status-banner');
+            banner.className.should.contain('status-unsupported');
+            banner.querySelector('.status-text').textContent.should.equal('Browser unsupported');
+        });
+
+        it('should apply a status-unavailable CSS class when the controller reports unavailable', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unavailable', message: 'Local AI cannot run on this device', progress: 0
+            });
+
+            var banner = document.getElementById('ai-status-banner');
+            banner.className.should.contain('status-unavailable');
+            banner.querySelector('.status-text').textContent.should.equal('Local AI cannot run on this device');
+        });
+
+        it('should hide the download button for every non-download Assistant Capability State that paints a banner, so the developer is not invited to re-download a ready model', function () {
+            var nonDownloadStates = ['ready', 'unsupported', 'unavailable', 'session-failed'];
+            nonDownloadStates.forEach(function (status) {
+                fakeController.fire('capability-state-changed', {
+                    status: status, message: status, progress: 0
+                });
+                var downloadButton = document.getElementById('ai-download-button');
+                downloadButton.style.display.should.equal('none');
+            });
+        });
+
+        it('should expose the clear-history affordance when the controller reports session-failed, so the developer has a user-facing recovery action that destroys the broken session and reseeds a fresh one', function () {
+            // Start from a ready state so the clear-history button is
+            // legitimately offered before session-failed arrives; the
+            // test then asserts session-failed keeps it offered.
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+            fakeController.fire('capability-state-changed', {
+                status: 'session-failed', message: 'session creation failed', progress: 0
+            });
+
+            var clearButton = document.getElementById('ai-clear-history-button');
+            clearButton.style.display.should.not.equal('none');
+        });
+
+        it('should leave the existing banner untouched when streaming-failed arrives — recovery is offered implicitly via the next sendUserMessage, not via a new banner — per PRD user story 8', function () {
+            // Paint a ready banner first; this is the state the assistant
+            // should appear to recover to on the next successful send.
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'Gemini Nano is ready', progress: 0
+            });
+            var bannerBefore = document.getElementById('ai-status-banner');
+            var classBefore = bannerBefore.className;
+            var textBefore = bannerBefore.querySelector('.status-text').textContent;
+
+            fakeController.fire('capability-state-changed', {
+                status: 'streaming-failed', message: 'model crashed', progress: 0
+            });
+
+            var bannerAfter = document.getElementById('ai-status-banner');
+            bannerAfter.className.should.equal(classBefore);
+            bannerAfter.querySelector('.status-text').textContent.should.equal(textBefore);
+        });
     });
 });

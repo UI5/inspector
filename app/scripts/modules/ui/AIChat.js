@@ -264,6 +264,24 @@ AIChat.prototype._renderConversationMemory = function (turns) {
 };
 
 /**
+ * Canonical Assistant Capability States surfaced by the controller. The
+ * view derives its banner CSS class directly from these names with no
+ * translation table: `status-<name>`. Any state outside this set is
+ * routed to the unavailable banner so a future canonical state never
+ * disappears silently from the developer's view.
+ * @private
+ */
+AIChat._CANONICAL_CAPABILITY_STATES = [
+    'unsupported',
+    'unavailable',
+    'downloadable',
+    'downloading',
+    'ready',
+    'session-failed',
+    'streaming-failed'
+];
+
+/**
  * React to an Assistant Capability State change from the controller.
  *
  * `streaming-failed` intentionally does not change the banner: it is
@@ -271,12 +289,15 @@ AIChat.prototype._renderConversationMemory = function (turns) {
  * and the banner stays on its prior `ready` state so the developer
  * sees the assistant recover on the next send (PRD user story #8).
  *
- * Any state with no dedicated renderer falls back to the unavailable
- * banner so a future canonical Assistant Capability State introduced
- * by the controller (for example a new state added in slice 05) never
- * disappears silently from the developer's view. The fallback also
- * logs a console warning so the missing handler is detectable during
- * development without changing user-visible behavior.
+ * For every other canonical state the view renders the banner directly
+ * from the controller's state object: the CSS class is `status-<status>`
+ * with no ad-hoc string mapping, the displayed text is `state.message`
+ * (with one cosmetic adjustment for downloading progress), and the
+ * download button is shown only for the two states that admit it.
+ *
+ * Any non-canonical state falls back to the `unavailable` banner with
+ * a console warning so the missing canonical state is detectable in
+ * development without dropping a state from the developer's view.
  *
  * @private
  * @param {{status: string, message: string, progress: number}} state
@@ -285,102 +306,54 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
     if (state.status === 'streaming-failed') {
         return;
     }
-    const handler = this._capabilityStateHandlers[state.status];
-    if (handler) {
-        handler.call(this, state);
-        return;
+
+    let status = state.status;
+    if (AIChat._CANONICAL_CAPABILITY_STATES.indexOf(status) === -1) {
+        console.warn('AIChat: unmapped Assistant Capability State "' + status + '"; routing to unavailable banner');
+        status = 'unavailable';
     }
-    console.warn('AIChat: unmapped Assistant Capability State "' + state.status + '"; routing to unavailable banner');
-    this._renderModelStatus('unavailable', 0, state.message || '');
-};
 
-/**
- * Render the `ready` Assistant Capability State: surface a ready banner,
- * reveal the clear-history affordance, and refresh the token counter so
- * the developer can see how much session quota is in use.
- * @private
- * @param {{message: string, progress: number}} state
- */
-AIChat.prototype._renderReadyCapabilityState = function (state) {
-    this._renderModelStatus('ready', state.progress || 0, state.message || 'Gemini Nano is ready');
-    const clearButton = document.getElementById('ai-clear-history-button');
-    if (clearButton) {
-        clearButton.style.display = 'inline-block';
+    this._renderCapabilityBanner(status, state);
+
+    if (status === 'ready') {
+        const clearButton = document.getElementById('ai-clear-history-button');
+        if (clearButton) {
+            clearButton.style.display = 'inline-block';
+        }
+        this._updateTokenCounter();
+    } else if (status === 'session-failed') {
+        // The clear-history affordance is the user-facing recovery for a
+        // failed session: ConversationStore.clear() destroys the broken
+        // session and AssistantController reseeds a fresh one. Surface
+        // the button so the developer is not left without an action.
+        const clearButton = document.getElementById('ai-clear-history-button');
+        if (clearButton) {
+            clearButton.style.display = 'inline-block';
+        }
     }
-    this._updateTokenCounter();
-};
-
-/**
- * Render the `downloadable` Assistant Capability State: surface a
- * needs-download banner with the download-model action exposed.
- * @private
- * @param {{message: string}} state
- */
-AIChat.prototype._renderDownloadableCapabilityState = function (state) {
-    this._renderModelStatus('needs-download', 0, state.message);
-};
-
-/**
- * Render the `downloading` Assistant Capability State: surface a
- * downloading banner with the current progress percentage.
- * @private
- * @param {{message: string, progress: number}} state
- */
-AIChat.prototype._renderDownloadingCapabilityState = function (state) {
-    const percent = Math.round((state.progress || 0) * 100);
-    this._renderModelStatus('downloading', state.progress || 0, percent === 0 ? state.message : 'Downloading: ' + percent + '%');
-};
-
-/**
- * Render the `session-failed` Assistant Capability State: surface an
- * error banner explaining that local AI session creation failed.
- * @private
- * @param {{message: string}} state
- */
-AIChat.prototype._renderSessionFailedCapabilityState = function (state) {
-    this._renderModelStatus('error', 0, 'Session failed: ' + (state.message || 'unable to create local AI session'));
-};
-
-/**
- * Render an unavailable Assistant Capability State (either `unsupported`
- * or `unavailable`): surface the unavailable banner with the controller's
- * supplied explanation.
- * @private
- * @param {{message: string}} state
- */
-AIChat.prototype._renderUnavailableCapabilityState = function (state) {
-    this._renderModelStatus('unavailable', 0, state.message || '');
-};
-
-/**
- * Lookup of canonical Assistant Capability State -> banner renderer.
- * Defined as a prototype map so each renderer stays small and
- * `_onCapabilityStateChanged` does not balloon in cyclomatic complexity
- * as new canonical states are added in slice 05. Renderers are bound
- * via `.call(this, state)` from the dispatcher.
- * @private
- */
-AIChat.prototype._capabilityStateHandlers = {
-    ready: AIChat.prototype._renderReadyCapabilityState,
-    downloadable: AIChat.prototype._renderDownloadableCapabilityState,
-    downloading: AIChat.prototype._renderDownloadingCapabilityState,
-    'session-failed': AIChat.prototype._renderSessionFailedCapabilityState,
-    unsupported: AIChat.prototype._renderUnavailableCapabilityState,
-    unavailable: AIChat.prototype._renderUnavailableCapabilityState
 };
 
 /**
  * Drive the initial capability resolution through the controller.
+ *
+ * The controller is responsible for translating every error path into
+ * a canonical Assistant Capability State and emitting it. The view
+ * therefore does not render an ad-hoc error banner here — doing so
+ * would race with the controller's emitted state and reintroduce the
+ * view-private "error" vocabulary that this slice removes.
  * @private
  */
 AIChat.prototype._checkModelAvailability = function () {
-    this._controller.initialize().catch((error) => {
-        this._renderModelStatus('error', 0, 'Error: ' + (error && error.message ? error.message : error));
-    });
+    this._controller.initialize();
 };
 
 /**
  * Handle model download via the controller.
+ *
+ * The controller emits a canonical Assistant Capability State on both
+ * success (`ready`) and failure (`unavailable`), so the view does not
+ * need to paint its own error banner. It only re-enables the input
+ * controls that were disabled while the download was in flight.
  * @private
  */
 AIChat.prototype._handleDownloadModel = function () {
@@ -395,8 +368,10 @@ AIChat.prototype._handleDownloadModel = function () {
     this._controller.downloadModel().then(() => {
         input.disabled = false;
         sendButton.disabled = !input.value.trim().length;
-    }, (error) => {
-        this._renderModelStatus('error', 0, 'Download failed: ' + (error && error.message ? error.message : error));
+    }, () => {
+        // Controller has already broadcast the `unavailable` capability
+        // state via `capability-state-changed`. Re-enable the inputs so
+        // the developer can retry once they understand the failure.
         downloadButton.disabled = false;
         input.disabled = false;
     });
@@ -525,20 +500,37 @@ AIChat.prototype._performClearHistory = function () {
 };
 
 /**
- * Render model status banner.
- * @param {string} status - Status: 'ready', 'needs-download', 'downloading', 'unavailable', 'error'
- * @param {number} progress - Download progress (0-1)
- * @param {string} message - Status message
+ * Render the status banner from a canonical Assistant Capability State.
+ *
+ * The CSS class is derived directly from the canonical status name
+ * (`status-<status>`) — no view-private vocabulary, no translation
+ * table. The banner text comes straight from `state.message`, with one
+ * cosmetic adjustment for `downloading`: once progress is non-zero the
+ * developer sees a percent indicator instead of the bare "starting
+ * download" message. Download-button visibility is the only behavioral
+ * branch and is bound to the two states that admit it.
+ *
+ * @private
+ * @param {string} status - Canonical Assistant Capability State name.
+ * @param {{message: string, progress: number}} state - Full controller state.
  */
-AIChat.prototype._renderModelStatus = function (status, progress, message) {
+AIChat.prototype._renderCapabilityBanner = function (status, state) {
     const banner = document.getElementById('ai-status-banner');
     const statusText = banner.querySelector('.status-text');
     const downloadButton = document.getElementById('ai-download-button');
 
     banner.className = 'ai-status-banner status-' + status;
+
+    let message = state.message || '';
+    if (status === 'downloading') {
+        const percent = Math.round((state.progress || 0) * 100);
+        if (percent > 0) {
+            message = 'Downloading: ' + percent + '%';
+        }
+    }
     statusText.textContent = message;
 
-    if (status === 'needs-download') {
+    if (status === 'downloadable') {
         downloadButton.style.display = 'inline-block';
         downloadButton.disabled = false;
     } else if (status === 'downloading') {

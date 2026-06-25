@@ -320,6 +320,18 @@ describe('AssistantController', function () {
                 harness.controller.getCapabilityState().status.should.equal('unsupported');
             });
         });
+
+        it('should resolve the Assistant Capability State to unavailable when the Prompt Client capability check itself throws, instead of letting initialize reject and leave the view without a canonical state to render', function () {
+            var harness = createController();
+            harness.promptClient.checkAvailability = function () {
+                return Promise.reject(new Error('runtime port disconnected'));
+            };
+
+            return harness.controller.initialize().then(function () {
+                harness.controller.getCapabilityState().status.should.equal('unavailable');
+                harness.controller.getCapabilityState().message.should.contain('runtime port disconnected');
+            });
+        });
     });
 
     describe('#initialize() — Conversation Memory loading', function () {

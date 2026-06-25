@@ -68,7 +68,9 @@
         }
     }
 
-    // Status-specific styles
+    // Status-specific styles — class names mirror the canonical Assistant
+    // Capability States exposed by AssistantController. No translation
+    // table between controller status and CSS class.
     &.status-ready {
         background-color: fade(@lighter-blue, 20%);
         border-color: @border-gray-lighter;
@@ -78,7 +80,7 @@
         }
     }
 
-    &.status-needs-download {
+    &.status-downloadable {
         background-color: fade(@purple, 15%);
         border-color: @border-gray-lighter;
 
@@ -97,8 +99,28 @@
         }
     }
 
+    // Recoverable session failure: framed as a warning, not a terminal
+    // error, because the developer can recover via clear-history or a
+    // controller-driven reseed on the next clearConversation()/setUrl().
+    &.status-session-failed,
+    &.status-streaming-failed {
+        background-color: fade(@red, 15%);
+        border-color: @border-gray-lighter;
+
+        .status-indicator {
+            background-color: @red;
+        }
+
+        .status-text {
+            white-space: pre-line;
+            font-size: 11px;
+        }
+    }
+
+    // Terminal unavailability: local AI cannot serve prompts in this
+    // environment regardless of developer action.
     &.status-unavailable,
-    &.status-error {
+    &.status-unsupported {
         background-color: fade(@red-saturated, 15%);
         border-color: @border-gray-lighter;
 
