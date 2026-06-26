@@ -1,6 +1,6 @@
 # 07 — Pre-wire PromptClient streaming buffer before iteration
 
-Status: needs-triage
+Status: done
 
 ## Parent
 
