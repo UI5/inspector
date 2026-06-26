@@ -191,6 +191,12 @@ PromptClient.prototype.hasActiveSession = function () {
  * messages, Inspection Context formatting) is the responsibility of
  * PromptBuilder and is not performed inside PromptClient.
  *
+ * The chunk / complete / error message handlers and the in-memory buffer are
+ * attached synchronously, before the returned promise resolves. This makes
+ * streaming order-independent: chunks delivered by the transport between
+ * `_send('prompt-streaming')` and the consumer's first `iterator.next()` are
+ * buffered and replayed in order, instead of being dropped.
+ *
  * @param {string} formattedUserMessage - User prompt already built by PromptBuilder.
  * @returns {Promise<AsyncIterable<string>>}
  */
@@ -203,92 +209,69 @@ PromptClient.prototype.promptStreaming = function (formattedUserMessage) {
             return;
         }
 
-        let streamHandlers = {
-            onChunk: null,
-            onComplete: null,
-            onError: null
+        // Pre-wired streaming buffer. Populated synchronously below by the
+        // chunk / complete / error transport handlers. The async iterator
+        // returned to the consumer only drains from this buffer; it never
+        // registers transport listeners of its own. This is what makes
+        // streaming order-independent.
+        const buffer = {
+            chunks: [],
+            isComplete: false,
+            error: null,
+            waiter: null
         };
 
-        const stream = {
-            [Symbol.asyncIterator]: async function* () {
-                const chunkPromises = [];
-                let resolveChunk;
-                let rejectChunk;
-                let isComplete = false;
-                let error = null;
-
-                streamHandlers.onChunk = (message) => {
-                    if (resolveChunk) {
-                        resolveChunk(message.content);
-                        resolveChunk = null;
-                    } else {
-                        chunkPromises.push(Promise.resolve(message.content));
-                    }
-                };
-
-                streamHandlers.onComplete = () => {
-                    isComplete = true;
-                    if (resolveChunk) {
-                        resolveChunk({ done: true });
-                    }
-                };
-
-                streamHandlers.onError = (message) => {
-                    error = new Error(message.message);
-                    if (rejectChunk) {
-                        rejectChunk(error);
-                    }
-                };
-
-                while (!isComplete && !error) {
-                    let chunk;
-                    if (chunkPromises.length > 0) {
-                        chunk = await chunkPromises.shift();
-                    } else {
-                        chunk = await new Promise((res, rej) => {
-                            resolveChunk = res;
-                            rejectChunk = rej;
-                        });
-                    }
-
-                    if (chunk && chunk.done) {
-                        break;
-                    }
-
-                    if (chunk) {
-                        yield chunk;
-                    }
-                }
-
-                if (error) {
-                    throw error;
-                }
+        const notifyWaiter = () => {
+            if (buffer.waiter) {
+                const waiter = buffer.waiter;
+                buffer.waiter = null;
+                waiter();
             }
         };
 
         this._on('chunk', (message) => {
-            if (streamHandlers.onChunk) {
-                streamHandlers.onChunk(message);
+            if (buffer.isComplete || buffer.error) {
+                return;
             }
+            buffer.chunks.push(message.content);
+            notifyWaiter();
         });
 
-        this._on('complete', (message) => {
-            if (streamHandlers.onComplete) {
-                streamHandlers.onComplete(message);
-            }
+        this._on('complete', () => {
+            buffer.isComplete = true;
             this._off('chunk');
             this._off('complete');
             this._off('error');
+            notifyWaiter();
         });
 
         this._on('error', (message) => {
-            if (streamHandlers.onError) {
-                streamHandlers.onError(message);
-            }
+            buffer.error = new Error(message.message);
             this._off('chunk');
             this._off('complete');
             this._off('error');
+            notifyWaiter();
         });
+
+        const stream = {
+            [Symbol.asyncIterator]: async function* () {
+                while (true) {
+                    if (buffer.chunks.length > 0) {
+                        yield buffer.chunks.shift();
+                        continue;
+                    }
+                    if (buffer.error) {
+                        throw buffer.error;
+                    }
+                    if (buffer.isComplete) {
+                        return;
+                    }
+                    await new Promise((res) => {
+                        buffer.waiter = res;
+                    });
+                }
+            }
+        };
 
         this._send({
             type: 'prompt-streaming',

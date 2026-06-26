@@ -186,6 +186,42 @@ describe('PromptClient', function () {
             });
         });
 
+        it('should buffer chunks emitted between sending the prompt and the first iterator.next() call', function () {
+            var fake = createFakePort();
+            var client = new PromptClient({
+                portFactory: function () {
+                    return fake.port;
+                }
+            });
+
+            var sessionPromise = client.createSession([]);
+            fake.emit({ type: 'session-created' });
+
+            return sessionPromise.then(function () {
+                return client.promptStreaming('Pre-formatted user prompt');
+            }).then(async function (stream) {
+                // Emit chunks BEFORE the consumer ever calls iterator.next().
+                // With a lazily-wired stream these chunks would be dropped;
+                // with a pre-wired buffer they must be delivered in order.
+                fake.emit({ type: 'chunk', content: 'first' });
+                fake.emit({ type: 'chunk', content: 'second' });
+                fake.emit({ type: 'complete' });
+
+                var iterator = stream[Symbol.asyncIterator]();
+
+                var first = await iterator.next();
+                first.value.should.equal('first');
+                first.done.should.be.false;
+
+                var second = await iterator.next();
+                second.value.should.equal('second');
+                second.done.should.be.false;
+
+                var done = await iterator.next();
+                done.done.should.be.true;
+            });
+        });
+
         it('should forward the already-formatted prompt to the transport and yield streamed chunks until complete', function () {
             var fake = createFakePort();
             var client = new PromptClient({
