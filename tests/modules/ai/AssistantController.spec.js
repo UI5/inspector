@@ -54,51 +54,34 @@ function createFakePromptClient() {
             let done = false;
             let error = null;
             let notify = null;
+            const wake = function () {
+                const fn = notify;
+                notify = null;
+                if (fn) { fn(); }
+            };
 
             const controller = {
-                emitChunk: function (text) {
-                    chunks.push(text);
-                    const fn = notify;
-                    notify = null;
-                    if (fn) { fn(); }
-                },
-                emitComplete: function () {
-                    done = true;
-                    const fn = notify;
-                    notify = null;
-                    if (fn) { fn(); }
-                },
-                emitError: function (err) {
-                    error = err;
-                    const fn = notify;
-                    notify = null;
-                    if (fn) { fn(); }
-                }
+                emitChunk: function (text) { chunks.push(text); wake(); },
+                emitComplete: function () { done = true; wake(); },
+                emitError: function (err) { error = err; wake(); }
             };
             fake.pendingStreamControllers.push(controller);
 
-            const stream = {
-                [Symbol.asyncIterator]: function () {
-                    return {
-                        next: function () {
-                            return new Promise(function (resolve, reject) {
-                                function check() {
-                                    if (chunks.length > 0) {
-                                        resolve({ value: chunks.shift(), done: false });
-                                    } else if (error) {
-                                        reject(error);
-                                    } else if (done) {
-                                        resolve({ value: undefined, done: true });
-                                    } else {
-                                        notify = check;
-                                    }
-                                }
-                                check();
-                            });
-                        }
-                    };
+            const stream = (async function* () {
+                while (true) {
+                    if (chunks.length > 0) {
+                        yield chunks.shift();
+                        continue;
+                    }
+                    if (error) {
+                        throw error;
+                    }
+                    if (done) {
+                        return;
+                    }
+                    await new Promise(function (resolve) { notify = resolve; });
                 }
-            };
+            })();
 
             return Promise.resolve(stream);
         },
