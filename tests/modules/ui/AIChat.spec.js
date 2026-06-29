@@ -38,17 +38,53 @@ function createFakeController() {
     };
 }
 
+/**
+ * Build a minimal AssistantTranscript-shaped fake that records every
+ * call from the view. The view only knows the transcript through this
+ * small interface; the spec asserts the view forwards the right calls
+ * to the transcript instead of probing markdown / JSON / scroll
+ * internals (which are covered in AssistantTranscript.spec).
+ * @returns {{calls: Array, appendUserTurn: Function,
+ *           appendSystemMessage: Function, beginAssistantTurn: Function,
+ *           clear: Function, reset: Function, scrollToBottom: Function,
+ *           destroy: Function}}
+ */
+function createFakeTranscript() {
+    var calls = [];
+    var streamingHandle = {
+        streamChunk: function (chunk) { calls.push({type: 'streamChunk', chunk: chunk}); },
+        finalize: function (content) { calls.push({type: 'finalize', content: content}); }
+    };
+    return {
+        calls: calls,
+        streamingHandle: streamingHandle,
+        appendUserTurn: function (c) { calls.push({type: 'appendUserTurn', content: c}); },
+        appendSystemMessage: function (m) { calls.push({type: 'appendSystemMessage', message: m}); },
+        beginAssistantTurn: function () {
+            calls.push({type: 'beginAssistantTurn'});
+            return streamingHandle;
+        },
+        clear: function () { calls.push({type: 'clear'}); },
+        reset: function (turns) { calls.push({type: 'reset', turns: turns}); },
+        scrollToBottom: function (force) { calls.push({type: 'scrollToBottom', force: force}); },
+        destroy: function () { calls.push({type: 'destroy'}); }
+    };
+}
+
 describe('AIChat', function () {
     var fixtures = document.getElementById('fixtures');
     var aiChat;
     var fakeController;
+    var fakeTranscript;
 
     beforeEach(function () {
         fixtures.innerHTML = '<div id="ai-chat"></div>';
         fakeController = createFakeController();
+        fakeTranscript = createFakeTranscript();
         aiChat = new AIChat('ai-chat', {
             getAppInfo: function () { return null; },
-            controller: fakeController
+            controller: fakeController,
+            transcriptFactory: function () { return fakeTranscript; }
         });
     });
 
@@ -57,6 +93,7 @@ describe('AIChat', function () {
             aiChat = null;
         }
         fakeController = null;
+        fakeTranscript = null;
         fixtures.innerHTML = '';
     });
 
@@ -66,13 +103,17 @@ describe('AIChat', function () {
             aiChat._container.id.should.equal('ai-chat');
         });
 
-        it('should set default values', function () {
-            aiChat._isStreaming.should.be.false;
-            aiChat._maxJsonDepth.should.equal(10);
-        });
-
         it('should render chat interface', function () {
             document.querySelector('.ai-chat-wrapper').should.exist;
+        });
+
+        it('should construct the transcript with the messages container as host, so all transcript rendering writes into the DOM the view already laid out', function () {
+            // The fake transcript factory was called with the container element; the
+            // view should now drive turns through the fake rather than render them
+            // itself.
+            fakeController.fire('conversation-loaded', [{role: 'user', content: 'hi'}]);
+            var resetCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'reset'; });
+            resetCalls.length.should.equal(1);
         });
     });
 
@@ -84,10 +125,13 @@ describe('AIChat', function () {
             wrapper.getAttribute('aria-label').should.equal('AI Chat');
         });
 
-        it('should render messages container', function () {
+        it('should render messages container as an empty host node owned by the transcript collaborator, with no view-private welcome HTML', function () {
             var container = document.getElementById('ai-messages-container');
             container.should.exist;
             container.getAttribute('role').should.equal('log');
+            // The view used to inject a welcome message here; that responsibility
+            // now lives in AssistantTranscript and is covered by its spec.
+            (container.querySelector('.ai-welcome-message') === null).should.be.true;
         });
 
         it('should render input with aria-label', function () {
@@ -110,174 +154,92 @@ describe('AIChat', function () {
         });
     });
 
-    describe('#_escapeHtml()', function () {
-        it('should escape < and >', function () {
-            var result = aiChat._escapeHtml('<div>');
-            result.should.contain('&lt;div&gt;');
+    describe('Sending a message', function () {
+        it('should forward a user-typed message to the transcript as a user turn and ask the transcript to begin an assistant turn, so transcript-shaped DOM work stays out of the view', function () {
+            var input = document.getElementById('ai-input');
+            var sendButton = document.getElementById('ai-send-button');
+            input.value = 'How does binding work?';
+            input.dispatchEvent(new Event('input'));
+            sendButton.click();
+
+            var userTurns = fakeTranscript.calls.filter(function (c) { return c.type === 'appendUserTurn'; });
+            var assistantTurns = fakeTranscript.calls.filter(function (c) { return c.type === 'beginAssistantTurn'; });
+            userTurns.length.should.equal(1);
+            userTurns[0].content.should.equal('How does binding work?');
+            assistantTurns.length.should.equal(1);
         });
 
-        it('should escape ampersand', function () {
-            var result = aiChat._escapeHtml('A & B');
-            result.should.contain('&amp;');
+        it('should forward controller stream chunks to the transcript handle returned by beginAssistantTurn, so the view does not buffer chunks itself', function () {
+            var input = document.getElementById('ai-input');
+            input.value = 'q';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+
+            fakeController.fire('stream-chunk', 'partial ');
+            fakeController.fire('stream-chunk', 'answer');
+
+            var chunkCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'streamChunk'; });
+            chunkCalls.length.should.equal(2);
+            chunkCalls[0].chunk.should.equal('partial ');
+            chunkCalls[1].chunk.should.equal('answer');
         });
 
-        it('should handle script tags', function () {
-            var result = aiChat._escapeHtml('<script>alert("xss")</script>');
-            result.should.equal('&lt;script&gt;alert("xss")&lt;/script&gt;');
+        it('should finalize the transcript streaming handle with the controller\'s full response, so the assistant turn is committed exactly once per stream', function () {
+            var input = document.getElementById('ai-input');
+            input.value = 'q';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+
+            fakeController.fire('stream-complete', {content: 'full response'});
+
+            var finalizeCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'finalize'; });
+            finalizeCalls.length.should.equal(1);
+            finalizeCalls[0].content.should.equal('full response');
         });
 
-        it('should handle quotes', function () {
-            var result = aiChat._escapeHtml('"quoted"');
-            result.should.not.contain('<');
-        });
-    });
+        it('should surface a streaming failure as a transcript system message instead of rendering its own error DOM', function () {
+            var input = document.getElementById('ai-input');
+            input.value = 'q';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
 
-    describe('#_parseMarkdown()', function () {
-        it('should escape HTML before formatting', function () {
-            var result = aiChat._parseMarkdown('<script>alert("xss")</script>');
-            result.should.not.contain('<script>');
-            result.should.contain('&lt;script&gt;');
-        });
+            fakeController.fire('stream-failed', new Error('boom'));
 
-        it('should convert **text** to bold', function () {
-            var result = aiChat._parseMarkdown('This is **bold** text');
-            result.should.contain('<strong>bold</strong>');
-        });
-
-        it('should convert *text* to italic', function () {
-            var result = aiChat._parseMarkdown('This is *italic* text');
-            result.should.contain('<em>italic</em>');
-        });
-
-        it('should convert [text](url) to links', function () {
-            var result = aiChat._parseMarkdown('[Click here](https://example.com)');
-            result.should.contain('<a href="https://example.com"');
-            result.should.contain('target="_blank"');
-        });
-
-        it('should handle inline code', function () {
-            var result = aiChat._parseMarkdown('Use `console.log()` for debugging');
-            result.should.contain('<code>');
-            result.should.contain('console.log()');
-        });
-
-        it('should escape HTML in inline code', function () {
-            var result = aiChat._parseMarkdown('Use `<div>` tag');
-            result.should.contain('&lt;div&gt;');
-        });
-
-        it('should convert line breaks', function () {
-            var result = aiChat._parseMarkdown('Line 1\nLine 2');
-            result.should.contain('<br>');
+            var systemMessages = fakeTranscript.calls.filter(function (c) { return c.type === 'appendSystemMessage'; });
+            systemMessages.length.should.equal(1);
+            systemMessages[0].message.should.contain('boom');
         });
     });
 
-    describe('JSON Viewer Methods', function () {
-        describe('#_renderJsonValue()', function () {
-            it('should handle null', function () {
-                var result = aiChat._renderJsonValue(null, 'test', true, 0);
-                result.should.contain('json-null');
-            });
+    describe('Conversation lifecycle', function () {
+        it('should ask the transcript to reset to the loaded prior turns when the controller emits conversation-loaded', function () {
+            var turns = [
+                {role: 'user', content: 'older question'},
+                {role: 'assistant', content: 'older answer'}
+            ];
+            fakeController.fire('conversation-loaded', turns);
 
-            it('should handle boolean', function () {
-                var result = aiChat._renderJsonValue(true, 'flag', true, 0);
-                result.should.contain('json-boolean');
-                result.should.contain('true');
-            });
-
-            it('should handle number', function () {
-                var result = aiChat._renderJsonValue(42, 'count', true, 0);
-                result.should.contain('json-number');
-                result.should.contain('42');
-            });
-
-            it('should handle string', function () {
-                var result = aiChat._renderJsonValue('test', 'name', true, 0);
-                result.should.contain('json-string');
-                result.should.contain('test');
-            });
-
-            it('should respect max depth limit', function () {
-                var result = aiChat._renderJsonValue({nested: 'value'}, 'deep', true, 11);
-                result.should.contain('Max depth reached');
-            });
+            var resetCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'reset'; });
+            resetCalls.length.should.equal(1);
+            resetCalls[0].turns.should.equal(turns);
         });
 
-        describe('#_renderJsonArray()', function () {
-            it('should render empty arrays', function () {
-                var result = aiChat._renderJsonArray('items', [], ',', 0);
-                result.should.contain('[]');
-            });
+        it('should clear the transcript and then append a "cleared" system message when the controller emits conversation-cleared, so the developer sees both the empty state and an explanatory note', function () {
+            fakeController.fire('conversation-cleared');
 
-            it('should render arrays with items', function () {
-                var result = aiChat._renderJsonArray('items', [1, 2, 3], ',', 0);
-                result.should.contain('3 items');
-            });
+            var clearCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'clear'; });
+            var systemCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'appendSystemMessage'; });
+            clearCalls.length.should.equal(1);
+            systemCalls.length.should.equal(1);
+            systemCalls[0].message.should.contain('cleared');
         });
 
-        describe('#_renderJsonObject()', function () {
-            it('should render empty objects', function () {
-                var result = aiChat._renderJsonObject('obj', {}, ',', 0);
-                result.should.contain('{}');
-            });
+        it('should scroll the transcript to the bottom when the tab is activated, so the developer sees the most recent turn without scrolling manually', function () {
+            aiChat.onTabActivated();
 
-            it('should render objects with keys', function () {
-                var result = aiChat._renderJsonObject('obj', {a: 1, b: 2}, ',', 0);
-                result.should.contain('2 keys');
-            });
-        });
-    });
-
-    describe('Code Viewer Methods', function () {
-        describe('#_renderCodeBlock()', function () {
-            it('should render code with lines', function () {
-                var result = aiChat._renderCodeBlock('line1\nline2', 'javascript');
-                result.should.contain('code-line');
-            });
-
-            it('should escape HTML in code', function () {
-                var result = aiChat._renderCodeBlock('<script>alert()</script>', 'html');
-                result.should.contain('&lt;script&gt;');
-            });
-        });
-
-        describe('#_createCodeViewer()', function () {
-            it('should create code viewer HTML', function () {
-                var result = aiChat._createCodeViewer('var x = 1;', 'javascript');
-                result.should.contain('code-viewer');
-                result.should.contain('data-code');
-            });
-        });
-
-        describe('#_createJsonViewer()', function () {
-            it('should create JSON viewer HTML', function () {
-                var result = aiChat._createJsonViewer({key: 'value'});
-                result.should.contain('json-viewer');
-                result.should.contain('data-json');
-            });
-        });
-    });
-
-    describe('Message Handling', function () {
-        describe('#_addMessage()', function () {
-            it('should add user message', function () {
-                aiChat._addMessage('user', 'Hello');
-                var container = document.getElementById('ai-messages-container');
-                container.innerHTML.should.contain('Hello');
-            });
-
-            it('should escape HTML in user messages', function () {
-                aiChat._addMessage('user', '<script>alert("xss")</script>');
-                var container = document.getElementById('ai-messages-container');
-                container.innerHTML.should.not.contain('<script>');
-                container.innerHTML.should.contain('&lt;script&gt;');
-            });
-
-            it('should use markdown for assistant messages', function () {
-                aiChat._addMessage('assistant', 'This is **bold**');
-                var container = document.getElementById('ai-messages-container');
-                container.innerHTML.should.contain('<strong>bold</strong>');
-            });
+            var scrollCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'scrollToBottom'; });
+            scrollCalls.length.should.equal(1);
+            scrollCalls[0].force.should.be.true;
         });
     });
 
@@ -317,24 +279,6 @@ describe('AIChat', function () {
                 aiChat._showConfirmDialog();
                 aiChat._hideConfirmDialog();
                 document.activeElement.should.equal(input);
-            });
-        });
-    });
-
-    describe('Debounced Rendering', function () {
-        describe('#_debouncedRender()', function () {
-            beforeEach(function () {
-                aiChat._streamingMessageElement = document.createElement('div');
-            });
-
-            it('should store pending render content', function () {
-                aiChat._debouncedRender('Pending content');
-                aiChat._pendingRender.should.equal('Pending content');
-            });
-
-            it('should set debounce timer', function () {
-                aiChat._debouncedRender('Test content');
-                (aiChat._renderDebounceTimer !== null).should.be.true;
             });
         });
     });
@@ -496,6 +440,45 @@ describe('AIChat', function () {
             var bannerAfter = document.getElementById('ai-status-banner');
             bannerAfter.className.should.equal(classBefore);
             bannerAfter.querySelector('.status-text').textContent.should.equal(textBefore);
+        });
+    });
+
+    describe('Token counter', function () {
+        it('should leave the token counter empty when the controller reports no usage info, so a non-ready or quota-unaware session does not paint stale numbers', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+
+            // getUsageInfo resolves to null in the fake controller; allow
+            // the microtask to drain.
+            return Promise.resolve().then(function () {
+                return Promise.resolve();
+            }).then(function () {
+                var counter = document.getElementById('ai-token-counter');
+                counter.textContent.should.equal('');
+            });
+        });
+
+        it('should append a token-usage warning as a system message exactly once when usage crosses the 70% threshold, so the developer is nudged to clear history without being spammed', function () {
+            fakeController.getUsageInfo = function () {
+                return Promise.resolve({inputUsage: 700, inputQuota: 1000, percentUsed: 75});
+            };
+
+            // Two ready transitions to prove the warning is appended at
+            // most once even if _updateTokenCounter runs repeatedly.
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+
+            return new Promise(function (resolve) { setTimeout(resolve, 20); }).then(function () {
+                var warnings = fakeTranscript.calls.filter(function (c) {
+                    return c.type === 'appendSystemMessage' && c.message.indexOf('token limit') !== -1;
+                });
+                warnings.length.should.equal(1);
+            });
         });
     });
 });

@@ -1,0 +1,264 @@
+'use strict';
+
+var AssistantTranscript = require('../../../app/scripts/modules/ai/AssistantTranscript.js');
+
+describe('AssistantTranscript', function () {
+    var fixtures = document.getElementById('fixtures');
+    var container;
+    var transcript;
+
+    beforeEach(function () {
+        fixtures.innerHTML = '<div id="transcript-host"></div>';
+        container = document.getElementById('transcript-host');
+        transcript = new AssistantTranscript(container);
+    });
+
+    afterEach(function () {
+        if (transcript && typeof transcript.destroy === 'function') {
+            transcript.destroy();
+        }
+        transcript = null;
+        container = null;
+        fixtures.innerHTML = '';
+    });
+
+    describe('Constructor', function () {
+        it('should accept a container element and render an empty welcome state inside it', function () {
+            container.querySelector('.ai-welcome-message').should.exist;
+        });
+
+        it('should throw if no container element is supplied, since the transcript cannot render itself without a host node', function () {
+            (function () {
+                /* eslint-disable no-new */
+                new AssistantTranscript(null);
+                /* eslint-enable no-new */
+            }).should.throw();
+        });
+    });
+
+    describe('#appendUserTurn()', function () {
+        it('should append a user turn to the transcript so the developer sees their own message echoed back', function () {
+            transcript.appendUserTurn('Hello');
+
+            container.innerHTML.should.contain('Hello');
+            container.querySelectorAll('.message-user').length.should.equal(1);
+        });
+
+        it('should escape HTML in user content so an inspected page that put markup into a control id cannot inject script tags through the transcript', function () {
+            transcript.appendUserTurn('<script>alert("xss")</script>');
+
+            container.innerHTML.should.not.contain('<script>');
+            container.innerHTML.should.contain('&lt;script&gt;');
+        });
+
+        it('should remove the welcome message once the first turn is appended, so the empty-state copy does not bleed into a live conversation', function () {
+            transcript.appendUserTurn('hi');
+
+            (container.querySelector('.ai-welcome-message') === null).should.be.true;
+        });
+    });
+
+    describe('#appendSystemMessage()', function () {
+        it('should append a system message that the developer can read inline with the conversation', function () {
+            transcript.appendSystemMessage('Chat history cleared');
+
+            container.innerHTML.should.contain('Chat history cleared');
+            container.querySelectorAll('.message-system').length.should.equal(1);
+        });
+
+        it('should escape HTML in system messages so an error string echoing a raw response cannot inject markup', function () {
+            transcript.appendSystemMessage('Error: <img src=x onerror=alert(1)>');
+
+            container.innerHTML.should.not.contain('<img');
+            container.innerHTML.should.contain('&lt;img');
+        });
+    });
+
+    describe('#beginAssistantTurn()', function () {
+        it('should return a handle so the view can drive a streamed assistant turn without owning the streaming DOM', function () {
+            var handle = transcript.beginAssistantTurn();
+
+            handle.should.exist;
+            (typeof handle.streamChunk).should.equal('function');
+            (typeof handle.finalize).should.equal('function');
+        });
+
+        it('should append an assistant message element with a loading indicator so the developer sees that something is being computed before the first chunk arrives', function () {
+            transcript.beginAssistantTurn();
+
+            container.querySelectorAll('.message-assistant').length.should.equal(1);
+            container.querySelector('.loading-indicator').should.exist;
+        });
+
+        it('should render markdown formatting once finalize() is called, so a final assistant turn shows bold/italic/links rendered, not as raw markdown', function () {
+            var handle = transcript.beginAssistantTurn();
+
+            handle.finalize('This is **bold** text');
+
+            container.innerHTML.should.contain('<strong>bold</strong>');
+        });
+
+        it('should render a JSON viewer for a fenced ```json block in the final assistant content, so the developer gets the expand/collapse tree, not a raw blob', function () {
+            var handle = transcript.beginAssistantTurn();
+
+            handle.finalize('Here is data:\n```json\n{"a":1}\n```');
+
+            container.querySelector('.json-viewer').should.exist;
+            container.querySelector('.json-toggle').should.exist;
+        });
+
+        it('should render a code viewer for a fenced ```js block in the final assistant content, with a copy button so the developer can grab the snippet', function () {
+            var handle = transcript.beginAssistantTurn();
+
+            handle.finalize('Try:\n```js\nvar x = 1;\n```');
+
+            container.querySelector('.code-wrapper').should.exist;
+            container.querySelector('.copy-code-button').should.exist;
+        });
+
+        it('should remove the loading indicator once finalize() runs, since the assistant is no longer thinking', function () {
+            var handle = transcript.beginAssistantTurn();
+            container.querySelector('.loading-indicator').should.exist;
+
+            handle.finalize('Done');
+
+            (container.querySelector('.loading-indicator') === null).should.be.true;
+        });
+
+        it('should add a copy-response button to the finalized assistant turn so the developer can copy the answer in one click', function () {
+            var handle = transcript.beginAssistantTurn();
+
+            handle.finalize('answer');
+
+            container.querySelector('.copy-response-button').should.exist;
+        });
+
+        it('should buffer streaming chunks behind a debounce timer so a noisy stream does not thrash markdown rendering on every token', function (done) {
+            var handle = transcript.beginAssistantTurn();
+
+            handle.streamChunk('Hello ');
+            handle.streamChunk('**world**');
+
+            // Wait past the internal debounce window.
+            setTimeout(function () {
+                container.querySelector('.message-assistant .message-content').innerHTML.should.contain('<strong>world</strong>');
+                done();
+            }, 100);
+        });
+    });
+
+    describe('#clear()', function () {
+        it('should drop all rendered turns and show a "cleared" welcome message so the developer knows the transcript is empty by design, not by accident', function () {
+            transcript.appendUserTurn('first message');
+            transcript.appendUserTurn('second message');
+
+            transcript.clear();
+
+            container.querySelectorAll('.ai-message').length.should.equal(0);
+            container.querySelector('.ai-welcome-message').should.exist;
+            container.innerHTML.should.contain('cleared');
+        });
+    });
+
+    describe('#reset()', function () {
+        it('should replace the transcript with the supplied list of prior turns, so loading Conversation Memory for a new url renders that conversation verbatim', function () {
+            transcript.appendUserTurn('stale');
+
+            transcript.reset([
+                { role: 'user', content: 'previous question' },
+                { role: 'assistant', content: 'previous **answer**' }
+            ]);
+
+            container.querySelectorAll('.ai-message').length.should.equal(2);
+            container.innerHTML.should.contain('previous question');
+            container.innerHTML.should.contain('<strong>answer</strong>');
+        });
+
+        it('should render an empty transcript when passed an empty turn list, so a freshly cleared conversation does not keep stale content from a previous url', function () {
+            transcript.appendUserTurn('stale');
+
+            transcript.reset([]);
+
+            container.querySelectorAll('.ai-message').length.should.equal(0);
+        });
+    });
+
+    describe('#scrollToBottom()', function () {
+        it('should expose a scroll-to-bottom hook so the view can keep the latest turn visible when the tab becomes active', function () {
+            (typeof transcript.scrollToBottom).should.equal('function');
+            // Calling it on a container without overflow must not throw.
+            (function () { transcript.scrollToBottom(true); }).should.not.throw();
+        });
+    });
+
+    describe('JSON viewer expand/collapse', function () {
+        it('should toggle a JSON content section when the toggle indicator is clicked, so the developer can fold and unfold nested structures', function () {
+            var handle = transcript.beginAssistantTurn();
+            handle.finalize('```json\n{"a":{"b":1}}\n```');
+
+            var toggle = container.querySelector('.json-toggle');
+            var targetId = toggle.getAttribute('data-target');
+            var content = document.getElementById(targetId);
+
+            // First click collapses.
+            toggle.click();
+            content.style.display.should.equal('none');
+            toggle.textContent.should.equal('\u25B6');
+
+            // Second click re-expands.
+            toggle.click();
+            content.style.display.should.equal('block');
+            toggle.textContent.should.equal('\u25BC');
+        });
+    });
+
+    describe('Copy-button failure handling', function () {
+        it('should append a "Failed to copy to clipboard" system message when the underlying copy command reports failure, so a denied or unsupported clipboard environment is not silently swallowed', function () {
+            // Force execCommand to return false (simulating browser
+            // policy denying the copy). The transcript must surface
+            // the failure as an inline system message — that was the
+            // pre-extraction behavior in AIChat._copyToClipboard.
+            var originalExecCommand = document.execCommand;
+            document.execCommand = function () { return false; };
+
+            try {
+                var handle = transcript.beginAssistantTurn();
+                handle.finalize('an answer');
+
+                var copyButton = container.querySelector('.copy-response-button');
+                copyButton.should.exist;
+                copyButton.click();
+
+                container.querySelector('.message-system').should.exist;
+                container.innerHTML.should.contain('Failed to copy to clipboard');
+            } finally {
+                document.execCommand = originalExecCommand;
+            }
+        });
+    });
+
+    describe('Scroll behavior on finalize', function () {
+        it('should not force-scroll the host container when the stream is finalized, so a developer who scrolled up to read an earlier turn is not yanked to the bottom on completion', function () {
+            // Give the container a real overflow so scrollTop can be set.
+            container.style.height = '50px';
+            container.style.overflow = 'auto';
+
+            // Seed enough content that there is room to scroll up.
+            transcript.appendUserTurn('first user message');
+            transcript.appendUserTurn('second user message');
+            transcript.appendUserTurn('third user message');
+
+            var handle = transcript.beginAssistantTurn();
+
+            // Developer scrolls up after the assistant placeholder
+            // appears, to re-read an earlier turn while the model
+            // streams. Finalize must not yank the scroll position
+            // back to the bottom.
+            container.scrollTop = 0;
+
+            handle.finalize('the assistant answer');
+
+            container.scrollTop.should.equal(0);
+        });
+    });
+});

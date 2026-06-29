@@ -1,16 +1,23 @@
 'use strict';
 
 var AssistantController = require('../ai/AssistantController.js');
+var AssistantTranscript = require('../ai/AssistantTranscript.js');
 
 /**
  * AIChat - thin view over the Inspector AI Assistant.
  *
- * After Assistant Architecture V1, AIChat owns rendering, markdown,
- * JSON/code viewers, dialogs, scroll behavior, and clipboard helpers. It
- * does not own session lifecycle, streaming orchestration, history
- * persistence, or Inspection Context injection — those are delegated to
- * the {@link AssistantController}, which is the single integration point
- * for Inspector AI Assistant behavior.
+ * After Assistant Architecture V2, AIChat owns the banner, the input
+ * area, the confirm dialog, the token counter, and the subscription to
+ * the {@link AssistantController}. It does *not* own how an assistant
+ * turn is rendered — markdown parsing, JSON / code viewers, scroll
+ * bookkeeping, the streaming render debounce, and clipboard helpers for
+ * transcript content all live behind the named {@link AssistantTranscript}
+ * collaborator.
+ *
+ * The Assistant Controller is unaware that the transcript exists — the
+ * view is still its only collaborator. AIChat forwards transcript-shaped
+ * controller events to the transcript and consumes the controller's
+ * capability and usage surfaces for its own non-transcript widgets.
  *
  * @param {string} containerId - ID of container element.
  * @param {Object} [options]
@@ -19,6 +26,10 @@ var AssistantController = require('../ai/AssistantController.js');
  * @param {AssistantController} [options.controller] - Pre-built controller
  *     for tests; defaults to a fresh AssistantController wired to the real
  *     PromptBuilder, PromptClient, and ConversationStore.
+ * @param {Function} [options.transcriptFactory] - Test seam: a factory
+ *     `(container) => AssistantTranscript` that returns a transcript
+ *     bound to the messages container. Defaults to a real
+ *     AssistantTranscript.
  * @constructor
  */
 function AIChat(containerId, options) {
@@ -29,15 +40,13 @@ function AIChat(containerId, options) {
     this._controller = this._options.controller || new AssistantController({
         getAppInfo: this._getAppInfo || function () { return null; }
     });
+    this._transcriptFactory = this._options.transcriptFactory || function (host) {
+        return new AssistantTranscript(host);
+    };
 
     this._isStreaming = false;
-    this._streamingMessageElement = null;
-    this._streamingMessageHeader = null;
-    this._streamingFullText = '';
+    this._streamingHandle = null;
     this._hasShownUsageWarning = false;
-    this._maxJsonDepth = 10;
-    this._renderDebounceTimer = null;
-    this._pendingRender = null;
 
     this.init();
 }
@@ -47,6 +56,7 @@ function AIChat(containerId, options) {
  */
 AIChat.prototype.init = function () {
     this._render();
+    this._transcript = this._transcriptFactory(document.getElementById('ai-messages-container'));
     this._attachEventListeners();
     this._attachControllerListeners();
     this._checkModelAvailability();
@@ -54,6 +64,10 @@ AIChat.prototype.init = function () {
 
 /**
  * Render the chat UI.
+ *
+ * The messages container element is created here but its contents are
+ * owned by {@link AssistantTranscript}, which is constructed in
+ * {@link AIChat#init} and writes directly into the container.
  * @private
  */
 AIChat.prototype._render = function () {
@@ -73,14 +87,7 @@ AIChat.prototype._render = function () {
             </div>
 
             <div class="ai-messages-wrapper">
-                <div class="ai-messages-container" id="ai-messages-container" role="log" aria-live="polite" aria-label="Chat messages">
-                    <div class="ai-welcome-message">
-                        <h3>UI5 AI Assistant</h3>
-                        <span class="experimental-tag">Experimental</span>
-                        <p>Ask questions about UI5 controls, debugging, or general development topics.</p>
-                        <p>Select a control in the Control Inspector to automatically include context in your questions.</p>
-                    </div>
-                </div>
+                <div class="ai-messages-container" id="ai-messages-container" role="log" aria-live="polite" aria-label="Chat messages"></div>
                 <div class="ai-disclaimer">AI-generated content may be incorrect</div>
             </div>
 
@@ -190,9 +197,9 @@ AIChat.prototype._attachEventListeners = function () {
 };
 
 /**
- * Subscribe to {@link AssistantController} events and translate them into
- * DOM updates. The controller owns capability resolution, streaming, and
- * history; the view only reacts.
+ * Subscribe to {@link AssistantController} events and translate them
+ * into transcript updates (via {@link AssistantTranscript}) and banner /
+ * input state updates (handled directly).
  * @private
  */
 AIChat.prototype._attachControllerListeners = function () {
@@ -201,61 +208,41 @@ AIChat.prototype._attachControllerListeners = function () {
     });
 
     this._controller.on('conversation-loaded', (turns) => {
-        this._renderConversationMemory(turns);
+        this._transcript.reset(turns || []);
+        if (turns && turns.length > 0) {
+            const clearButton = document.getElementById('ai-clear-history-button');
+            if (clearButton) {
+                clearButton.style.display = 'inline-block';
+            }
+        }
     });
 
     this._controller.on('stream-chunk', (chunk) => {
-        this._streamingFullText += chunk;
-        this._debouncedRender(this._streamingFullText);
+        if (this._streamingHandle) {
+            this._streamingHandle.streamChunk(chunk);
+        }
     });
 
     this._controller.on('stream-complete', (payload) => {
-        this._finalizeStreamingMessage(payload.content);
+        if (this._streamingHandle) {
+            this._streamingHandle.finalize(payload.content);
+            this._streamingHandle = null;
+        }
+        this._isStreaming = false;
+        this._updateTokenCounter();
     });
 
     this._controller.on('stream-failed', (err) => {
         this._isStreaming = false;
-        this._streamingMessageElement = null;
-        this._streamingMessageHeader = null;
-        this._streamingFullText = '';
-        this._addSystemMessage('Error: ' + (err && err.message ? err.message : 'streaming failed'));
+        this._streamingHandle = null;
+        this._transcript.appendSystemMessage('Error: ' + (err && err.message ? err.message : 'streaming failed'));
     });
 
     this._controller.on('conversation-cleared', () => {
-        const messagesContainer = document.getElementById('ai-messages-container');
-        // Safe to use innerHTML with this literal: no user-controlled or
-        // model-controlled content is interpolated. Any user message goes
-        // through _addMessage, which routes user/system text through
-        // _escapeHtml and assistant text through _parseMarkdown.
-        messagesContainer.innerHTML = `
-            <div class="ai-welcome-message">
-                <h3>UI5 AI Assistant</h3>
-                <p>Chat history cleared. Ask me anything!</p>
-            </div>
-        `;
+        this._transcript.clear();
         this._hasShownUsageWarning = false;
-        this._addSystemMessage('Chat history cleared');
+        this._transcript.appendSystemMessage('Chat history cleared');
     });
-};
-
-/**
- * Render any Conversation Memory loaded by the controller into the DOM.
- * @private
- * @param {Array<{role: string, content: string}>} turns
- */
-AIChat.prototype._renderConversationMemory = function (turns) {
-    const messagesContainer = document.getElementById('ai-messages-container');
-    messagesContainer.innerHTML = '';
-    if (turns && turns.length > 0) {
-        turns.forEach((msg) => {
-            this._addMessage(msg.role, msg.content);
-        });
-        const clearButton = document.getElementById('ai-clear-history-button');
-        if (clearButton) {
-            clearButton.style.display = 'inline-block';
-        }
-        this._scrollToBottom(true);
-    }
 };
 
 /**
@@ -387,64 +374,16 @@ AIChat.prototype._handleSendMessage = function () {
     input.value = '';
     document.getElementById('ai-send-button').disabled = true;
 
-    this._addMessage('user', userMessage);
+    this._transcript.appendUserTurn(userMessage);
 
     this._isStreaming = true;
-    this._streamingFullText = '';
-    const messageElement = this._addMessage('assistant', '', false);
-    this._streamingMessageElement = messageElement.querySelector('.message-content');
-    this._streamingMessageHeader = messageElement.querySelector('.message-header');
-
-    const loadingIndicator = document.createElement('span');
-    loadingIndicator.className = 'loading-indicator';
-    loadingIndicator.textContent = 'Thinking';
-    const loadingDots = document.createElement('span');
-    loadingDots.className = 'loading-dots';
-    loadingIndicator.appendChild(loadingDots);
-    this._streamingMessageElement.appendChild(loadingIndicator);
+    this._streamingHandle = this._transcript.beginAssistantTurn();
 
     // The controller already owns Inspection Context. The view notifies the
     // controller via updateContext()/_clearContext.
     this._controller.sendUserMessage(userMessage).catch(() => {
         // stream-failed event handler already surfaces the error.
     });
-};
-
-/**
- * Finalize a streaming assistant message once the controller reports
- * stream completion.
- * @private
- * @param {string} fullResponse
- */
-AIChat.prototype._finalizeStreamingMessage = function (fullResponse) {
-    if (!this._streamingMessageElement) {
-        // Nothing in the DOM to finalize; controller-driven update without view.
-        this._isStreaming = false;
-        return;
-    }
-    if (this._renderDebounceTimer) {
-        clearTimeout(this._renderDebounceTimer);
-        this._renderDebounceTimer = null;
-    }
-    this._streamingMessageElement.innerHTML = this._parseMarkdown(fullResponse);
-    this._initializeJsonViewers(this._streamingMessageElement);
-
-    const copyButton = document.createElement('button');
-    copyButton.className = 'copy-response-button';
-    copyButton.title = 'Copy response';
-    copyButton.setAttribute('aria-label', 'Copy response');
-    copyButton.textContent = 'Copy';
-    copyButton.addEventListener('click', (e) => {
-        this._copyToClipboard(fullResponse, e.currentTarget);
-    });
-    this._streamingMessageHeader.appendChild(copyButton);
-
-    this._isStreaming = false;
-    this._streamingMessageElement = null;
-    this._streamingMessageHeader = null;
-    this._streamingFullText = '';
-
-    this._updateTokenCounter();
 };
 
 /**
@@ -490,7 +429,7 @@ AIChat.prototype._hideConfirmDialog = function () {
  */
 AIChat.prototype._performClearHistory = function () {
     this._controller.clearConversation().catch((error) => {
-        this._addSystemMessage('Error clearing history: ' + (error && error.message ? error.message : error));
+        this._transcript.appendSystemMessage('Error clearing history: ' + (error && error.message ? error.message : error));
     });
 };
 
@@ -534,431 +473,6 @@ AIChat.prototype._renderCapabilityBanner = function (status, state) {
     } else {
         downloadButton.style.display = 'none';
     }
-};
-
-/**
- * Add a message to the chat UI.
- * @param {string} role - 'user', 'assistant', or 'system'
- * @param {string} content - Message content
- * @param {boolean} showCopyButton - Whether to show copy button for assistant messages (default: true)
- * @returns {HTMLElement} - The message element
- */
-AIChat.prototype._addMessage = function (role, content, showCopyButton) {
-    const messagesContainer = document.getElementById('ai-messages-container');
-
-    const welcomeMessage = messagesContainer.querySelector('.ai-welcome-message');
-    if (welcomeMessage) {
-        welcomeMessage.remove();
-    }
-
-    const messageElement = document.createElement('div');
-    messageElement.className = 'ai-message message-' + role;
-
-    const formattedContent = role === 'assistant' ? this._parseMarkdown(content) : this._escapeHtml(content);
-
-    const shouldShowCopyButton = role === 'assistant' && (showCopyButton === undefined || showCopyButton === true);
-
-    messageElement.innerHTML = `
-        <div class="message-header">
-            <span class="message-role">${role === 'user' ? 'You' : role === 'assistant' ? 'AI' : 'System'}</span>
-            ${shouldShowCopyButton ? '<button class="copy-response-button" title="Copy response" aria-label="Copy response">Copy</button>' : ''}
-        </div>
-        <div class="message-content">${formattedContent}</div>
-    `;
-
-    messagesContainer.appendChild(messageElement);
-
-    if (role === 'assistant') {
-        const contentElement = messageElement.querySelector('.message-content');
-        this._initializeJsonViewers(contentElement);
-
-        const copyButton = messageElement.querySelector('.copy-response-button');
-        if (copyButton) {
-            copyButton.addEventListener('click', (e) => {
-                this._copyToClipboard(content, e.currentTarget);
-            });
-        }
-    }
-
-    this._scrollToBottom(true);
-
-    return messageElement;
-};
-
-/**
- * Add a system message.
- * @param {string} message
- */
-AIChat.prototype._addSystemMessage = function (message) {
-    this._addMessage('system', message);
-};
-
-/**
- * Escape HTML to prevent XSS.
- * @private
- * @param {string} text
- * @returns {string}
- */
-AIChat.prototype._escapeHtml = function (text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-};
-
-/**
- * Parse markdown to HTML for AI responses.
- * @private
- * @param {string} text - Markdown text
- * @returns {string} - HTML string
- */
-AIChat.prototype._parseMarkdown = function (text) {
-    const placeholders = { codeBlocks: [], inlineCode: [] };
-
-    let html = this._extractCodeBlocks(text, placeholders);
-    html = this._extractInlineCode(html, placeholders);
-
-    html = this._escapeHtml(html);
-
-    html = this._applyMarkdownFormatting(html);
-
-    html = html.trimEnd();
-
-    html = html.replace(/\n/g, '<br>');
-
-    html = this._restoreInlineCode(html, placeholders.inlineCode);
-    html = this._restoreCodeBlocks(html, placeholders.codeBlocks);
-
-    return html;
-};
-
-/**
- * Extract code blocks from text.
- * @private
- */
-AIChat.prototype._extractCodeBlocks = function (text, placeholders) {
-    return text.replace(/```([\w]*)?\n([\s\S]*?)```/g, (match, lang, code) => {
-        const index = placeholders.codeBlocks.length;
-        const trimmedCode = code.trim();
-        const isJson = lang === 'json' || (!lang && /^[\[\{]/.test(trimmedCode));
-
-        if (isJson) {
-            try {
-                placeholders.codeBlocks.push({ type: 'json', data: JSON.parse(trimmedCode) });
-            } catch (e) {
-                placeholders.codeBlocks.push({ type: 'code', lang: 'plaintext', code: trimmedCode });
-            }
-        } else {
-            placeholders.codeBlocks.push({ type: 'code', lang: lang || 'plaintext', code: trimmedCode });
-        }
-
-        return `___CODEBLOCK_${index}___`;
-    });
-};
-
-/**
- * Extract inline code from text.
- * @private
- */
-AIChat.prototype._extractInlineCode = function (text, placeholders) {
-    return text.replace(/`([^`]+)`/g, (match, code) => {
-        const index = placeholders.inlineCode.length;
-        placeholders.inlineCode.push(code);
-        return `___INLINECODE_${index}___`;
-    });
-};
-
-/**
- * Apply markdown formatting (bold, italic, links).
- * @private
- */
-AIChat.prototype._applyMarkdownFormatting = function (text) {
-    return text
-        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-        .replace(/\b__([^_]+)__\b/g, '<strong>$1</strong>')
-        .replace(/(?<!\*)\*(?!\*)([^*<>]+)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
-        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-};
-
-/**
- * Restore inline code.
- * @private
- */
-AIChat.prototype._restoreInlineCode = function (text, inlineCode) {
-    inlineCode.forEach((code, index) => {
-        text = text.replace(`___INLINECODE_${index}___`, `<code>${this._escapeHtml(code)}</code>`);
-    });
-    return text;
-};
-
-/**
- * Restore code blocks.
- * @private
- */
-AIChat.prototype._restoreCodeBlocks = function (text, codeBlocks) {
-    codeBlocks.forEach((block, index) => {
-        let replacement;
-        if (block.type === 'json') {
-            replacement = this._createJsonViewer(block.data);
-        } else {
-            replacement = this._createCodeViewer(block.code, block.lang);
-        }
-        text = text.replace(`___CODEBLOCK_${index}___`, replacement);
-    });
-    return text;
-};
-
-/**
- * Create JSON viewer HTML.
- * @private
- */
-AIChat.prototype._createJsonViewer = function (data) {
-    const jsonString = JSON.stringify(data).replace(/'/g, '&#39;');
-    return `<div class="json-viewer" data-json='${jsonString}'></div>`;
-};
-
-/**
- * Create code viewer HTML.
- * @private
- */
-AIChat.prototype._createCodeViewer = function (code, lang) {
-    const escapedCode = code.replace(/'/g, '&#39;').replace(/"/g, '&quot;');
-    return `<div class="code-viewer" data-code='${escapedCode}' data-lang='${lang}'></div>`;
-};
-
-/**
- * Render interactive JSON viewer with expand/collapse.
- * @private
- */
-AIChat.prototype._renderJsonValue = function (value, key, isLast, depth) {
-    depth = depth || 0;
-
-    if (depth > this._maxJsonDepth) {
-        const comma = isLast ? '' : ',';
-        return this._renderJsonLine(key, `<span class="json-truncated">[Max depth reached]</span>${comma}`);
-    }
-
-    const comma = isLast ? '' : ',';
-    const handlers = {
-        null: () => this._renderJsonLine(key, `<span class="json-null">null</span>${comma}`),
-        boolean: () => this._renderJsonLine(key, `<span class="json-boolean">${value}</span>${comma}`),
-        number: () => this._renderJsonLine(key, `<span class="json-number">${value}</span>${comma}`),
-        string: () => this._renderJsonString(key, value, comma),
-        array: () => this._renderJsonArray(key, value, comma, depth),
-        object: () => this._renderJsonObject(key, value, comma, depth)
-    };
-
-    const type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
-    return handlers[type] ? handlers[type]() : this._renderJsonLine(key, `${this._escapeHtml(String(value))}${comma}`);
-};
-
-/**
- * Render JSON string value.
- * @private
- */
-AIChat.prototype._renderJsonString = function (key, value, comma) {
-    const escaped = this._escapeHtml(value);
-    return this._renderJsonLine(key, `<span class="json-string">"${escaped}"</span>${comma}`);
-};
-
-/**
- * Render JSON array.
- * @private
- */
-AIChat.prototype._renderJsonArray = function (key, value, comma, depth) {
-    if (value.length === 0) {
-        return this._renderJsonLine(key, `<span class="json-bracket">[]</span>${comma}`);
-    }
-
-    const id = 'json-' + Math.random().toString(36).substr(2, 9);
-    const keyHtml = key ? `<span class="json-key">"${this._escapeHtml(key)}"</span>: ` : '';
-    const items = value.map((item, i) => this._renderJsonValue(item, null, i === value.length - 1, depth + 1)).join('');
-
-    return `<div class="json-line">${keyHtml}<span class="json-toggle" data-target="${id}">▼</span> <span class="json-bracket">[</span><span class="json-count">${value.length} items</span></div>
-            <div class="json-content" id="${id}">${items}<div class="json-line"><span class="json-bracket">]</span>${comma}</div></div>`;
-};
-
-/**
- * Render JSON object.
- * @private
- */
-AIChat.prototype._renderJsonObject = function (key, value, comma, depth) {
-    const keys = Object.keys(value);
-    if (keys.length === 0) {
-        return this._renderJsonLine(key, `<span class="json-bracket">{}</span>${comma}`);
-    }
-
-    const id = 'json-' + Math.random().toString(36).substr(2, 9);
-    const keyHtml = key ? `<span class="json-key">"${this._escapeHtml(key)}"</span>: ` : '';
-    const items = keys.map((k, i) => this._renderJsonValue(value[k], k, i === keys.length - 1, depth + 1)).join('');
-
-    return `<div class="json-line">${keyHtml}<span class="json-toggle" data-target="${id}">▼</span> <span class="json-bracket">{</span><span class="json-count">${keys.length} keys</span></div>
-            <div class="json-content" id="${id}">${items}<div class="json-line"><span class="json-bracket">}</span>${comma}</div></div>`;
-};
-
-/**
- * Render a single JSON line.
- * @private
- * @param {string} key - Key name (null for array items)
- * @param {string} content - HTML content
- * @returns {string} - HTML string
- */
-AIChat.prototype._renderJsonLine = function (key, content) {
-    let html = '<div class="json-line">';
-
-    if (key !== null) {
-        html += '<span class="json-key">"' + this._escapeHtml(key) + '"</span>: ';
-    }
-
-    html += content;
-    html += '</div>';
-
-    return html;
-};
-
-/**
- * Initialize JSON viewers in a message element.
- * @private
- */
-AIChat.prototype._initializeJsonViewers = function (element) {
-    element.querySelectorAll('.json-viewer').forEach(viewer => {
-        const jsonData = viewer.getAttribute('data-json');
-        if (!jsonData) {
-            return;
-        }
-
-        try {
-            const parsed = JSON.parse(jsonData);
-            viewer.innerHTML = `<div class="json-wrapper">
-                <button class="copy-code-button" title="Copy JSON" aria-label="Copy JSON">Copy</button>
-                <div class="json-tree">${this._renderJsonValue(parsed, null, true)}</div>
-            </div>`;
-
-            this._setupJsonToggleHandlers(viewer);
-
-            const copyButton = viewer.querySelector('.copy-code-button');
-            if (copyButton) {
-                copyButton.addEventListener('click', (e) => {
-                    this._copyToClipboard(JSON.stringify(parsed, null, 2), e.currentTarget);
-                });
-            }
-        } catch (e) {
-            viewer.textContent = `Error rendering JSON: ${e.message}`;
-        }
-    });
-
-    element.querySelectorAll('.code-viewer').forEach(viewer => {
-        const code = viewer.getAttribute('data-code');
-        const lang = viewer.getAttribute('data-lang');
-        if (!code) {
-            return;
-        }
-
-        try {
-            viewer.innerHTML = this._renderCodeBlock(code, lang);
-
-            const copyButton = viewer.querySelector('.copy-code-button');
-            if (copyButton) {
-                copyButton.addEventListener('click', (e) => {
-                    this._copyToClipboard(code, e.currentTarget);
-                });
-            }
-        } catch (e) {
-            viewer.textContent = `Error rendering code: ${e.message}`;
-        }
-    });
-};
-
-/**
- * Setup toggle handlers for JSON expand/collapse.
- * @private
- */
-AIChat.prototype._setupJsonToggleHandlers = function (viewer) {
-    viewer.querySelectorAll('.json-toggle').forEach(toggle => {
-        toggle.addEventListener('click', e => {
-            e.preventDefault();
-            e.stopPropagation();
-
-            const content = document.getElementById(toggle.getAttribute('data-target'));
-            if (content) {
-                const isCollapsed = content.style.display === 'none';
-                content.style.display = isCollapsed ? 'block' : 'none';
-                toggle.textContent = isCollapsed ? '▼' : '▶';
-            }
-        });
-    });
-};
-
-/**
- * Render code block as DOM elements.
- * @private
- */
-AIChat.prototype._renderCodeBlock = function (code, lang) {
-    const lines = code.split('\n');
-    const linesHtml = lines.map(line => {
-        const escapedLine = this._escapeHtml(line || ' ');
-        return `<div class="code-line">${escapedLine}</div>`;
-    }).join('');
-
-    const langLabel = lang && lang !== 'plaintext' ? `<div class="code-lang">${lang}</div>` : '';
-    const copyButton = '<button class="copy-code-button" title="Copy code" aria-label="Copy code">Copy</button>';
-
-    return `<div class="code-wrapper">${langLabel}${copyButton}<div class="code-content">${linesHtml}</div></div>`;
-};
-
-/**
- * Check if user is scrolled to bottom (within threshold).
- * @private
- * @returns {boolean}
- */
-AIChat.prototype._isScrolledToBottom = function () {
-    const messagesContainer = document.getElementById('ai-messages-container');
-    if (!messagesContainer) {
-        return true;
-    }
-
-    const threshold = 100;
-    const scrollPosition = messagesContainer.scrollTop + messagesContainer.clientHeight;
-    const scrollHeight = messagesContainer.scrollHeight;
-
-    return scrollHeight - scrollPosition < threshold;
-};
-
-/**
- * Scroll messages container to bottom (only if user is already at bottom).
- * @private
- * @param {boolean} force - Force scroll even if user scrolled up
- */
-AIChat.prototype._scrollToBottom = function (force) {
-    const messagesContainer = document.getElementById('ai-messages-container');
-    if (!messagesContainer || messagesContainer.scrollHeight === undefined) {
-        return;
-    }
-
-    if (force || this._isScrolledToBottom()) {
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }
-};
-
-/**
- * Debounced render for streaming content to improve performance.
- * @private
- * @param {string} content - Content to render
- */
-AIChat.prototype._debouncedRender = function (content) {
-    this._pendingRender = content;
-
-    if (this._renderDebounceTimer) {
-        return;
-    }
-
-    this._renderDebounceTimer = setTimeout(() => {
-        if (this._pendingRender && this._streamingMessageElement) {
-            this._streamingMessageElement.innerHTML = this._parseMarkdown(this._pendingRender);
-            this._initializeJsonViewers(this._streamingMessageElement);
-            this._scrollToBottom(false);
-        }
-        this._renderDebounceTimer = null;
-    }, 50);
 };
 
 /**
@@ -1013,7 +527,7 @@ AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
             'For faster responses and better performance, consider clearing the chat history to start fresh. ' +
             'Click "Clear History" button above.';
 
-        this._addSystemMessage(warningMessage);
+        this._transcript.appendSystemMessage(warningMessage);
     }
 };
 
@@ -1026,7 +540,7 @@ AIChat.prototype._clearContext = function () {
     const contextInfo = document.getElementById('ai-context-info');
     contextInfo.style.display = 'none';
 
-    this._addSystemMessage('❌ Context cleared - no control is currently selected');
+    this._transcript.appendSystemMessage('❌ Context cleared - no control is currently selected');
 };
 
 /**
@@ -1051,7 +565,7 @@ AIChat.prototype.updateContext = function (context) {
  * Called when AI tab is activated.
  */
 AIChat.prototype.onTabActivated = function () {
-    this._scrollToBottom(true);
+    this._transcript.scrollToBottom(true);
 };
 
 /**
@@ -1067,52 +581,13 @@ AIChat.prototype.setUrl = function (url) {
 };
 
 /**
- * Copy text to clipboard.
- * @private
- * @param {string} text - Text to copy
- * @param {HTMLElement} button - The button element that triggered the copy
- */
-AIChat.prototype._copyToClipboard = function (text, button) {
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.top = '-9999px';
-    textarea.style.left = '-9999px';
-    textarea.setAttribute('readonly', '');
-    document.body.appendChild(textarea);
-
-    textarea.focus();
-    textarea.select();
-
-    textarea.setSelectionRange(0, text.length);
-
-    try {
-        const successful = document.execCommand('copy');
-
-        if (successful) {
-            const originalText = button.textContent;
-            button.textContent = 'Copied!';
-            button.disabled = true;
-
-            setTimeout(() => {
-                button.textContent = originalText;
-                button.disabled = false;
-            }, 1500);
-        } else {
-            this._addSystemMessage('Failed to copy to clipboard');
-        }
-    } catch (err) {
-        this._addSystemMessage('Failed to copy to clipboard');
-    } finally {
-        document.body.removeChild(textarea);
-    }
-};
-
-/**
  * Destroy the component and cleanup.
  */
 AIChat.prototype.destroy = function () {
     this._controller.destroy();
+    if (this._transcript && typeof this._transcript.destroy === 'function') {
+        this._transcript.destroy();
+    }
 };
 
 module.exports = AIChat;

@@ -48,6 +48,10 @@ _Avoid_: AIChat, prompt client, assistant UI
 The persistence boundary for Inspector AI Assistant conversation memory. It loads, appends, clears, limits, and keys stored chat turns for an inspected URL while hiding Chrome storage details from assistant workflow code.
 _Avoid_: Chrome storage manager, chat storage helper, persisted inspection context
 
+**Assistant Transcript**:
+The presentation module that owns the rules for rendering an Inspector AI Assistant turn — markdown, JSON viewer, code viewer, scroll, streaming debounce, and HTML escaping — behind a small stream-shaped interface for the AIChat view. It does not own conversation persistence, Assistant Capability State, or controller communication.
+_Avoid_: chat history, conversation memory, AIChat
+
 **Assistant Architecture V1**:
 The first simplification effort for the Inspector AI Assistant, focused on understandable boundaries and deterministic agent validation. It excludes actual model answer quality evaluation, full DevTools extension end-to-end automation, UI redesign, provider replacement, autonomous actions, broader UI5 data collection, and changes to the rest of the inspector message architecture.
 _Avoid_: AI rewrite, e2e assistant validation, model quality evaluation
