@@ -1,19 +1,17 @@
 'use strict';
 
 /**
- * Persistence boundary for assistant conversation memory.
+ * Persists assistant conversation memory.
  *
- * Owns the storage-key shape for an inspected URL, the retention limit (50
- * most recent turns), and load / append / clear. Hides Chrome storage from
- * the rest of the assistant.
+ * Owns the storage key shape for each inspected URL, the retention limit (50 most recent turns),
+ * and load / append / clear. Hides Chrome storage from the rest of the assistant.
  *
  * Only chat turns are persisted. Inspection context must not be stored here.
  *
  * @param {Object} [options]
- * @param {Object} [options.storage] - A `chrome.storage.local`-compatible
- *     surface (`get(keys, cb)`, `set(items, cb)`, `remove(keys, cb)`).
- *     Defaults to `chrome.storage.local`. Construction throws if no storage
- *     is available, so the failure is loud rather than deferred to first use.
+ * @param {Object} [options.storage] - A `chrome.storage.local`-compatible surface (`get`, `set`,
+ *                                     `remove`). Defaults to `chrome.storage.local`. Construction
+ *                                     throws if no storage is available.
  * @constructor
  */
 function ConversationStore(options) {
@@ -29,8 +27,7 @@ function ConversationStore(options) {
 }
 
 /**
- * Maximum stored chat turns per inspected URL. Older turns drop from the
- * front when this limit is exceeded.
+ * Max stored chat turns per inspected URL. Older turns drop from the front when exceeded.
  * @type {number}
  */
 ConversationStore.RETENTION_LIMIT = 50;
@@ -74,8 +71,7 @@ ConversationStore.prototype.load = function (url) {
 };
 
 /**
- * Append a chat turn. Only `role` and `content` are persisted; inspection
- * context and timestamps are dropped.
+ * Append a chat turn. Only `role` and `content` are persisted.
  * @param {string} url
  * @param {{role: string, content: string}} message
  * @returns {Promise<void>}

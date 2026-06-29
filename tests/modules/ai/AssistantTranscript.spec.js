@@ -139,7 +139,7 @@ describe('AssistantTranscript', function () {
             handle.streamChunk('Hello ');
             handle.streamChunk('**world**');
 
-            // Wait past the internal debounce window.
+            // Wait past the debounce window.
             setTimeout(function () {
                 container.querySelector('.message-assistant .message-content').innerHTML.should.contain('<strong>world</strong>');
                 done();
@@ -186,7 +186,7 @@ describe('AssistantTranscript', function () {
     describe('#scrollToBottom()', function () {
         it('should expose a scroll-to-bottom hook so the view can keep the latest turn visible when the tab becomes active', function () {
             (typeof transcript.scrollToBottom).should.equal('function');
-            // Calling it on a container without overflow must not throw.
+            // Calling on a container without overflow must not throw.
             (function () { transcript.scrollToBottom(true); }).should.not.throw();
         });
     });
@@ -212,9 +212,7 @@ describe('AssistantTranscript', function () {
 
     describe('Copy-button failure handling', function () {
         it('should append a "Failed to copy to clipboard" system message when the underlying copy command reports failure, so a denied or unsupported clipboard environment is not silently swallowed', function () {
-            // Force execCommand to return false to simulate the browser
-            // denying the copy. The transcript must surface the failure
-            // as an inline system message.
+            // Force execCommand to return false to simulate a denied copy. The transcript must surface the failure as a system message.
             const originalExecCommand = document.execCommand;
             document.execCommand = function () { return false; };
 
@@ -236,20 +234,18 @@ describe('AssistantTranscript', function () {
 
     describe('Scroll behavior on finalize', function () {
         it('should not force-scroll the host container when the stream is finalized, so a developer who scrolled up to read an earlier turn is not yanked to the bottom on completion', function () {
-            // Give the container a real overflow so scrollTop can be set.
+            // Real overflow so scrollTop can be set.
             container.style.height = '50px';
             container.style.overflow = 'auto';
 
-            // Seed enough content that there is room to scroll up.
+            // Seed enough content for room to scroll up.
             transcript.appendUserTurn('first user message');
             transcript.appendUserTurn('second user message');
             transcript.appendUserTurn('third user message');
 
             const handle = transcript.beginAssistantTurn();
 
-            // Developer scrolls up after the placeholder appears, while
-            // the model streams. Finalize must not yank the scroll
-            // position back to the bottom.
+            // Developer scrolls up while the model streams. Finalize must not yank back.
             container.scrollTop = 0;
 
             handle.finalize('the assistant answer');

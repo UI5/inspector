@@ -3,10 +3,8 @@
 const AIChat = require('../../../app/scripts/modules/ui/AIChat.js');
 
 /**
- * Minimal AssistantController-shaped fake. The view talks only to the
- * controller surface, so the fake records event registrations and exposes
- * a `fire` helper that dispatches any event the view subscribes to. No
- * Chrome runtime, no storage, no capability behavior.
+ * Fake {@link AssistantController}. Records event registrations and exposes `fire` to dispatch
+ * events.
  * @returns {{listeners: Object, on: Function, fire: Function,
  *           initialize: Function, getUsageInfo: Function,
  *           updateInspectionContext: Function, setUrl: Function,
@@ -36,10 +34,7 @@ function createFakeController() {
 }
 
 /**
- * Minimal AssistantTranscript-shaped fake. Records every call from the
- * view. The spec asserts the view forwards the right calls to the
- * transcript instead of probing markdown / JSON / scroll internals
- * (covered in AssistantTranscript.spec).
+ * Fake {@link AssistantTranscript}. Records every call from the view.
  * @returns {{calls: Array, appendUserTurn: Function,
  *           appendSystemMessage: Function, beginAssistantTurn: Function,
  *           clear: Function, reset: Function, scrollToBottom: Function,
@@ -103,8 +98,7 @@ describe('AIChat', function () {
         });
 
         it('should construct the transcript with the messages container as host, so all transcript rendering writes into the DOM the view already laid out', function () {
-            // The transcript factory was called with the container; the
-            // view drives turns through the fake instead of rendering itself.
+            // Transcript factory was called with the container. The view drives turns through the fake.
             fakeController.fire('conversation-loaded', [{role: 'user', content: 'hi'}]);
             const resetCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'reset'; });
             resetCalls.length.should.equal(1);
@@ -401,9 +395,7 @@ describe('AIChat', function () {
         });
 
         it('should expose the clear-history affordance when the controller reports session-failed, so the developer has a user-facing recovery action that destroys the broken session and reseeds a fresh one', function () {
-            // Start from a ready state so the clear-history button is
-            // offered before session-failed arrives. The test then asserts
-            // session-failed keeps it offered.
+            // Start from ready so clear-history is offered before session-failed arrives. Assert session-failed keeps it offered.
             fakeController.fire('capability-state-changed', {
                 status: 'ready', message: 'ready', progress: 0
             });
@@ -416,8 +408,7 @@ describe('AIChat', function () {
         });
 
         it('should leave the existing banner untouched when streaming-failed arrives — recovery is offered implicitly via the next sendUserMessage, not via a new banner — per PRD user story 8', function () {
-            // Paint a ready banner first; this is the state the assistant
-            // should appear to recover to on the next successful send.
+            // Paint a ready banner first. This is the state the assistant should recover to on the next successful send.
             fakeController.fire('capability-state-changed', {
                 status: 'ready', message: 'Gemini Nano is ready', progress: 0
             });
@@ -455,8 +446,7 @@ describe('AIChat', function () {
                 return Promise.resolve({inputUsage: 700, inputQuota: 1000, percentUsed: 75});
             };
 
-            // Two ready transitions to prove the warning appends at most
-            // once even if _updateTokenCounter runs repeatedly.
+            // Two ready transitions to prove the warning appends at most once.
             fakeController.fire('capability-state-changed', {
                 status: 'ready', message: 'ready', progress: 0
             });

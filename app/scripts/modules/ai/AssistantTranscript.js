@@ -1,11 +1,9 @@
 'use strict';
 
 /**
- * Presentation module for the assistant transcript. Owns markdown parsing,
- * JSON viewer expand/collapse, code viewer rendering, scroll bookkeeping,
- * the streaming render debounce, clipboard helpers for the copy buttons it
- * injects, and HTML escaping. Exposes a small stream-shaped interface so
- * AIChat can drive it without reaching into private helpers.
+ * Renders the assistant transcript. Owns markdown parsing, JSON viewer expand/collapse, code viewer
+ * rendering, scroll bookkeeping, the streaming render debounce, clipboard helpers, and HTML
+ * escaping.
  *
  * Does not own:
  *  - Conversation memory persistence (see {@link ConversationStore})
@@ -14,10 +12,9 @@
  *
  * @param {HTMLElement} container - DOM host. Written into directly.
  * @param {Object} [options]
- * @param {number} [options.maxJsonDepth=10] - Max depth before the inline
- *     JSON viewer renders a "max depth reached" sentinel.
- * @param {number} [options.streamDebounceMs=50] - Coalescing interval for
- *     the streaming render loop.
+ * @param {number} [options.maxJsonDepth=10] - Max depth before the JSON viewer renders a "max depth
+ *                 reached" sentinel.
+ * @param {number} [options.streamDebounceMs=50] - Coalescing interval for streaming renders.
  * @constructor
  */
 function AssistantTranscript(container, options) {
@@ -35,9 +32,7 @@ function AssistantTranscript(container, options) {
  * @private
  */
 AssistantTranscript.prototype._renderEmptyState = function () {
-    // Safe innerHTML: literal string, no user- or model-controlled
-    // interpolation. Later appends route content through _escapeHtml
-    // (user/system) or _parseMarkdown (assistant).
+    // Safe innerHTML: literal string, no user- or model-controlled interpolation. Later appends route content through _escapeHtml (user/system) or _parseMarkdown (assistant).
     this._container.innerHTML = '' +
         '<div class="ai-welcome-message">' +
             '<h3>UI5 AI Assistant</h3>' +
@@ -66,9 +61,8 @@ AssistantTranscript.prototype.appendSystemMessage = function (message) {
 /**
  * Begin a streaming assistant turn.
  *
- * Creates a placeholder with a loading indicator. Returns a handle the caller
- * drives with chunks until the stream finalizes. The handle does not expose
- * the DOM nodes or the debounce timer.
+ * Creates a placeholder with a loading indicator. Returns a handle the caller drives with chunks
+ * until the stream finalizes.
  *
  * @returns {{
  *   streamChunk: function(string): void,
@@ -131,10 +125,7 @@ AssistantTranscript.prototype.beginAssistantTurn = function () {
             });
             headerElement.appendChild(copyButton);
 
-            // Do not scroll on finalize. The chunk-by-chunk debounced
-            // render already scrolled. Skipping here means a developer
-            // who scrolled up to read an earlier turn is not yanked to
-            // the bottom when the stream completes.
+            // Do not scroll on finalize. The debounced chunk render already scrolled. Skipping here means a developer who scrolled up to read an earlier turn is not yanked to the bottom on stream completion.
         }
     };
 };
@@ -165,11 +156,11 @@ AssistantTranscript.prototype.reset = function (turns) {
 };
 
 /**
- * Scroll the transcript host to its bottom.
+ * Scroll the host to its bottom.
  *
- * @param {boolean} force - When true, scroll even if scrolled up. When false,
- *     scroll only if already near the bottom, so a streaming turn does not
- *     yank the developer's reading position.
+ * @param {boolean} force - When true, scroll unconditionally. When false, scroll only if already
+ *                          near the bottom, so a streaming turn does not yank the reader's
+ *                          position.
  */
 AssistantTranscript.prototype.scrollToBottom = function (force) {
     const container = this._container;
@@ -182,9 +173,8 @@ AssistantTranscript.prototype.scrollToBottom = function (force) {
 };
 
 /**
- * Tear-down hook. Streaming timers live in the closure returned by
- * {@link AssistantTranscript#beginAssistantTurn}, so there is no
- * instance-level timer to cancel. Kept for symmetry and future extension.
+ * Tear-down hook. Streaming timers live in the closure returned by {@link
+ * AssistantTranscript#beginAssistantTurn}, so no instance-level timer to cancel. Kept for symmetry.
  */
 AssistantTranscript.prototype.destroy = function () {};
 
@@ -218,9 +208,7 @@ AssistantTranscript.prototype._appendMessage = function (role, content, showCopy
     const shouldShowCopyButton = role === 'assistant' && (showCopyButton === undefined || showCopyButton === true);
     const roleLabel = role === 'user' ? 'You' : role === 'assistant' ? 'AI' : 'System';
 
-    // Safe innerHTML: roleLabel is from a fixed set, formattedContent is
-    // either escaped or markdown-parsed (which itself escapes anything it
-    // does not turn into a known formatting tag).
+    // Safe innerHTML: roleLabel is from a fixed set, formattedContent is either escaped or markdown-parsed (which itself escapes anything it does not turn into a known formatting tag).
     messageElement.innerHTML = '' +
         '<div class="message-header">' +
             '<span class="message-role">' + roleLabel + '</span>' +
@@ -528,11 +516,10 @@ AssistantTranscript.prototype._renderCodeBlock = function (code, lang) {
 };
 
 /**
- * Copy text to the clipboard via execCommand. The DevTools panel may not
- * have user-activation context for the async Clipboard API, so the legacy
- * path is used.
+ * Copy text to the clipboard via execCommand. The DevTools panel may not have user-activation
+ * context for the async Clipboard API, so the legacy path is used.
  *
- * On failure, append an inline system message so the failure is visible.
+ * On failure, appends an inline system message.
  * @private
  */
 AssistantTranscript.prototype._copyToClipboard = function (text, button) {

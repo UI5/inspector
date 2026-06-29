@@ -5,18 +5,14 @@ const PromptClient = require('./PromptClient.js');
 const ConversationStore = require('./ConversationStore.js');
 
 /**
- * Workflow coordinator for the Inspector AI Assistant. Owns capability state,
- * conversation memory for the current URL, session creation and reseeding,
- * per-turn inspection context injection, streaming, and persistence through
- * PromptBuilder, PromptClient, and ConversationStore. Has no direct Chrome
- * runtime, DOM, or storage dependencies.
+ * Coordinates the AI Assistant: capability state, per-URL conversation memory, session lifecycle,
+ * inspection context, streaming, and persistence. No direct Chrome, DOM, or storage dependencies.
  *
  * @param {Object} [options]
  * @param {PromptBuilder} [options.promptBuilder]
  * @param {PromptClient} [options.promptClient]
  * @param {ConversationStore} [options.conversationStore]
- * @param {Function} [options.getAppInfo] - Returns the current application metadata
- *     snapshot used by PromptBuilder when seeding the session.
+ * @param {Function} [options.getAppInfo] - Returns the app metadata snapshot for session seeding.
  * @constructor
  */
 function AssistantController(options) {
@@ -26,9 +22,7 @@ function AssistantController(options) {
     this._conversationStore = options.conversationStore || new ConversationStore();
     this._getAppInfo = options.getAppInfo || function () { return null; };
 
-    // Seed with `unavailable` until `initialize()` resolves the real
-    // availability from PromptClient. Overwritten by the first real
-    // capability resolution.
+    // Seeded as `unavailable` until `initialize()` resolves the real status.
     this._capabilityState = { status: 'unavailable', message: 'Checking model status...', progress: 0 };
     this._listeners = {};
     this._currentUrl = null;
@@ -38,19 +32,13 @@ function AssistantController(options) {
 }
 
 /**
- * Register a listener for a controller event.
+ * Register a listener.
  *
- * Supported events:
- *  - `capability-state-changed` ({status, message, progress})
- *  - `conversation-loaded` (turns)
- *  - `stream-chunk` (chunk)
- *  - `stream-complete` ({content})
- *  - `stream-failed` (Error)
- *  - `conversation-cleared`
+ * Events: `capability-state-changed`, `conversation-loaded`, `stream-chunk`, `stream-complete`,
+ * `stream-failed`, `conversation-cleared`.
  *
- * Local in-process event bus, not `chrome.runtime` message dispatch. The
- * controller and the AIChat view live in the same DevTools panel page.
- * The cross-process port protocol is owned by PromptClient.
+ * In-process event bus, not `chrome.runtime` message dispatch. The cross-process port protocol
+ * lives in PromptClient.
  *
  * @param {string} event
  * @param {Function} handler
@@ -102,13 +90,11 @@ AssistantController.prototype._setCapabilityState = function (status, message, p
 /**
  * Resolve capability state from PromptClient and broadcast it.
  *
- * PromptClient returns canonical capability names directly. The two
- * controller-managed states (`session-failed`, `streaming-failed`) come
- * from elsewhere in this module.
+ * PromptClient returns canonical capability names. The two controller-managed states
+ * (`session-failed`, `streaming-failed`) come from elsewhere in this module.
  *
- * A rejected capability check resolves to `unavailable` rather than
- * throwing, so the view always has a canonical state to render. The
- * returned promise never rejects.
+ * A rejected capability check resolves to `unavailable` so the view always has a canonical state to
+ * render. The returned promise never rejects.
  *
  * @returns {Promise<void>}
  */
@@ -127,8 +113,8 @@ AssistantController.prototype.initialize = function () {
 };
 
 /**
- * Create a fresh local AI session and translate any failure into a
- * `session-failed` capability state rather than letting the error propagate.
+ * Create a fresh local AI session. Translates failures into a `session-failed` capability state
+ * instead of propagating.
  * @private
  * @returns {Promise<void>}
  */
@@ -139,8 +125,7 @@ AssistantController.prototype._seedSessionOrFail = function () {
 };
 
 /**
- * Create a local AI session seeded with the system prompt and current
- * conversation memory.
+ * Create a local AI session seeded with the system prompt and conversation memory.
  * @private
  * @returns {Promise<void>}
  */
@@ -151,11 +136,10 @@ AssistantController.prototype._seedSession = function () {
 };
 
 /**
- * Send a user message: build the prompt, stream the response, persist both
- * turns, and emit stream-chunk / stream-complete events.
+ * Send a user message: build the prompt, stream the response, persist both turns, and emit stream
+ * events.
  *
- * Inspection context is injected into this prompt only and is never
- * persisted as conversation memory.
+ * Inspection context is injected only into this prompt — never persisted.
  *
  * @param {string} userMessage
  * @returns {Promise<{content: string}>}
@@ -170,10 +154,7 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
     return this._promptClient.promptStreaming(formatted).then((stream) => {
         return this._consumeStream(stream);
     }).then((fullText) => {
-        // Persist only completed turns. Appending the user turn before the
-        // stream finishes would leave an orphan user message in conversation
-        // memory on streaming failure, which would then leak into the next
-        // session seed and bias future answers.
+        // Persist only completed turns. Appending the user turn before the stream finishes would leak an orphan user message into the next session seed on streaming failure.
         return this._conversationStore.append(this._currentUrl, {
             role: 'user',
             content: userMessage
@@ -186,9 +167,7 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
             this._conversationMemory.push({ role: 'user', content: userMessage });
             this._conversationMemory.push({ role: 'assistant', content: fullText });
             this._isStreaming = false;
-            // A successful turn after a prior streaming-failed state means
-            // the session has recovered. Resurface `ready` so the view does
-            // not stay stuck on a failure banner.
+            // Resurface `ready` after a streaming-failed recovery so the view does not stick on the failure banner.
             if (this._capabilityState.status === 'streaming-failed') {
                 this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
             }
@@ -204,8 +183,7 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
 };
 
 /**
- * Drain the streamed response, emit each chunk as `stream-chunk`, and
- * return the joined response.
+ * Drain the stream, emit each chunk as `stream-chunk`, return the joined text.
  * @private
  * @param {AsyncIterable<string>} stream
  * @returns {Promise<string>}
@@ -231,10 +209,8 @@ AssistantController.prototype._consumeStream = function (stream) {
 /**
  * Set the inspected URL whose conversation memory the controller owns.
  *
- * Before initialization, this records the URL. After initialization with a
- * different URL, the controller loads the new URL's conversation memory,
- * destroys the active session, and reseeds with the new history. Same-URL
- * calls are a no-op.
+ * Before initialization, records the URL. After initialization with a different URL, loads the new
+ * URL's memory, destroys the active session, and reseeds. Same-URL calls are a no-op.
  *
  * @param {string} url
  * @returns {Promise<void>|undefined}
@@ -257,9 +233,8 @@ AssistantController.prototype.setUrl = function (url) {
 };
 
 /**
- * Update the pending inspection context for the next user prompt. Inspection
- * context is consumed once and is never written to conversation memory.
- * Pass `null` to clear.
+ * Set the inspection context for the next prompt. Consumed once and never persisted. Pass `null` to
+ * clear.
  *
  * @param {Object} [context] - Inspection context with optional `control` snapshot.
  */
@@ -268,8 +243,8 @@ AssistantController.prototype.updateInspectionContext = function (context) {
 };
 
 /**
- * Clear conversation memory for the current URL, destroy the active session,
- * and reseed without prior turns.
+ * Clear conversation memory for the current URL, destroy the active session, and reseed without
+ * prior turns.
  *
  * @returns {Promise<void>}
  */
@@ -283,9 +258,8 @@ AssistantController.prototype.clearConversation = function () {
 };
 
 /**
- * Drive the PromptClient model download. Emits transient `downloading`
- * capability states with progress in [0, 1], then `ready` once the model is
- * available and the session has been reseeded.
+ * Drive the model download. Emits transient `downloading` states with progress in [0, 1], then
+ * `ready` once the model is available and the session has been reseeded.
  *
  * @returns {Promise<void>}
  */

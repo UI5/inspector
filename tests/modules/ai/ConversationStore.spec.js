@@ -3,8 +3,7 @@
 const ConversationStore = require('../../../app/scripts/modules/ai/ConversationStore.js');
 
 /**
- * In-memory fake of the `chrome.storage.local` surface. Tests inspect
- * `data` directly and seed stored conversation memory.
+ * In-memory fake of the `chrome.storage.local` surface.
  *
  * @returns {{storage: Object, data: Object}}
  */
@@ -45,7 +44,7 @@ describe('ConversationStore', function () {
     describe('constructor', function () {
         it('should throw when no storage surface is available so failures are loud rather than deferred to first use', function () {
             const originalChrome = window.chrome;
-            // Force the "no Chrome at all" path so the fallback resolves to nothing.
+            // Force the "no Chrome" path.
             window.chrome = undefined;
             try {
                 (function () {
@@ -152,7 +151,7 @@ describe('ConversationStore', function () {
             const store = new ConversationStore({ storage: fake.storage });
             const key = store.keyForUrl('https://example.com');
 
-            // Seed 50 existing turns so the next append exceeds the limit.
+            // Seed 50 turns so the next append exceeds the limit.
             const seeded = [];
             for (let i = 0; i < 50; i++) {
                 seeded.push({ role: 'user', content: 'old-' + i });

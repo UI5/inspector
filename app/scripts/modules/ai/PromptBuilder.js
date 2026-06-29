@@ -1,10 +1,8 @@
 'use strict';
 
 /**
- * Deterministic builder for assistant prompts. Owns the system prompt,
- * application metadata formatting, selected-control (inspection context)
- * formatting, truncation rules, and session seed construction. Free of
- * Chrome APIs so it can be unit-tested directly.
+ * Builds assistant prompts. Owns the system prompt, app metadata formatting, selected-control
+ * formatting, truncation rules, and session seed construction. Free of Chrome APIs.
  *
  * @constructor
  */
@@ -12,8 +10,7 @@ function PromptBuilder() {
 }
 
 /**
- * Includes a Current Application Context section when app metadata is
- * provided.
+ * Adds a Current Application Context section when app metadata is provided.
  *
  * @param {Object} [appInfo]
  * @returns {string}
@@ -51,12 +48,10 @@ PromptBuilder.prototype.buildSystemPrompt = function (appInfo) {
 };
 
 /**
- * Build a user prompt prefixed with a single-turn inspection context section
- * (selected control type, id, properties, bindings, aggregations). Returns
- * the message unchanged when no context is provided.
+ * Prefix a user prompt with a single-turn inspection context section (selected control type, id,
+ * properties, bindings, aggregations). Returns the message unchanged when no context is provided.
  *
- * Inspection context is injected per prompt and is never stored as
- * conversation memory.
+ * Inspection context is injected per prompt and never stored as conversation memory.
  *
  * @param {string} userMessage
  * @param {Object} [inspectionContext]
@@ -80,8 +75,8 @@ PromptBuilder.prototype.buildUserPrompt = function (userMessage, inspectionConte
 };
 
 /**
- * Truncate JSON serialization to a maximum length. Returns a placeholder for
- * circular or non-serializable input.
+ * Truncate JSON serialization to a maximum length. Returns a placeholder for circular or
+ * non-serializable input.
  * @private
  * @param {*} data
  * @param {number} maxLength
@@ -100,8 +95,7 @@ PromptBuilder.prototype._truncateJson = function (data, maxLength) {
 };
 
 /**
- * Format control "own" properties as a truncated JSON line. Empty when there
- * are no own properties.
+ * Format control "own" properties as a truncated JSON line. Empty when there are no own properties.
  * @private
  * @param {Object} control
  * @param {number} maxLength
@@ -160,10 +154,8 @@ PromptBuilder.prototype._addAggregationsContext = function (aggregations, maxLen
 /**
  * Build the seed message array for a new session.
  *
- * Always emits a leading system message from `buildSystemPrompt`, followed
- * by user/assistant turns from the supplied conversation memory.
- * Non-user/assistant entries and empty placeholders are skipped so mid-stream
- * slots from the view never leak in.
+ * Emits a leading system message from `buildSystemPrompt`, followed by user/assistant turns from
+ * the supplied conversation memory. Non-user/assistant entries and empty placeholders are skipped.
  *
  * @param {Object} [appInfo]
  * @param {Array} [conversationMemory] - Prior {role, content} turns.

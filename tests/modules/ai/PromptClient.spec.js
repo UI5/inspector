@@ -3,10 +3,8 @@
 const PromptClient = require('../../../app/scripts/modules/ai/PromptClient.js');
 
 /**
- * Deterministic fake of the Chrome extension port surface
- * (`chrome.runtime.connect({ name: 'prompt-api' })`). Records posted
- * messages and emits responses through `emit(message)` and
- * `triggerDisconnect()`.
+ * Fake Chrome extension port (`chrome.runtime.connect({ name: 'prompt-api' })`). Records posted
+ * messages and emits responses via `emit` and `triggerDisconnect`.
  *
  * @returns {{port: Object, posted: Array, emit: Function, triggerDisconnect: Function}}
  */
@@ -52,7 +50,7 @@ function createFakePort() {
 }
 
 /**
- * Build a PromptClient wired to a fresh fake port.
+ * Build a PromptClient with a fake port.
  *
  * @returns {{client: Object, fake: Object}}
  */
@@ -268,9 +266,7 @@ describe('PromptClient', function () {
             return sessionPromise.then(function () {
                 return client.promptStreaming('Pre-formatted user prompt');
             }).then(async function (stream) {
-                // Emit chunks before the consumer calls iterator.next().
-                // A lazily-wired stream would drop these; a pre-wired
-                // buffer must deliver them in order.
+                // Emit chunks before the consumer calls iterator.next(). A lazily-wired stream would drop these. A pre-wired buffer must deliver them in order.
                 fake.emit({ type: 'chunk', content: 'first' });
                 fake.emit({ type: 'chunk', content: 'second' });
                 fake.emit({ type: 'complete' });
@@ -309,8 +305,7 @@ describe('PromptClient', function () {
                     const iterator = stream[Symbol.asyncIterator]();
                     const firstChunkPromise = iterator.next();
 
-                    // First chunk handler is wired; deliver chunks
-                    // asynchronously to mirror real port arrival.
+                    // Deliver chunks asynchronously to mirror real port arrival.
                     fake.emit({ type: 'chunk', content: 'Hello' });
 
                     const first = await firstChunkPromise;

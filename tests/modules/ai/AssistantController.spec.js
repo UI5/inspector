@@ -4,9 +4,8 @@ const AssistantController = require('../../../app/scripts/modules/ai/AssistantCo
 const PromptBuilder = require('../../../app/scripts/modules/ai/PromptBuilder.js');
 
 /**
- * Deterministic fake of the {@link PromptClient} interface. Records seed
- * messages and user prompts and lets tests script capability resolution,
- * session creation, streaming, usage info, and failures.
+ * Fake {@link PromptClient}. Records seed messages and user prompts and lets tests script
+ * capability resolution, session creation, streaming, usage info, and failures.
  *
  * @returns {Object}
  */
@@ -117,8 +116,7 @@ function createFakePromptClient() {
 }
 
 /**
- * Deterministic fake of {@link ConversationStore}. Records load / append /
- * clear interactions per URL.
+ * Fake {@link ConversationStore}. Records load / append / clear per URL.
  *
  * @returns {Object}
  */
@@ -152,7 +150,7 @@ function createFakeConversationStore() {
 }
 
 /**
- * Convenience builder for an AssistantController with deterministic fakes.
+ * Builds an AssistantController with fakes.
  *
  * @param {Object} [overrides]
  * @returns {{controller: Object, promptClient: Object, conversationStore: Object,
@@ -204,10 +202,9 @@ function createController(overrides) {
 }
 
 /**
- * Drive a fresh harness into the `ready` capability state: configure the
- * fake PromptClient to report ready, set the canonical test URL, and run
- * `initialize()`. After this resolves the controller has a session seeded
- * with PromptBuilder messages and accepts `sendUserMessage()`.
+ * Drive a fresh harness into `ready`: configure the fake to report ready, set the test URL, and run
+ * `initialize()`. After this resolves the controller has a seeded session and accepts
+ * `sendUserMessage()`.
  *
  * @param {Object} harness
  * @returns {Promise<void>}
@@ -221,13 +218,9 @@ function initializedReady(harness) {
 }
 
 /**
- * Wait until the fake PromptClient has registered a streaming call, then
- * return its controller so the test can drive chunks, completion, or
- * error. Polls because `sendUserMessage()` reaches `promptStreaming` only
- * after the awaited `append`/`Promise.resolve(stream)` chain has flushed.
- *
- * Bounded by `maxAttempts` so a test where production code never reaches
- * `promptStreaming` fails fast with a descriptive error.
+ * Wait until the fake has registered a streaming call, then return its controller. Polls because
+ * `sendUserMessage()` reaches `promptStreaming` only after the awaited chain flushes. Bounded by
+ * `maxAttempts`.
  *
  * @param {Object} fakePromptClient
  * @param {number} [maxAttempts=500]
