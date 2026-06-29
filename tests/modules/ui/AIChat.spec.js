@@ -57,7 +57,6 @@ function createFakeTranscript() {
     };
     return {
         calls: calls,
-        streamingHandle: streamingHandle,
         appendUserTurn: function (c) { calls.push({type: 'appendUserTurn', content: c}); },
         appendSystemMessage: function (m) { calls.push({type: 'appendSystemMessage', message: m}); },
         beginAssistantTurn: function () {

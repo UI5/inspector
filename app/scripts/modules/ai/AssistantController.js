@@ -49,15 +49,6 @@ function AssistantController(options) {
 }
 
 /**
- * @returns {boolean} Whether the controller is currently streaming a response.
- *     Useful for views that need to clear a "thinking" indicator without
- *     subscribing to every internal stream event.
- */
-AssistantController.prototype.isStreaming = function () {
-    return this._isStreaming;
-};
-
-/**
  * Register a listener for a controller event.
  *
  * Supported events:

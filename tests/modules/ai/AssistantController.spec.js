@@ -23,7 +23,6 @@ function createFakePromptClient() {
         seedMessagesByCall: [],
         userPromptsByCall: [],
         destroyed: 0,
-        hasActiveSessionValue: false,
         pendingStreamControllers: [],
 
         checkAvailability: function () {
@@ -47,12 +46,7 @@ function createFakePromptClient() {
             if (fake.createSessionError) {
                 return Promise.reject(fake.createSessionError);
             }
-            fake.hasActiveSessionValue = fake.sessionCreated;
             return Promise.resolve(fake.sessionCreated);
-        },
-
-        hasActiveSession: function () {
-            return fake.hasActiveSessionValue;
         },
 
         promptStreaming: function (formattedUserMessage) {
@@ -117,7 +111,6 @@ function createFakePromptClient() {
 
         destroy: function () {
             fake.destroyed += 1;
-            fake.hasActiveSessionValue = false;
         }
     };
 
@@ -164,7 +157,7 @@ function createFakeConversationStore() {
  *
  * @param {Object} [overrides] - Test-specific overrides.
  * @returns {{controller: Object, promptClient: Object, conversationStore: Object,
- *           promptBuilder: PromptBuilder, events: Array, capabilityStates: Array}}
+ *           events: Array, capabilityStates: Array}}
  */
 function createController(overrides) {
     overrides = overrides || {};
@@ -206,7 +199,6 @@ function createController(overrides) {
         controller: controller,
         promptClient: promptClient,
         conversationStore: conversationStore,
-        promptBuilder: promptBuilder,
         events: events,
         capabilityStates: capabilityStates
     };
@@ -515,7 +507,7 @@ describe('AssistantController', function () {
                         err.message.should.equal('model crashed');
                     });
                 }).then(function () {
-                    harness.controller.isStreaming().should.be.false;
+                    harness.controller._isStreaming.should.be.false;
                     harness.controller.getCapabilityState().status.should.equal('streaming-failed');
                     var failed = harness.events.filter(function (e) {
                         return e.type === 'stream-failed';

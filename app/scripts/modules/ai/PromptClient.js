@@ -221,13 +221,6 @@ PromptClient.prototype.createSession = function (initialPrompts) {
 };
 
 /**
- * @returns {boolean} Whether a local AI session is currently active.
- */
-PromptClient.prototype.hasActiveSession = function () {
-    return this._hasActiveSession;
-};
-
-/**
  * Send an already-formatted user prompt and obtain an async-iterable stream of
  * response chunks. The transport session retains its own history, so only the
  * new user message is sent here. Prompt construction (system prompt, seed

@@ -51,15 +51,29 @@ function createFakePort() {
     };
 }
 
+/**
+ * Build a PromptClient wired to a fresh fake port. Convenience over the
+ * 17-call-site preamble of constructing a fake port and threading it through
+ * a `portFactory`.
+ *
+ * @returns {{client: Object, fake: Object}}
+ */
+function createClient() {
+    var fake = createFakePort();
+    var client = new PromptClient({
+        portFactory: function () {
+            return fake.port;
+        }
+    });
+    return { client: client, fake: fake };
+}
+
 describe('PromptClient', function () {
     describe('#checkAvailability()', function () {
         it('should resolve with the canonical `ready` Assistant Capability State when the background port reports `ready`', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('ready');
@@ -74,12 +88,9 @@ describe('PromptClient', function () {
         });
 
         it('should translate the background port `needs-download` status to the canonical `downloadable` Assistant Capability State', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('downloadable');
@@ -92,12 +103,9 @@ describe('PromptClient', function () {
         });
 
         it('should pass through the background port `downloading` status as the canonical `downloading` Assistant Capability State, preserving the transport-supplied message', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('downloading');
@@ -110,12 +118,9 @@ describe('PromptClient', function () {
         });
 
         it('should pass through the background port `unsupported` status as the canonical `unsupported` Assistant Capability State', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('unsupported');
@@ -128,12 +133,9 @@ describe('PromptClient', function () {
         });
 
         it('should pass through the background port `unavailable` status as the canonical `unavailable` Assistant Capability State', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('unavailable');
@@ -146,12 +148,9 @@ describe('PromptClient', function () {
         });
 
         it('should translate the background port `error` status to the canonical `unavailable` Assistant Capability State, preserving the transport-supplied error message', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('unavailable');
@@ -164,12 +163,9 @@ describe('PromptClient', function () {
         });
 
         it('should default to the canonical `unavailable` Assistant Capability State for any unrecognized background port status', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('unavailable');
@@ -183,12 +179,9 @@ describe('PromptClient', function () {
 
     describe('#downloadModel()', function () {
         it('should report progress callbacks for every download-progress message and resolve on download-complete', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var progressUpdates = [];
             var promise = client.downloadModel(function (progress) {
@@ -209,12 +202,9 @@ describe('PromptClient', function () {
 
     describe('#createSession()', function () {
         it('should forward the supplied seed messages to the transport and resolve when the session is created', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var seedMessages = [
                 { role: 'system', content: 'system prompt' },
@@ -224,7 +214,7 @@ describe('PromptClient', function () {
 
             var promise = client.createSession(seedMessages).then(function (created) {
                 created.should.be.true;
-                client.hasActiveSession().should.be.true;
+                client._hasActiveSession.should.be.true;
             });
 
             fake.posted[0].type.should.equal('create-session');
@@ -235,17 +225,14 @@ describe('PromptClient', function () {
         });
 
         it('should keep the active session flag set when a subsequent createSession fails', async function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var first = client.createSession([]);
             fake.emit({ type: 'session-created' });
             await first;
-            client.hasActiveSession().should.be.true;
+            client._hasActiveSession.should.be.true;
 
             var second = client.createSession([]);
             fake.emit({ type: 'error', message: 'Session init failed' });
@@ -255,18 +242,15 @@ describe('PromptClient', function () {
             } catch (err) {
                 err.message.should.equal('Session init failed');
             }
-            client.hasActiveSession().should.be.true;
+            client._hasActiveSession.should.be.true;
         });
     });
 
     describe('#promptStreaming()', function () {
         it('should reject when called before a session has been created', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             return client.promptStreaming('Hello').then(function () {
                 throw new Error('Expected promptStreaming to reject without an active session');
@@ -276,12 +260,9 @@ describe('PromptClient', function () {
         });
 
         it('should buffer chunks emitted between sending the prompt and the first iterator.next() call', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var sessionPromise = client.createSession([]);
             fake.emit({ type: 'session-created' });
@@ -312,12 +293,9 @@ describe('PromptClient', function () {
         });
 
         it('should forward the already-formatted prompt to the transport and yield streamed chunks until complete', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var sessionPromise = client.createSession([]);
             fake.emit({ type: 'session-created' });
@@ -357,12 +335,9 @@ describe('PromptClient', function () {
 
     describe('#getUsageInfo()', function () {
         it('should resolve with the usage data payload reported by the transport', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var promise = client.getUsageInfo().then(function (data) {
                 data.should.deep.equal({
@@ -384,12 +359,9 @@ describe('PromptClient', function () {
 
     describe('error and disconnect handling', function () {
         it('should surface a streaming-failed Assistant Capability State by throwing through the async iterator when the transport reports an error mid-stream', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var sessionPromise = client.createSession([]);
             fake.emit({ type: 'session-created' });
@@ -416,34 +388,28 @@ describe('PromptClient', function () {
         });
 
         it('should disconnect the transport on destroy and clear active-session state', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var sessionPromise = client.createSession([]);
             fake.emit({ type: 'session-created' });
 
             return sessionPromise.then(function () {
-                client.hasActiveSession().should.be.true;
+                client._hasActiveSession.should.be.true;
 
                 client.destroy();
 
                 fake.posted.should.deep.include({ type: 'destroy-session' });
                 fake.port.disconnected.should.be.true;
-                client.hasActiveSession().should.be.false;
+                client._hasActiveSession.should.be.false;
             });
         });
 
         it('should surface a streaming-failed Assistant Capability State when the transport disconnects mid-stream', function () {
-            var fake = createFakePort();
-            var client = new PromptClient({
-                portFactory: function () {
-                    return fake.port;
-                }
-            });
+            var harness = createClient();
+            var fake = harness.fake;
+            var client = harness.client;
 
             var sessionPromise = client.createSession([]);
             fake.emit({ type: 'session-created' });
