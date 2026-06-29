@@ -14,9 +14,7 @@
  *                                     throws if no storage is available.
  * @constructor
  */
-function ConversationStore(options) {
-    options = options || {};
-    let storage = options.storage;
+function ConversationStore({ storage } = {}) {
     if (!storage && typeof chrome !== 'undefined' && chrome.storage) {
         storage = chrome.storage.local;
     }

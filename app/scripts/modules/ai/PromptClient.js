@@ -12,11 +12,12 @@
  *                                           to the real Chrome runtime port.
  * @constructor
  */
-function PromptClient(options) {
-    options = options || {};
-    this._portFactory = options.portFactory || function () {
+function PromptClient({
+    portFactory = function () {
         return chrome.runtime.connect({ name: 'prompt-api' });
-    };
+    }
+} = {}) {
+    this._portFactory = portFactory;
     this._port = null;
     this._isConnected = false;
     this._hasActiveSession = false;

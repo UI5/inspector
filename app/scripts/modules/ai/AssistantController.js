@@ -15,12 +15,16 @@ const ConversationStore = require('./ConversationStore.js');
  * @param {Function} [options.getAppInfo] - Returns the app metadata snapshot for session seeding.
  * @constructor
  */
-function AssistantController(options) {
-    options = options || {};
-    this._promptBuilder = options.promptBuilder || new PromptBuilder();
-    this._promptClient = options.promptClient || new PromptClient();
-    this._conversationStore = options.conversationStore || new ConversationStore();
-    this._getAppInfo = options.getAppInfo || function () { return null; };
+function AssistantController({
+    promptBuilder = new PromptBuilder(),
+    promptClient = new PromptClient(),
+    conversationStore = new ConversationStore(),
+    getAppInfo = () => null
+} = {}) {
+    this._promptBuilder = promptBuilder;
+    this._promptClient = promptClient;
+    this._conversationStore = conversationStore;
+    this._getAppInfo = getAppInfo;
 
     // Seeded as `unavailable` until `initialize()` resolves the real status.
     this._capabilityState = { status: 'unavailable', message: 'Checking model status...', progress: 0 };

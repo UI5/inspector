@@ -17,11 +17,10 @@
  * @param {number} [options.streamDebounceMs=50] - Coalescing interval for streaming renders.
  * @constructor
  */
-function AssistantTranscript(container, options) {
+function AssistantTranscript(container, options = {}) {
     if (!container) {
         throw new Error('AssistantTranscript requires a container element');
     }
-    options = options || {};
     this._container = container;
     this._maxJsonDepth = typeof options.maxJsonDepth === 'number' ? options.maxJsonDepth : 10;
     this._streamDebounceMs = typeof options.streamDebounceMs === 'number' ? options.streamDebounceMs : 50;

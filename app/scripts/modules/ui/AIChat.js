@@ -21,17 +21,20 @@ const AssistantTranscript = require('../ai/AssistantTranscript.js');
  *                                                 Defaults to a real AssistantTranscript.
  * @constructor
  */
-function AIChat(containerId, options) {
+function AIChat(containerId, {
+    getAppInfo = null,
+    controller = null,
+    transcriptFactory = function (host) {
+        return new AssistantTranscript(host);
+    }
+} = {}) {
     this._container = document.getElementById(containerId);
-    this._options = options || {};
 
-    this._getAppInfo = this._options.getAppInfo || null;
-    this._controller = this._options.controller || new AssistantController({
+    this._getAppInfo = getAppInfo;
+    this._controller = controller || new AssistantController({
         getAppInfo: this._getAppInfo || function () { return null; }
     });
-    this._transcriptFactory = this._options.transcriptFactory || function (host) {
-        return new AssistantTranscript(host);
-    };
+    this._transcriptFactory = transcriptFactory;
 
     this._isStreaming = false;
     this._streamingHandle = null;
