@@ -113,17 +113,16 @@ AssistantController.prototype._setCapabilityState = function (status, message, p
  * @returns {Promise<void>}
  */
 AssistantController.prototype.initialize = function () {
-    const that = this;
-    return this._promptClient.checkAvailability().then(function (capability) {
-        that._setCapabilityState(capability.status, capability.message, 0);
-        return that._loadConversationMemory().then(function () {
+    return this._promptClient.checkAvailability().then((capability) => {
+        this._setCapabilityState(capability.status, capability.message, 0);
+        return this._loadConversationMemory().then(() => {
             if (capability.status === 'ready') {
-                return that._seedSessionOrFail();
+                return this._seedSessionOrFail();
             }
             return undefined;
         });
-    }, function (err) {
-        that._setCapabilityState('unavailable', err && err.message ? err.message : 'Local AI is unavailable', 0);
+    }, (err) => {
+        this._setCapabilityState('unavailable', err && err.message ? err.message : 'Local AI is unavailable', 0);
     });
 };
 
@@ -134,9 +133,8 @@ AssistantController.prototype.initialize = function () {
  * @returns {Promise<void>}
  */
 AssistantController.prototype._seedSessionOrFail = function () {
-    const that = this;
-    return this._seedSession().then(undefined, function (err) {
-        that._setCapabilityState('session-failed', err && err.message ? err.message : 'Session creation failed', 0);
+    return this._seedSession().then(undefined, (err) => {
+        this._setCapabilityState('session-failed', err && err.message ? err.message : 'Session creation failed', 0);
     });
 };
 
@@ -163,45 +161,44 @@ AssistantController.prototype._seedSession = function () {
  * @returns {Promise<{content: string}>}
  */
 AssistantController.prototype.sendUserMessage = function (userMessage) {
-    const that = this;
     const contextForThisTurn = this._pendingInspectionContext;
     this._pendingInspectionContext = null;
     const formatted = this._promptBuilder.buildUserPrompt(userMessage, contextForThisTurn);
 
     this._isStreaming = true;
 
-    return this._promptClient.promptStreaming(formatted).then(function (stream) {
-        return that._consumeStream(stream);
-    }).then(function (fullText) {
+    return this._promptClient.promptStreaming(formatted).then((stream) => {
+        return this._consumeStream(stream);
+    }).then((fullText) => {
         // Persist only completed turns. Appending the user turn before the
         // stream finishes would leave an orphan user message in conversation
         // memory on streaming failure, which would then leak into the next
         // session seed and bias future answers.
-        return that._conversationStore.append(that._currentUrl, {
+        return this._conversationStore.append(this._currentUrl, {
             role: 'user',
             content: userMessage
-        }).then(function () {
-            return that._conversationStore.append(that._currentUrl, {
+        }).then(() => {
+            return this._conversationStore.append(this._currentUrl, {
                 role: 'assistant',
                 content: fullText
             });
-        }).then(function () {
-            that._conversationMemory.push({ role: 'user', content: userMessage });
-            that._conversationMemory.push({ role: 'assistant', content: fullText });
-            that._isStreaming = false;
+        }).then(() => {
+            this._conversationMemory.push({ role: 'user', content: userMessage });
+            this._conversationMemory.push({ role: 'assistant', content: fullText });
+            this._isStreaming = false;
             // A successful turn after a prior streaming-failed state means
             // the session has recovered. Resurface `ready` so the view does
             // not stay stuck on a failure banner.
-            if (that._capabilityState.status === 'streaming-failed') {
-                that._setCapabilityState('ready', 'Gemini Nano is ready', 0);
+            if (this._capabilityState.status === 'streaming-failed') {
+                this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
             }
-            that._emit('stream-complete', { content: fullText });
+            this._emit('stream-complete', { content: fullText });
             return { content: fullText };
         });
-    }, function (err) {
-        that._isStreaming = false;
-        that._setCapabilityState('streaming-failed', err && err.message ? err.message : 'Streaming failed', 0);
-        that._emit('stream-failed', err);
+    }, (err) => {
+        this._isStreaming = false;
+        this._setCapabilityState('streaming-failed', err && err.message ? err.message : 'Streaming failed', 0);
+        this._emit('stream-failed', err);
         throw err;
     });
 };
@@ -214,20 +211,19 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
  * @returns {Promise<string>}
  */
 AssistantController.prototype._consumeStream = function (stream) {
-    const that = this;
     const iterator = stream[Symbol.asyncIterator]();
     let fullText = '';
 
-    function step() {
-        return iterator.next().then(function (result) {
+    const step = () => {
+        return iterator.next().then((result) => {
             if (result.done) {
                 return fullText;
             }
             fullText += result.value;
-            that._emit('stream-chunk', result.value);
+            this._emit('stream-chunk', result.value);
             return step();
         });
-    }
+    };
 
     return step();
 };
@@ -254,10 +250,9 @@ AssistantController.prototype.setUrl = function (url) {
         return Promise.resolve();
     }
 
-    const that = this;
-    return this._loadConversationMemory().then(function () {
-        that._promptClient.destroy();
-        return that._seedSessionOrFail();
+    return this._loadConversationMemory().then(() => {
+        this._promptClient.destroy();
+        return this._seedSessionOrFail();
     });
 };
 
@@ -279,12 +274,11 @@ AssistantController.prototype.updateInspectionContext = function (context) {
  * @returns {Promise<void>}
  */
 AssistantController.prototype.clearConversation = function () {
-    const that = this;
-    return this._conversationStore.clear(this._currentUrl).then(function () {
-        that._conversationMemory = [];
-        that._promptClient.destroy();
-        that._emit('conversation-cleared');
-        return that._seedSessionOrFail();
+    return this._conversationStore.clear(this._currentUrl).then(() => {
+        this._conversationMemory = [];
+        this._promptClient.destroy();
+        this._emit('conversation-cleared');
+        return this._seedSessionOrFail();
     });
 };
 
@@ -296,15 +290,14 @@ AssistantController.prototype.clearConversation = function () {
  * @returns {Promise<void>}
  */
 AssistantController.prototype.downloadModel = function () {
-    const that = this;
-    that._setCapabilityState('downloading', 'Starting download...', 0);
-    return this._promptClient.downloadModel(function (progress) {
-        that._setCapabilityState('downloading', 'Downloading model', progress);
-    }).then(function () {
-        that._setCapabilityState('ready', 'Model ready', 1);
-        return that._seedSessionOrFail();
-    }, function (err) {
-        that._setCapabilityState('unavailable', err && err.message ? err.message : 'Download failed', 0);
+    this._setCapabilityState('downloading', 'Starting download...', 0);
+    return this._promptClient.downloadModel((progress) => {
+        this._setCapabilityState('downloading', 'Downloading model', progress);
+    }).then(() => {
+        this._setCapabilityState('ready', 'Model ready', 1);
+        return this._seedSessionOrFail();
+    }, (err) => {
+        this._setCapabilityState('unavailable', err && err.message ? err.message : 'Download failed', 0);
         throw err;
     });
 };
@@ -328,10 +321,9 @@ AssistantController.prototype.destroy = function () {
  * @returns {Promise<void>}
  */
 AssistantController.prototype._loadConversationMemory = function () {
-    const that = this;
-    return this._conversationStore.load(this._currentUrl).then(function (turns) {
-        that._conversationMemory = turns || [];
-        that._emit('conversation-loaded', that._conversationMemory.slice());
+    return this._conversationStore.load(this._currentUrl).then((turns) => {
+        this._conversationMemory = turns || [];
+        this._emit('conversation-loaded', this._conversationMemory.slice());
     });
 };
 

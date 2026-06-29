@@ -88,30 +88,29 @@ AssistantTranscript.prototype.beginAssistantTurn = function () {
     loadingIndicator.appendChild(loadingDots);
     contentElement.appendChild(loadingIndicator);
 
-    const that = this;
     let buffer = '';
     let debounceTimer = null;
     let pendingText = null;
 
-    function flush() {
+    const flush = () => {
         if (pendingText !== null && contentElement.isConnected !== false) {
-            contentElement.innerHTML = that._parseMarkdown(pendingText);
-            that._initializeJsonViewers(contentElement);
-            that.scrollToBottom(false);
+            contentElement.innerHTML = this._parseMarkdown(pendingText);
+            this._initializeJsonViewers(contentElement);
+            this.scrollToBottom(false);
         }
         debounceTimer = null;
-    }
+    };
 
     return {
-        streamChunk: function (chunk) {
+        streamChunk: (chunk) => {
             buffer += chunk;
             pendingText = buffer;
             if (debounceTimer) {
                 return;
             }
-            debounceTimer = setTimeout(flush, that._streamDebounceMs);
+            debounceTimer = setTimeout(flush, this._streamDebounceMs);
         },
-        finalize: function (fullContent) {
+        finalize: (fullContent) => {
             if (debounceTimer) {
                 clearTimeout(debounceTimer);
                 debounceTimer = null;
@@ -119,16 +118,16 @@ AssistantTranscript.prototype.beginAssistantTurn = function () {
             pendingText = null;
             buffer = '';
 
-            contentElement.innerHTML = that._parseMarkdown(fullContent);
-            that._initializeJsonViewers(contentElement);
+            contentElement.innerHTML = this._parseMarkdown(fullContent);
+            this._initializeJsonViewers(contentElement);
 
             const copyButton = document.createElement('button');
             copyButton.className = 'copy-response-button';
             copyButton.title = 'Copy response';
             copyButton.setAttribute('aria-label', 'Copy response');
             copyButton.textContent = 'Copy';
-            copyButton.addEventListener('click', function (e) {
-                that._copyToClipboard(fullContent, e.currentTarget);
+            copyButton.addEventListener('click', (e) => {
+                this._copyToClipboard(fullContent, e.currentTarget);
             });
             headerElement.appendChild(copyButton);
 
@@ -237,9 +236,8 @@ AssistantTranscript.prototype._appendMessage = function (role, content, showCopy
 
         const copyButton = messageElement.querySelector('.copy-response-button');
         if (copyButton) {
-            const that = this;
-            copyButton.addEventListener('click', function (e) {
-                that._copyToClipboard(content, e.currentTarget);
+            copyButton.addEventListener('click', (e) => {
+                this._copyToClipboard(content, e.currentTarget);
             });
         }
     }
@@ -324,9 +322,8 @@ AssistantTranscript.prototype._applyMarkdownFormatting = function (text) {
  * @private
  */
 AssistantTranscript.prototype._restoreInlineCode = function (text, inlineCode) {
-    const that = this;
-    inlineCode.forEach(function (code, index) {
-        text = text.replace('___INLINECODE_' + index + '___', '<code>' + that._escapeHtml(code) + '</code>');
+    inlineCode.forEach((code, index) => {
+        text = text.replace('___INLINECODE_' + index + '___', '<code>' + this._escapeHtml(code) + '</code>');
     });
     return text;
 };
@@ -335,13 +332,12 @@ AssistantTranscript.prototype._restoreInlineCode = function (text, inlineCode) {
  * @private
  */
 AssistantTranscript.prototype._restoreCodeBlocks = function (text, codeBlocks) {
-    const that = this;
-    codeBlocks.forEach(function (block, index) {
+    codeBlocks.forEach((block, index) => {
         let replacement;
         if (block.type === 'json') {
-            replacement = that._createJsonViewer(block.data);
+            replacement = this._createJsonViewer(block.data);
         } else {
-            replacement = that._createCodeViewer(block.code, block.lang);
+            replacement = this._createCodeViewer(block.code, block.lang);
         }
         text = text.replace('___CODEBLOCK_' + index + '___', replacement);
     });
@@ -376,14 +372,13 @@ AssistantTranscript.prototype._renderJsonValue = function (value, key, isLast, d
     }
 
     const comma = isLast ? '' : ',';
-    const that = this;
     const handlers = {
-        'null': function () { return that._renderJsonLine(key, '<span class="json-null">null</span>' + comma); },
-        'boolean': function () { return that._renderJsonLine(key, '<span class="json-boolean">' + value + '</span>' + comma); },
-        'number': function () { return that._renderJsonLine(key, '<span class="json-number">' + value + '</span>' + comma); },
-        'string': function () { return that._renderJsonString(key, value, comma); },
-        'array': function () { return that._renderJsonArray(key, value, comma, depth); },
-        'object': function () { return that._renderJsonObject(key, value, comma, depth); }
+        'null': () => this._renderJsonLine(key, '<span class="json-null">null</span>' + comma),
+        'boolean': () => this._renderJsonLine(key, '<span class="json-boolean">' + value + '</span>' + comma),
+        'number': () => this._renderJsonLine(key, '<span class="json-number">' + value + '</span>' + comma),
+        'string': () => this._renderJsonString(key, value, comma),
+        'array': () => this._renderJsonArray(key, value, comma, depth),
+        'object': () => this._renderJsonObject(key, value, comma, depth)
     };
 
     const type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
@@ -408,9 +403,8 @@ AssistantTranscript.prototype._renderJsonArray = function (key, value, comma, de
 
     const id = 'json-' + Math.random().toString(36).substring(2, 11);
     const keyHtml = key ? '<span class="json-key">"' + this._escapeHtml(key) + '"</span>: ' : '';
-    const that = this;
-    const items = value.map(function (item, i) {
-        return that._renderJsonValue(item, null, i === value.length - 1, depth + 1);
+    const items = value.map((item, i) => {
+        return this._renderJsonValue(item, null, i === value.length - 1, depth + 1);
     }).join('');
 
     return '<div class="json-line">' + keyHtml + '<span class="json-toggle" data-target="' + id + '">\u25BC</span> <span class="json-bracket">[</span><span class="json-count">' + value.length + ' items</span></div>' +
@@ -428,9 +422,8 @@ AssistantTranscript.prototype._renderJsonObject = function (key, value, comma, d
 
     const id = 'json-' + Math.random().toString(36).substring(2, 11);
     const keyHtml = key ? '<span class="json-key">"' + this._escapeHtml(key) + '"</span>: ' : '';
-    const that = this;
-    const items = keys.map(function (k, i) {
-        return that._renderJsonValue(value[k], k, i === keys.length - 1, depth + 1);
+    const items = keys.map((k, i) => {
+        return this._renderJsonValue(value[k], k, i === keys.length - 1, depth + 1);
     }).join('');
 
     return '<div class="json-line">' + keyHtml + '<span class="json-toggle" data-target="' + id + '">\u25BC</span> <span class="json-bracket">{</span><span class="json-count">' + keys.length + ' keys</span></div>' +
@@ -454,9 +447,7 @@ AssistantTranscript.prototype._renderJsonLine = function (key, content) {
  * @private
  */
 AssistantTranscript.prototype._initializeJsonViewers = function (element) {
-    const that = this;
-
-    element.querySelectorAll('.json-viewer').forEach(function (viewer) {
+    element.querySelectorAll('.json-viewer').forEach((viewer) => {
         const jsonData = viewer.getAttribute('data-json');
         if (!jsonData) {
             return;
@@ -465,15 +456,15 @@ AssistantTranscript.prototype._initializeJsonViewers = function (element) {
             const parsed = JSON.parse(jsonData);
             viewer.innerHTML = '<div class="json-wrapper">' +
                 '<button class="copy-code-button" title="Copy JSON" aria-label="Copy JSON">Copy</button>' +
-                '<div class="json-tree">' + that._renderJsonValue(parsed, null, true) + '</div>' +
+                '<div class="json-tree">' + this._renderJsonValue(parsed, null, true) + '</div>' +
                 '</div>';
 
-            that._setupJsonToggleHandlers(viewer);
+            this._setupJsonToggleHandlers(viewer);
 
             const copyButton = viewer.querySelector('.copy-code-button');
             if (copyButton) {
-                copyButton.addEventListener('click', function (e) {
-                    that._copyToClipboard(JSON.stringify(parsed, null, 2), e.currentTarget);
+                copyButton.addEventListener('click', (e) => {
+                    this._copyToClipboard(JSON.stringify(parsed, null, 2), e.currentTarget);
                 });
             }
         } catch (e) {
@@ -481,18 +472,18 @@ AssistantTranscript.prototype._initializeJsonViewers = function (element) {
         }
     });
 
-    element.querySelectorAll('.code-viewer').forEach(function (viewer) {
+    element.querySelectorAll('.code-viewer').forEach((viewer) => {
         const code = viewer.getAttribute('data-code');
         const lang = viewer.getAttribute('data-lang');
         if (!code) {
             return;
         }
         try {
-            viewer.innerHTML = that._renderCodeBlock(code, lang);
+            viewer.innerHTML = this._renderCodeBlock(code, lang);
             const copyButton = viewer.querySelector('.copy-code-button');
             if (copyButton) {
-                copyButton.addEventListener('click', function (e) {
-                    that._copyToClipboard(code, e.currentTarget);
+                copyButton.addEventListener('click', (e) => {
+                    this._copyToClipboard(code, e.currentTarget);
                 });
             }
         } catch (e) {
@@ -524,10 +515,9 @@ AssistantTranscript.prototype._setupJsonToggleHandlers = function (viewer) {
  * @private
  */
 AssistantTranscript.prototype._renderCodeBlock = function (code, lang) {
-    const that = this;
     const lines = code.split('\n');
-    const linesHtml = lines.map(function (line) {
-        const escapedLine = that._escapeHtml(line || ' ');
+    const linesHtml = lines.map((line) => {
+        const escapedLine = this._escapeHtml(line || ' ');
         return '<div class="code-line">' + escapedLine + '</div>';
     }).join('');
 
