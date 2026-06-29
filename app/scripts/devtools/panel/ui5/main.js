@@ -436,6 +436,12 @@
         }
     });
 
+    // Tear down the AI session when the panel page is unloaded so the background
+    // service worker disconnects the prompt-api port and destroys the model session.
+    window.addEventListener('beforeunload', function () {
+        aiChat.destroy();
+    });
+
     // ================================================================================
     // Communication
     // ================================================================================
