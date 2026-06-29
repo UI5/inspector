@@ -231,61 +231,51 @@ AIChat.prototype._attachControllerListeners = function () {
 };
 
 /**
- * Canonical capability states. The banner CSS class derives directly: `status-<name>`. States
- * outside this set route to the unavailable banner.
+ * Canonical capability state config. The banner CSS class is `status-<key>` for every key.
+ * `skip: true` means no banner update. `showClearButton: true` makes the clear-history button
+ * visible. `updateTokens: true` refreshes the token counter. Unknown statuses route to `unavailable`.
  * @private
  */
-AIChat._CANONICAL_CAPABILITY_STATES = [
-    'unsupported',
-    'unavailable',
-    'downloadable',
-    'downloading',
-    'ready',
-    'session-failed',
-    'streaming-failed'
-];
+AIChat._CAPABILITY_CONFIG = {
+    'unsupported':      {},
+    'unavailable':      {},
+    'downloadable':     {},
+    'downloading':      {},
+    'ready':            { showClearButton: true, updateTokens: true },
+    // Clear-history is the recovery: ConversationStore.clear() destroys the broken session and the controller reseeds. Show the button.
+    'session-failed':   { showClearButton: true },
+    // streaming-failed keeps the prior banner so recovery shows via the next sendUserMessage(); the error surfaces as a system message via `stream-failed`.
+    'streaming-failed': { skip: true }
+};
 
 /**
  * React to a capability state change.
- *
- * `streaming-failed` does not change the banner — it is surfaced as a system message via
- * `stream-failed`, and the banner stays on its prior `ready` state so recovery shows on the next
- * send.
- *
- * For every other canonical state the view renders the banner from the controller's state: CSS
- * class `status-<status>`, text `state.message` (with a cosmetic adjustment for downloading
- * progress), download button visible only for the two states that admit it.
- *
- * Non-canonical states fall back to the `unavailable` banner with a console warning.
- *
  * @private
  * @param {{status: string, message: string, progress: number}} state
  */
 AIChat.prototype._onCapabilityStateChanged = function (state) {
-    if (state.status === 'streaming-failed') {
+    let config = AIChat._CAPABILITY_CONFIG[state.status];
+    if (config && config.skip) {
         return;
     }
 
     let status = state.status;
-    if (AIChat._CANONICAL_CAPABILITY_STATES.indexOf(status) === -1) {
+    if (!config) {
         console.warn('AIChat: unmapped Assistant Capability State "' + status + '"; routing to unavailable banner');
         status = 'unavailable';
+        config = AIChat._CAPABILITY_CONFIG.unavailable;
     }
 
     this._renderCapabilityBanner(status, state);
 
-    if (status === 'ready') {
+    if (config.showClearButton) {
         const clearButton = document.getElementById('ai-clear-history-button');
         if (clearButton) {
             clearButton.style.display = 'inline-block';
         }
+    }
+    if (config.updateTokens) {
         this._updateTokenCounter();
-    } else if (status === 'session-failed') {
-        // Clear-history is the recovery: ConversationStore.clear() destroys the broken session and the controller reseeds. Show the button.
-        const clearButton = document.getElementById('ai-clear-history-button');
-        if (clearButton) {
-            clearButton.style.display = 'inline-block';
-        }
     }
 };
 
