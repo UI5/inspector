@@ -116,9 +116,6 @@ AIChat.prototype._render = function () {
     `;
 };
 
-/**
- * @private
- */
 AIChat.prototype._attachEventListeners = function () {
     const input = document.getElementById('ai-input');
     const sendButton = document.getElementById('ai-send-button');
@@ -312,9 +309,6 @@ AIChat.prototype._handleDownloadModel = function () {
     });
 };
 
-/**
- * @private
- */
 AIChat.prototype._handleSendMessage = function () {
     const input = document.getElementById('ai-input');
     const userMessage = input.value.trim();
@@ -336,16 +330,10 @@ AIChat.prototype._handleSendMessage = function () {
     });
 };
 
-/**
- * @private
- */
 AIChat.prototype._handleClearHistory = function () {
     this._showConfirmDialog();
 };
 
-/**
- * @private
- */
 AIChat.prototype._showConfirmDialog = function () {
     const dialog = document.getElementById('ai-confirm-dialog');
     dialog.style.display = 'flex';
@@ -358,9 +346,6 @@ AIChat.prototype._showConfirmDialog = function () {
     }
 };
 
-/**
- * @private
- */
 AIChat.prototype._hideConfirmDialog = function () {
     const dialog = document.getElementById('ai-confirm-dialog');
     dialog.style.display = 'none';
@@ -370,9 +355,6 @@ AIChat.prototype._hideConfirmDialog = function () {
     }
 };
 
-/**
- * @private
- */
 AIChat.prototype._performClearHistory = function () {
     this._controller.clearConversation().catch((error) => {
         this._transcript.appendSystemMessage('Error clearing history: ' + (error && error.message ? error.message : error));
@@ -417,9 +399,6 @@ AIChat.prototype._renderCapabilityBanner = function (status, state) {
     }
 };
 
-/**
- * @private
- */
 AIChat.prototype._updateTokenCounter = function () {
     const counter = document.getElementById('ai-token-counter');
     const input = document.getElementById('ai-input');
@@ -471,9 +450,6 @@ AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
     }
 };
 
-/**
- * @private
- */
 AIChat.prototype._clearContext = function () {
     this._controller.updateInspectionContext(null);
     const contextInfo = document.getElementById('ai-context-info');

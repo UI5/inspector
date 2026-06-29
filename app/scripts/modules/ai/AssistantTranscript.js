@@ -27,9 +27,6 @@ function AssistantTranscript(container, options = {}) {
     this._renderEmptyState();
 }
 
-/**
- * @private
- */
 AssistantTranscript.prototype._renderEmptyState = function () {
     // Safe innerHTML: literal string, no user- or model-controlled interpolation. Later appends route content through _escapeHtml (user/system) or _parseMarkdown (assistant).
     this._container.innerHTML = '' +
@@ -177,9 +174,6 @@ AssistantTranscript.prototype.scrollToBottom = function (force) {
  */
 AssistantTranscript.prototype.destroy = function () {};
 
-/**
- * @private
- */
 AssistantTranscript.prototype._isScrolledToBottom = function () {
     const container = this._container;
     if (!container) {
@@ -191,9 +185,6 @@ AssistantTranscript.prototype._isScrolledToBottom = function () {
     return scrollHeight - scrollPosition < threshold;
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._appendMessage = function (role, content, showCopyButton) {
     const welcomeMessage = this._container.querySelector('.ai-welcome-message');
     if (welcomeMessage) {
@@ -233,18 +224,12 @@ AssistantTranscript.prototype._appendMessage = function (role, content, showCopy
     return messageElement;
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._escapeHtml = function (text) {
     const div = document.createElement('div');
     div.textContent = (text === null || text === undefined) ? '' : String(text);
     return div.innerHTML;
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._parseMarkdown = function (text) {
     const placeholders = { codeBlocks: [], inlineCode: [] };
 
@@ -260,9 +245,6 @@ AssistantTranscript.prototype._parseMarkdown = function (text) {
     return html;
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._extractCodeBlocks = function (text, placeholders) {
     return text.replace(/```([\w]*)?\n([\s\S]*?)```/g, function (match, lang, code) {
         const index = placeholders.codeBlocks.length;
@@ -283,9 +265,6 @@ AssistantTranscript.prototype._extractCodeBlocks = function (text, placeholders)
     });
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._extractInlineCode = function (text, placeholders) {
     return text.replace(/`([^`]+)`/g, function (match, code) {
         const index = placeholders.inlineCode.length;
@@ -294,9 +273,6 @@ AssistantTranscript.prototype._extractInlineCode = function (text, placeholders)
     });
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._applyMarkdownFormatting = function (text) {
     return text
         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
@@ -305,9 +281,6 @@ AssistantTranscript.prototype._applyMarkdownFormatting = function (text) {
         .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._restoreInlineCode = function (text, inlineCode) {
     inlineCode.forEach((code, index) => {
         text = text.replace('___INLINECODE_' + index + '___', '<code>' + this._escapeHtml(code) + '</code>');
@@ -315,9 +288,6 @@ AssistantTranscript.prototype._restoreInlineCode = function (text, inlineCode) {
     return text;
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._restoreCodeBlocks = function (text, codeBlocks) {
     codeBlocks.forEach((block, index) => {
         let replacement;
@@ -331,25 +301,16 @@ AssistantTranscript.prototype._restoreCodeBlocks = function (text, codeBlocks) {
     return text;
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._createJsonViewer = function (data) {
     const jsonString = JSON.stringify(data).replace(/'/g, '&#39;');
     return '<div class="json-viewer" data-json=\'' + jsonString + '\'></div>';
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._createCodeViewer = function (code, lang) {
     const escapedCode = code.replace(/'/g, '&#39;').replace(/"/g, '&quot;');
     return '<div class="code-viewer" data-code=\'' + escapedCode + '\' data-lang=\'' + lang + '\'></div>';
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._renderJsonValue = function (value, key, isLast, depth) {
     depth = depth || 0;
 
@@ -372,17 +333,11 @@ AssistantTranscript.prototype._renderJsonValue = function (value, key, isLast, d
     return handlers[type] ? handlers[type]() : this._renderJsonLine(key, this._escapeHtml(String(value)) + comma);
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._renderJsonString = function (key, value, comma) {
     const escaped = this._escapeHtml(value);
     return this._renderJsonLine(key, '<span class="json-string">"' + escaped + '"</span>' + comma);
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._renderJsonArray = function (key, value, comma, depth) {
     if (value.length === 0) {
         return this._renderJsonLine(key, '<span class="json-bracket">[]</span>' + comma);
@@ -398,9 +353,6 @@ AssistantTranscript.prototype._renderJsonArray = function (key, value, comma, de
         '<div class="json-content" id="' + id + '">' + items + '<div class="json-line"><span class="json-bracket">]</span>' + comma + '</div></div>';
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._renderJsonObject = function (key, value, comma, depth) {
     const keys = Object.keys(value);
     if (keys.length === 0) {
@@ -417,9 +369,6 @@ AssistantTranscript.prototype._renderJsonObject = function (key, value, comma, d
         '<div class="json-content" id="' + id + '">' + items + '<div class="json-line"><span class="json-bracket">}</span>' + comma + '</div></div>';
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._renderJsonLine = function (key, content) {
     let html = '<div class="json-line">';
     if (key !== null) {
@@ -430,9 +379,6 @@ AssistantTranscript.prototype._renderJsonLine = function (key, content) {
     return html;
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._initializeJsonViewers = function (element) {
     element.querySelectorAll('.json-viewer').forEach((viewer) => {
         const jsonData = viewer.getAttribute('data-json');
@@ -479,9 +425,6 @@ AssistantTranscript.prototype._initializeJsonViewers = function (element) {
     });
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._setupJsonToggleHandlers = function (viewer) {
     viewer.querySelectorAll('.json-toggle').forEach(function (toggle) {
         toggle.addEventListener('click', function (e) {
@@ -498,9 +441,6 @@ AssistantTranscript.prototype._setupJsonToggleHandlers = function (viewer) {
     });
 };
 
-/**
- * @private
- */
 AssistantTranscript.prototype._renderCodeBlock = function (code, lang) {
     const lines = code.split('\n');
     const linesHtml = lines.map((line) => {

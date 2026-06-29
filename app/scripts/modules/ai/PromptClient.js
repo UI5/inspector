@@ -24,9 +24,6 @@ function PromptClient({
     this._messageHandlers = {};
 }
 
-/**
- * @private
- */
 PromptClient.prototype._connect = function () {
     if (this._isConnected) {
         return;
