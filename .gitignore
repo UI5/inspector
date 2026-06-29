@@ -27,3 +27,10 @@ package
 # AI
 AGENTS.md
 CLAUDE.md
+
+# Agent workflow artifacts (PRDs, issues, ADRs, agent docs)
+.scratch/
+docs/adr/
+docs/agents/
+CONTEXT.md
+prompt.md
