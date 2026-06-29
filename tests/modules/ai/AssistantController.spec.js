@@ -22,6 +22,9 @@ function createFakePromptClient() {
         userPromptsByCall: [],
         destroyed: 0,
         pendingStreamControllers: [],
+        // When non-null, createSession() returns this pending promise instead of resolving
+        // synchronously. Tests resolve / reject the deferred to drive reseed timing.
+        deferredCreateSession: null,
 
         checkAvailability: function () {
             return Promise.resolve(fake.availabilityResult);
@@ -41,6 +44,9 @@ function createFakePromptClient() {
 
         createSession: function (seedMessages) {
             fake.seedMessagesByCall.push(seedMessages);
+            if (fake.deferredCreateSession) {
+                return fake.deferredCreateSession.promise;
+            }
             if (fake.createSessionError) {
                 return Promise.reject(fake.createSessionError);
             }
@@ -226,6 +232,22 @@ function awaitStreamController(fakePromptClient, maxAttempts) {
         }
         poll();
     });
+}
+
+/**
+ * A manually-resolvable promise wrapper. Tests use it to defer the fake Prompt Client's
+ * `createSession()` so they can drive the reseed timing explicitly.
+ *
+ * @returns {{promise: Promise<*>, resolve: Function, reject: Function}}
+ */
+function createDeferred() {
+    let resolve;
+    let reject;
+    const promise = new Promise(function (res, rej) {
+        resolve = res;
+        reject = rej;
+    });
+    return { promise: promise, resolve: resolve, reject: reject };
 }
 
 describe('AssistantController', function () {
@@ -808,6 +830,97 @@ describe('AssistantController', function () {
                 return harness.controller.downloadModel();
             }).then(function () {
                 harness.controller._capabilityState.status.should.equal('session-failed');
+            });
+        });
+    });
+
+    describe('#sendUserMessage() during an in-flight session reseed', function () {
+        it('should defer the user prompt until clearConversation has reseeded the session, so a Send pressed immediately after Clear History does not race the Prompt Client guard', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                // Arrange: defer the reseed createSession so the window between destroy and
+                // session-created stays open.
+                harness.promptClient.deferredCreateSession = createDeferred();
+
+                // Act: trigger Clear History (fire-and-forget, like AIChat does) then send
+                // immediately, before the reseed resolves.
+                harness.controller.clearConversation();
+                const sendPromise = harness.controller.sendUserMessage('after clear');
+
+                // The user prompt MUST NOT have reached promptStreaming yet — the controller
+                // is responsible for waiting for the in-flight seed before sending.
+                return new Promise(function (resolve) { setTimeout(resolve, 0); }).then(function () {
+                    harness.promptClient.userPromptsByCall.should.have.length(0);
+
+                    // Now let the reseed complete. Leaving `deferredCreateSession` set is fine —
+                    // there is only one seed in flight in this scenario.
+                    harness.promptClient.deferredCreateSession.resolve(true);
+
+                    return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                        streamCtrl.emitChunk('hi');
+                        streamCtrl.emitComplete();
+                        return sendPromise;
+                    });
+                }).then(function () {
+                    harness.promptClient.userPromptsByCall.should.deep.equal(['after clear']);
+                });
+            });
+        });
+
+        it('should reject sendUserMessage and leave the Assistant Capability State at session-failed when the in-flight reseed itself fails, instead of overwriting it with streaming-failed', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                harness.promptClient.deferredCreateSession = createDeferred();
+
+                harness.controller.clearConversation();
+                const sendPromise = harness.controller.sendUserMessage('after clear');
+
+                // Reseed fails. Leave `deferredCreateSession` set so the fake's `createSession`
+                // call from inside the clearConversation chain (on the next microtask) returns
+                // the rejected promise rather than falling through to the default resolved path.
+                harness.promptClient.deferredCreateSession.reject(new Error('reseed failed mid race'));
+
+                return sendPromise.then(function () {
+                    throw new Error('Expected sendUserMessage to reject when the in-flight reseed failed');
+                }, function (err) {
+                    err.message.should.contain('reseed failed mid race');
+                }).then(function () {
+                    // Capability state stays session-failed; streaming-failed would overwrite the
+                    // user-visible banner with the wrong cause.
+                    harness.controller._capabilityState.status.should.equal('session-failed');
+                    // The prompt must never have been forwarded to the transport.
+                    harness.promptClient.userPromptsByCall.should.have.length(0);
+                });
+            });
+        });
+
+        it('should defer the user prompt until setUrl has reseeded the session for the new inspected URL, so a Send pressed immediately after a URL change does not race the Prompt Client guard', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                // Same race shape as clearConversation, on the setUrl path. Spec acceptance
+                // criterion 2 (".scratch/ai-session-reseed-race/issue.md"): URL change reseed
+                // must not let a Send through before the new session is live.
+                harness.promptClient.deferredCreateSession = createDeferred();
+
+                harness.controller.setUrl('https://other.example.com');
+                const sendPromise = harness.controller.sendUserMessage('after url change');
+
+                return new Promise(function (resolve) { setTimeout(resolve, 0); }).then(function () {
+                    harness.promptClient.userPromptsByCall.should.have.length(0);
+
+                    harness.promptClient.deferredCreateSession.resolve(true);
+
+                    return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                        streamCtrl.emitChunk('ok');
+                        streamCtrl.emitComplete();
+                        return sendPromise;
+                    });
+                }).then(function () {
+                    harness.promptClient.userPromptsByCall.should.deep.equal(['after url change']);
+                });
             });
         });
     });

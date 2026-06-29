@@ -33,6 +33,12 @@ function AssistantController({
     this._conversationMemory = [];
     this._pendingInspectionContext = null;
     this._isStreaming = false;
+    // Promise of the most recent in-flight session reseed (initialize, clearConversation,
+    // setUrl, downloadModel). `sendUserMessage` awaits this so a Send pressed during a reseed
+    // window does not race the Prompt Client's "No active session" guard. Resolved to undefined
+    // when no reseed is in flight; rejects if a reseed itself rejects (its rejection is also
+    // caught by `_trackReseed` to surface a `session-failed` capability state).
+    this._pendingReseed = Promise.resolve();
 }
 
 /**
@@ -100,7 +106,7 @@ AssistantController.prototype.initialize = function () {
         this._setCapabilityState(capability.status, capability.message, 0);
         return this._loadConversationMemory().then(() => {
             if (capability.status === 'ready') {
-                return this._seedSessionOrFail();
+                return this._trackReseed(this._seedSession());
             }
             return undefined;
         });
@@ -110,14 +116,43 @@ AssistantController.prototype.initialize = function () {
 };
 
 /**
- * Create a fresh local AI session. Translates failures into a `session-failed` capability state
- * instead of propagating.
+ * Track `rawSeed` (a promise from `_seedSession()`) as the in-flight `_pendingReseed` and
+ * translate its failure into a `session-failed` capability state instead of propagating from this
+ * method.
+ *
+ * Stored as the *raw* (rejection-preserving) promise so `sendUserMessage` awaiters observe a
+ * reseed failure and reject the send rather than fall through into the Prompt Client's "No active
+ * session" guard.
+ *
  * @private
+ * @param {Promise<*>} rawSeed
  * @returns {Promise<void>}
  */
-AssistantController.prototype._seedSessionOrFail = function () {
-    return this._seedSession().then(undefined, (err) => {
+AssistantController.prototype._trackReseed = function (rawSeed) {
+    this._pendingReseed = rawSeed;
+    return rawSeed.then(undefined, (err) => {
         this._setCapabilityState('session-failed', err && err.message ? err.message : 'Session creation failed', 0);
+    });
+};
+
+/**
+ * Like `_trackReseed`, and on success re-emit `ready` so view-level state derived from the live
+ * session (token counter, quota styling, input enablement) refreshes. Used by destroy-then-reseed
+ * paths (`clearConversation`, `setUrl`) where the view needs an explicit signal that the new
+ * session is live.
+ *
+ * On failure, does not emit `ready` — `session-failed` is already surfaced and must not be
+ * overwritten.
+ *
+ * @private
+ * @param {Promise<*>} rawSeed
+ * @returns {Promise<void>}
+ */
+AssistantController.prototype._trackReseedAndAnnounceReady = function (rawSeed) {
+    return this._trackReseed(rawSeed).then(() => {
+        if (this._capabilityState.status === 'ready') {
+            this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
+        }
     });
 };
 
@@ -148,34 +183,49 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
 
     this._isStreaming = true;
 
-    return this._promptClient.promptStreaming(formatted).then((stream) => {
-        return this._consumeStream(stream);
-    }).then((fullText) => {
-        // Persist only completed turns. Appending the user turn before the stream finishes would leak an orphan user message into the next session seed on streaming failure.
-        return this._conversationStore.append(this._currentUrl, {
-            role: 'user',
-            content: userMessage
-        }).then(() => {
+    // Wait for any in-flight reseed (initialize / clearConversation / setUrl / downloadModel) so
+    // a Send pressed during the destroy-then-reseed window does not race the Prompt Client's
+    // "No active session. Call createSession() first." guard.
+    //
+    // If the reseed itself rejects, reject sendUserMessage with that error and leave the existing
+    // `session-failed` capability state in place — flipping it to `streaming-failed` would
+    // overwrite the more accurate banner with the wrong cause.
+    return this._pendingReseed.then(() => {
+        return this._promptClient.promptStreaming(formatted).then((stream) => {
+            return this._consumeStream(stream);
+        }).then((fullText) => {
+            // Persist only completed turns. Appending the user turn before the stream finishes would leak an orphan user message into the next session seed on streaming failure.
             return this._conversationStore.append(this._currentUrl, {
-                role: 'assistant',
-                content: fullText
+                role: 'user',
+                content: userMessage
+            }).then(() => {
+                return this._conversationStore.append(this._currentUrl, {
+                    role: 'assistant',
+                    content: fullText
+                });
+            }).then(() => {
+                this._conversationMemory.push({ role: 'user', content: userMessage });
+                this._conversationMemory.push({ role: 'assistant', content: fullText });
+                this._isStreaming = false;
+                // Resurface `ready` after a streaming-failed recovery so the view does not stick on the failure banner.
+                if (this._capabilityState.status === 'streaming-failed') {
+                    this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
+                }
+                this._emit('stream-complete', { content: fullText });
+                return { content: fullText };
             });
-        }).then(() => {
-            this._conversationMemory.push({ role: 'user', content: userMessage });
-            this._conversationMemory.push({ role: 'assistant', content: fullText });
+        }, (err) => {
             this._isStreaming = false;
-            // Resurface `ready` after a streaming-failed recovery so the view does not stick on the failure banner.
-            if (this._capabilityState.status === 'streaming-failed') {
-                this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
-            }
-            this._emit('stream-complete', { content: fullText });
-            return { content: fullText };
+            this._setCapabilityState('streaming-failed', err && err.message ? err.message : 'Streaming failed', 0);
+            this._emit('stream-failed', err);
+            throw err;
         });
-    }, (err) => {
+    }, (seedErr) => {
+        // Reseed failed. `_trackReseed` has already surfaced `session-failed`
+        // for the view; do not overwrite it with `streaming-failed`.
         this._isStreaming = false;
-        this._setCapabilityState('streaming-failed', err && err.message ? err.message : 'Streaming failed', 0);
-        this._emit('stream-failed', err);
-        throw err;
+        this._emit('stream-failed', seedErr);
+        throw seedErr;
     });
 };
 
@@ -225,10 +275,15 @@ AssistantController.prototype.setUrl = function (url) {
         return Promise.resolve();
     }
 
-    return this._loadConversationMemory().then(() => {
+    // Set up `_pendingReseed` synchronously via `_trackReseedAndAnnounceReady` so a
+    // `sendUserMessage` called during the URL-change reseed window awaits the new session and
+    // observes any reseed failure rather than racing the Prompt Client's "No active session"
+    // guard.
+    const rawSeed = this._loadConversationMemory().then(() => {
         this._promptClient.destroy();
-        return this._reseedAndAnnounceReady();
+        return this._seedSession();
     });
+    return this._trackReseedAndAnnounceReady(rawSeed);
 };
 
 /**
@@ -253,32 +308,18 @@ AssistantController.prototype.updateInspectionContext = function (context) {
  * @returns {Promise<void>}
  */
 AssistantController.prototype.clearConversation = function () {
-    return this._conversationStore.clear(this._currentUrl).then(() => {
+    // Set up `_pendingReseed` synchronously via `_trackReseedAndAnnounceReady` so that any
+    // `sendUserMessage` called during the destroy-then-reseed window (notably from AIChat's
+    // fire-and-forget Clear History flow) awaits the new session rather than racing the Prompt
+    // Client's "No active session" guard. The pending reseed mirrors the underlying
+    // `_seedSession` rejection so a reseed failure here rejects the awaiting send.
+    const rawSeed = this._conversationStore.clear(this._currentUrl).then(() => {
         this._conversationMemory = [];
         this._promptClient.destroy();
         this._emit('conversation-cleared');
-        return this._reseedAndAnnounceReady();
+        return this._seedSession();
     });
-};
-
-/**
- * Reseed the local AI session and, on success, re-emit a `ready` capability state so view-level
- * state derived from the live session (token counter, quota styling, input enablement) refreshes.
- * On failure, `_seedSessionOrFail` already surfaces `session-failed`, so this method does not
- * emit `ready`.
- *
- * @private
- * @returns {Promise<void>}
- */
-AssistantController.prototype._reseedAndAnnounceReady = function () {
-    return this._seedSessionOrFail().then(() => {
-        // `_seedSessionOrFail` resolves either with the session ready or after having flipped
-        // capability state to `session-failed`. Re-emit `ready` only in the former case so a
-        // failed reseed's `session-failed` banner is not immediately overwritten.
-        if (this._capabilityState.status === 'ready') {
-            this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
-        }
-    });
+    return this._trackReseedAndAnnounceReady(rawSeed);
 };
 
 /**
@@ -293,7 +334,7 @@ AssistantController.prototype.downloadModel = function () {
         this._setCapabilityState('downloading', 'Downloading model', progress);
     }).then(() => {
         this._setCapabilityState('ready', 'Model ready', 1);
-        return this._seedSessionOrFail();
+        return this._trackReseed(this._seedSession());
     }, (err) => {
         this._setCapabilityState('unavailable', err && err.message ? err.message : 'Download failed', 0);
         throw err;
