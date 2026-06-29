@@ -1,27 +1,23 @@
 'use strict';
 
 /**
- * AssistantTranscript - presentation module for the Inspector AI Assistant.
- *
- * Owns the *rules* for rendering an assistant transcript inside a host
- * container: markdown parsing, JSON viewer expand/collapse, code viewer
- * rendering, scroll bookkeeping, the streaming render debounce, clipboard
- * helpers for copy buttons it itself injects, and HTML escaping. Exposes
- * a small stream-shaped interface so AIChat can drive it without
- * reaching past it into private helpers.
+ * Presentation module for the assistant transcript. Owns markdown parsing,
+ * JSON viewer expand/collapse, code viewer rendering, scroll bookkeeping,
+ * the streaming render debounce, clipboard helpers for the copy buttons it
+ * injects, and HTML escaping. Exposes a small stream-shaped interface so
+ * AIChat can drive it without reaching into private helpers.
  *
  * Does not own:
- *  - Conversation Memory persistence (that lives in {@link ConversationStore})
+ *  - Conversation memory persistence (see {@link ConversationStore})
  *  - Capability state, controller communication, or session lifecycle
  *  - AIChat banner, input area, dialogs, token counter
  *
- * @param {HTMLElement} container - The DOM element that hosts the
- *     transcript. AssistantTranscript writes directly into this element.
+ * @param {HTMLElement} container - DOM host. Written into directly.
  * @param {Object} [options]
- * @param {number} [options.maxJsonDepth=10] - Max depth for the inline
- *     JSON viewer before it renders a "max depth reached" sentinel.
- * @param {number} [options.streamDebounceMs=50] - Coalescing interval
- *     for the streaming render loop.
+ * @param {number} [options.maxJsonDepth=10] - Max depth before the inline
+ *     JSON viewer renders a "max depth reached" sentinel.
+ * @param {number} [options.streamDebounceMs=50] - Coalescing interval for
+ *     the streaming render loop.
  * @constructor
  */
 function AssistantTranscript(container, options) {
@@ -36,13 +32,13 @@ function AssistantTranscript(container, options) {
 }
 
 /**
- * Render the initial empty-state welcome panel inside the container.
+ * Render the initial empty-state welcome panel.
  * @private
  */
 AssistantTranscript.prototype._renderEmptyState = function () {
-    // Safe innerHTML usage: literal string, no user- or model-controlled
-    // interpolation. Every later append routes turn content through
-    // _escapeHtml (user/system) or _parseMarkdown (assistant).
+    // Safe innerHTML: literal string, no user- or model-controlled
+    // interpolation. Later appends route content through _escapeHtml
+    // (user/system) or _parseMarkdown (assistant).
     this._container.innerHTML = '' +
         '<div class="ai-welcome-message">' +
             '<h3>UI5 AI Assistant</h3>' +
@@ -53,18 +49,18 @@ AssistantTranscript.prototype._renderEmptyState = function () {
 };
 
 /**
- * Append a user-authored turn to the transcript.
+ * Append a user turn.
  * @param {string} content - Raw user input, escaped before insertion.
- * @returns {HTMLElement} The message element appended to the container.
+ * @returns {HTMLElement}
  */
 AssistantTranscript.prototype.appendUserTurn = function (content) {
     return this._appendMessage('user', content);
 };
 
 /**
- * Append a system-authored message (status, error, hint) to the transcript.
+ * Append a system message (status, error, hint).
  * @param {string} message - Plain text, escaped before insertion.
- * @returns {HTMLElement} The message element appended to the container.
+ * @returns {HTMLElement}
  */
 AssistantTranscript.prototype.appendSystemMessage = function (message) {
     return this._appendMessage('system', message);
@@ -73,10 +69,9 @@ AssistantTranscript.prototype.appendSystemMessage = function (message) {
 /**
  * Begin a streaming assistant turn.
  *
- * Creates a placeholder assistant message with a loading indicator and
- * returns a small handle the caller can drive with chunks until the
- * stream finalizes. The handle is intentionally minimal: it does not
- * expose the underlying DOM nodes or the debounce timer.
+ * Creates a placeholder with a loading indicator. Returns a handle the caller
+ * drives with chunks until the stream finalizes. The handle does not expose
+ * the DOM nodes or the debounce timer.
  *
  * @returns {{
  *   streamChunk: function(string): void,
@@ -140,21 +135,19 @@ AssistantTranscript.prototype.beginAssistantTurn = function () {
             });
             headerElement.appendChild(copyButton);
 
-            // Intentionally do not call scrollToBottom here: the old
-            // _finalizeStreamingMessage did not scroll on finalize, only
-            // the chunk-by-chunk debounced render did. Preserving that
-            // means a developer who scrolled up to read an earlier turn
-            // is not yanked to the bottom when the stream completes.
+            // Do not scroll on finalize. The chunk-by-chunk debounced
+            // render already scrolled. Skipping here means a developer
+            // who scrolled up to read an earlier turn is not yanked to
+            // the bottom when the stream completes.
         }
     };
 };
 
 /**
- * Clear the transcript and surface a "cleared" empty-state so the
- * developer knows the transcript is empty by design.
+ * Clear the transcript and show a "cleared" empty-state.
  */
 AssistantTranscript.prototype.clear = function () {
-    // Safe innerHTML usage: literal string with no interpolation.
+    // Safe innerHTML: literal string with no interpolation.
     this._container.innerHTML = '' +
         '<div class="ai-welcome-message">' +
             '<h3>UI5 AI Assistant</h3>' +
@@ -163,7 +156,7 @@ AssistantTranscript.prototype.clear = function () {
 };
 
 /**
- * Replace the transcript with the supplied list of prior turns.
+ * Replace the transcript with the supplied prior turns.
  *
  * @param {Array<{role: string, content: string}>} turns - May be empty.
  */
@@ -181,9 +174,9 @@ AssistantTranscript.prototype.reset = function (turns) {
 /**
  * Scroll the transcript host to its bottom.
  *
- * @param {boolean} force - When true, scroll even if the developer has
- *     scrolled up; when false, only scroll if already near the bottom
- *     so a streaming turn does not yank the developer's reading position.
+ * @param {boolean} force - When true, scroll even if scrolled up. When false,
+ *     scroll only if already near the bottom, so a streaming turn does not
+ *     yank the developer's reading position.
  */
 AssistantTranscript.prototype.scrollToBottom = function (force) {
     var container = this._container;
@@ -196,12 +189,9 @@ AssistantTranscript.prototype.scrollToBottom = function (force) {
 };
 
 /**
- * Tear down hook. Streaming timers live inside the closure of the
- * handle returned by {@link AssistantTranscript#beginAssistantTurn},
- * not on the instance, and the `flush()` guard there is a no-op once
- * the host container is detached — so there is no instance-level
- * timer to cancel here. The method exists for symmetry with the
- * other named assistant modules and for future extension.
+ * Tear-down hook. Streaming timers live in the closure returned by
+ * {@link AssistantTranscript#beginAssistantTurn}, so there is no
+ * instance-level timer to cancel. Kept for symmetry and future extension.
  */
 AssistantTranscript.prototype.destroy = function () {};
 
@@ -239,8 +229,8 @@ AssistantTranscript.prototype._appendMessage = function (role, content, showCopy
     var roleLabel = role === 'user' ? 'You' : role === 'assistant' ? 'AI' : 'System';
 
     // Safe innerHTML: roleLabel is from a fixed set, formattedContent is
-    // either escaped or markdown-parsed (which itself escapes everything
-    // it does not turn into a known formatting tag).
+    // either escaped or markdown-parsed (which itself escapes anything it
+    // does not turn into a known formatting tag).
     messageElement.innerHTML = '' +
         '<div class="message-header">' +
             '<span class="message-role">' + roleLabel + '</span>' +
@@ -557,14 +547,11 @@ AssistantTranscript.prototype._renderCodeBlock = function (code, lang) {
 };
 
 /**
- * Copy text to the system clipboard using the legacy execCommand path
- * so the transcript keeps working inside the DevTools panel where the
- * modern async Clipboard API may not have user-activation context.
+ * Copy text to the clipboard via execCommand. The DevTools panel may not
+ * have user-activation context for the async Clipboard API, so the legacy
+ * path is used.
  *
- * On failure the transcript appends a system message into itself,
- * matching the pre-extraction behavior in AIChat where copy failures
- * surfaced inline. This keeps the failure visible to the developer
- * without reaching back into the view.
+ * On failure, append an inline system message so the failure is visible.
  * @private
  */
 AssistantTranscript.prototype._copyToClipboard = function (text, button) {

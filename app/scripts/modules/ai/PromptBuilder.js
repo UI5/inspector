@@ -1,12 +1,10 @@
 'use strict';
 
 /**
- * PromptBuilder - Deterministic builder for Inspector AI Assistant prompts.
- *
- * Owns the system prompt, application metadata formatting, selected-control
- * (Inspection Context) formatting, truncation rules, and session seed message
- * construction. Free of Chrome APIs so it can be unit-tested as part of the
- * Agent Validation Loop.
+ * Deterministic builder for assistant prompts. Owns the system prompt,
+ * application metadata formatting, selected-control (inspection context)
+ * formatting, truncation rules, and session seed construction. Free of
+ * Chrome APIs so it can be unit-tested directly.
  *
  * @constructor
  */
@@ -14,12 +12,10 @@ function PromptBuilder() {
 }
 
 /**
- * Build the system prompt content for the Inspector AI Assistant.
+ * Build the system prompt. Includes a Current Application Context section
+ * when app metadata is provided.
  *
- * Includes a Current Application Context section when application metadata
- * (framework version, theme, loaded libraries) is provided.
- *
- * @param {Object} [appInfo] - Application metadata snapshot from UI5 Inspector.
+ * @param {Object} [appInfo]
  * @returns {string}
  */
 PromptBuilder.prototype.buildSystemPrompt = function (appInfo) {
@@ -55,16 +51,15 @@ PromptBuilder.prototype.buildSystemPrompt = function (appInfo) {
 };
 
 /**
- * Build a formatted user prompt that prefixes a single-turn Inspection Context
- * section (selected control type, id, properties, bindings, aggregations) ahead
- * of the developer's question. Returns the user message unchanged when no
- * inspection context is provided.
+ * Build a user prompt prefixed with a single-turn inspection context section
+ * (selected control type, id, properties, bindings, aggregations). Returns
+ * the message unchanged when no context is provided.
  *
- * Inspection Context is injected per user prompt and is never stored as
- * Conversation Memory by the assistant.
+ * Inspection context is injected per prompt and is never stored as
+ * conversation memory.
  *
- * @param {string} userMessage - The developer's question.
- * @param {Object} [inspectionContext] - Optional Inspection Context with a `control` snapshot.
+ * @param {string} userMessage
+ * @param {Object} [inspectionContext]
  * @returns {string}
  */
 PromptBuilder.prototype.buildUserPrompt = function (userMessage, inspectionContext) {
@@ -85,8 +80,8 @@ PromptBuilder.prototype.buildUserPrompt = function (userMessage, inspectionConte
 };
 
 /**
- * Truncate JSON serialization of arbitrary data to a maximum length, returning
- * a friendly placeholder string for circular or non-serializable input.
+ * Truncate JSON serialization to a maximum length. Returns a placeholder for
+ * circular or non-serializable input.
  * @private
  * @param {*} data
  * @param {number} maxLength
@@ -105,8 +100,8 @@ PromptBuilder.prototype._truncateJson = function (data, maxLength) {
 };
 
 /**
- * Format the selected-control "own" properties as a truncated JSON line.
- * Returns an empty string when the control has no own properties to report.
+ * Format control "own" properties as a truncated JSON line. Empty when there
+ * are no own properties.
  * @private
  * @param {Object} control
  * @param {number} maxLength
@@ -129,7 +124,7 @@ PromptBuilder.prototype._addPropertiesContext = function (control, maxLength) {
 };
 
 /**
- * Format the selected-control bindings as a truncated JSON block.
+ * Format control bindings as a truncated JSON block.
  * @private
  * @param {Object} bindings
  * @param {number} maxLength
@@ -145,7 +140,7 @@ PromptBuilder.prototype._addBindingsContext = function (bindings, maxLength) {
 };
 
 /**
- * Format the selected-control "own" aggregations as a truncated JSON block.
+ * Format control "own" aggregations as a truncated JSON block.
  * @private
  * @param {Object} aggregations
  * @param {number} maxLength
@@ -165,15 +160,15 @@ PromptBuilder.prototype._addAggregationsContext = function (aggregations, maxLen
 };
 
 /**
- * Build the seed message array used to create a new local AI session.
+ * Build the seed message array for a new session.
  *
- * Always emits a leading system message produced by `buildSystemPrompt`,
- * followed by any user/assistant turns from the supplied Conversation Memory.
- * Non-user/assistant entries (UI-only system notices) and empty placeholders
- * are skipped so that mid-stream slots from the view layer never leak in.
+ * Always emits a leading system message from `buildSystemPrompt`, followed
+ * by user/assistant turns from the supplied conversation memory.
+ * Non-user/assistant entries and empty placeholders are skipped so mid-stream
+ * slots from the view never leak in.
  *
- * @param {Object} [appInfo] - Application metadata snapshot for the system prompt.
- * @param {Array} [conversationMemory] - Prior chat turns ({role, content}) to replay.
+ * @param {Object} [appInfo]
+ * @param {Array} [conversationMemory] - Prior {role, content} turns.
  * @returns {Array<{role: string, content: string}>}
  */
 PromptBuilder.prototype.buildSeedMessages = function (appInfo, conversationMemory) {

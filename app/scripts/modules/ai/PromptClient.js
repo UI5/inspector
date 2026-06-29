@@ -1,17 +1,16 @@
 'use strict';
 
 /**
- * PromptClient - the assistant-facing interface for local AI operations.
- *
- * Hides Chrome extension port transport (`chrome.runtime.connect({ name: 'prompt-api' })`)
- * and the background service worker port message protocol from the rest of the
- * Inspector AI Assistant. Consumers pass already-built prompt strings and seed
- * messages; PromptClient does not construct prompts.
+ * Assistant-facing interface for local AI operations. Hides the Chrome
+ * extension port transport (`chrome.runtime.connect({ name: 'prompt-api' })`)
+ * and its message protocol. Consumers pass already-built prompt strings and
+ * seed messages. PromptClient does not construct prompts.
  *
  * @param {Object} [options]
- * @param {Function} [options.portFactory] - Factory returning a port-like object with
- *     `postMessage(msg)`, `onMessage.addListener(fn)`, `onDisconnect.addListener(fn)`,
- *     and `disconnect()`. Defaults to the real Chrome runtime port.
+ * @param {Function} [options.portFactory] - Factory returning a port-like
+ *     object with `postMessage(msg)`, `onMessage.addListener(fn)`,
+ *     `onDisconnect.addListener(fn)`, and `disconnect()`. Defaults to the
+ *     real Chrome runtime port.
  * @constructor
  */
 function PromptClient(options) {
@@ -49,9 +48,8 @@ PromptClient.prototype._connect = function () {
         this._hasActiveSession = false;
         this._port = null;
 
-        // Surface a streaming-failed Assistant Capability State to any
-        // in-flight stream waiting on this transport so the UI does not
-        // hang in a "thinking" state.
+        // Surface a streaming-failed capability state to any in-flight
+        // stream so the UI does not hang in a "thinking" state.
         const errorHandler = this._messageHandlers.error;
         if (errorHandler) {
             errorHandler({ message: 'Connection to background script lost. Please try again.' });
@@ -62,8 +60,8 @@ PromptClient.prototype._connect = function () {
 /**
  * Register a message handler.
  * @private
- * @param {string} type - Message type
- * @param {Function} handler - Handler function
+ * @param {string} type
+ * @param {Function} handler
  */
 PromptClient.prototype._on = function (type, handler) {
     this._messageHandlers[type] = handler;
@@ -72,7 +70,7 @@ PromptClient.prototype._on = function (type, handler) {
 /**
  * Remove a message handler.
  * @private
- * @param {string} type - Message type
+ * @param {string} type
  */
 PromptClient.prototype._off = function (type) {
     delete this._messageHandlers[type];
@@ -89,13 +87,12 @@ PromptClient.prototype._send = function (message) {
 };
 
 /**
- * Translate a background service worker port-protocol availability status
- * into the canonical Assistant Capability State vocabulary defined in
- * CONTEXT.md. Kept module-private; the only caller is `checkAvailability`.
+ * Translate a background port-protocol availability status into the canonical
+ * capability state vocabulary. Module-private; only `checkAvailability` calls it.
  *
  * @private
- * @param {string} portStatus - Status string from the background port.
- * @returns {string} Canonical Assistant Capability State name.
+ * @param {string} portStatus
+ * @returns {string}
  */
 function toCanonicalCapabilityState(portStatus) {
     if (portStatus === 'ready') {
@@ -111,30 +108,25 @@ function toCanonicalCapabilityState(portStatus) {
         return 'unsupported';
     }
     // `unavailable`, `error`, and any unrecognized status collapse to
-    // canonical `unavailable`. The transport-supplied message is preserved
-    // by the caller so the developer still sees the actual cause.
+    // canonical `unavailable`. The transport message is preserved by
+    // the caller so the developer sees the actual cause.
     return 'unavailable';
 }
 
 /**
- * Resolve the current Assistant Capability State from the transport.
+ * Resolve current capability state from the transport.
  *
- * Translates the background service worker's port-protocol status dialect
- * (`ready`, `needs-download`, `downloading`, `unsupported`, `unavailable`,
- * `error`) into the canonical Assistant Capability State vocabulary
- * defined in CONTEXT.md (`ready`, `downloadable`, `downloading`,
- * `unsupported`, `unavailable`). The background port protocol itself does
- * not change — the translation lives at this seam so the rest of the
- * Inspector AI Assistant speaks only the canonical vocabulary.
+ * Translates the background port-protocol dialect (`ready`, `needs-download`,
+ * `downloading`, `unsupported`, `unavailable`, `error`) into the canonical
+ * vocabulary (`ready`, `downloadable`, `downloading`, `unsupported`,
+ * `unavailable`). The translation lives at this seam so the rest of the
+ * assistant speaks only the canonical vocabulary.
  *
- * The `error` transport status is collapsed to canonical `unavailable`
- * (the view treats it the same as any other unavailable cause) but the
- * transport-supplied message is preserved so the developer sees the
- * actual failure reason instead of a generic banner. Any unrecognized
- * transport status also resolves to `unavailable` to keep the controller
- * and view on canonical ground.
+ * The `error` transport status collapses to `unavailable`, but the
+ * transport-supplied message is preserved. Unrecognized statuses also resolve
+ * to `unavailable`.
  *
- * @returns {Promise<{status: string, message: string}>} Canonical state.
+ * @returns {Promise<{status: string, message: string}>}
  */
 PromptClient.prototype.checkAvailability = function () {
     return new Promise((resolve) => {
@@ -153,10 +145,9 @@ PromptClient.prototype.checkAvailability = function () {
 };
 
 /**
- * Request the background service worker to download the local AI model.
- * Calls `onProgress(progress)` for every download-progress message, resolves
- * when the transport reports download-complete, and rejects on error.
- * @param {Function} [onProgress] - Progress callback receiving values in [0, 1].
+ * Request a model download. Invokes `onProgress(progress)` for every
+ * download-progress message, resolves on download-complete, rejects on error.
+ * @param {Function} [onProgress] - Receives values in [0, 1].
  * @returns {Promise<void>}
  */
 PromptClient.prototype.downloadModel = function (onProgress) {
@@ -188,9 +179,8 @@ PromptClient.prototype.downloadModel = function (onProgress) {
 };
 
 /**
- * Create a new local AI session, seeding it with the supplied initial prompts.
- * The caller is responsible for building seed messages via PromptBuilder;
- * PromptClient does not construct prompts.
+ * Create a new session seeded with the supplied initial prompts. Seed
+ * construction is the caller's responsibility (see PromptBuilder).
  * @param {Array<{role: string, content: string}>} [initialPrompts]
  * @returns {Promise<boolean>}
  */
@@ -221,19 +211,16 @@ PromptClient.prototype.createSession = function (initialPrompts) {
 };
 
 /**
- * Send an already-formatted user prompt and obtain an async-iterable stream of
- * response chunks. The transport session retains its own history, so only the
- * new user message is sent here. Prompt construction (system prompt, seed
- * messages, Inspection Context formatting) is the responsibility of
- * PromptBuilder and is not performed inside PromptClient.
+ * Send a formatted user prompt and obtain an async-iterable stream of
+ * response chunks. The transport session retains its own history, so only
+ * the new user message is sent. Prompt construction is PromptBuilder's job.
  *
- * The chunk / complete / error message handlers and the in-memory buffer are
- * attached synchronously, before the returned promise resolves. This makes
- * streaming order-independent: chunks delivered by the transport between
- * `_send('prompt-streaming')` and the consumer's first `iterator.next()` are
- * buffered and replayed in order, instead of being dropped.
+ * The chunk / complete / error handlers and the in-memory buffer are wired
+ * synchronously, before the returned promise resolves. Chunks delivered
+ * between `_send('prompt-streaming')` and the consumer's first `next()`
+ * are buffered and replayed in order instead of being dropped.
  *
- * @param {string} formattedUserMessage - User prompt already built by PromptBuilder.
+ * @param {string} formattedUserMessage
  * @returns {Promise<AsyncIterable<string>>}
  */
 PromptClient.prototype.promptStreaming = function (formattedUserMessage) {
@@ -246,10 +233,8 @@ PromptClient.prototype.promptStreaming = function (formattedUserMessage) {
         }
 
         // Pre-wired streaming buffer. Populated synchronously below by the
-        // chunk / complete / error transport handlers. The async iterator
-        // returned to the consumer only drains from this buffer; it never
-        // registers transport listeners of its own. This is what makes
-        // streaming order-independent.
+        // chunk / complete / error handlers. The async iterator drains from
+        // this buffer and never registers transport listeners of its own.
         const buffer = {
             chunks: [],
             isComplete: false,
@@ -321,7 +306,7 @@ PromptClient.prototype.promptStreaming = function (formattedUserMessage) {
 };
 
 /**
- * Resolve current local AI session usage info reported by the transport.
+ * Resolve current session usage info from the transport.
  * @returns {Promise<Object|null>} {inputUsage, inputQuota, percentUsed} or null.
  */
 PromptClient.prototype.getUsageInfo = function () {
@@ -338,8 +323,8 @@ PromptClient.prototype.getUsageInfo = function () {
 };
 
 /**
- * Destroy the current local AI session and disconnect the transport. Safe to
- * call when no session is active.
+ * Destroy the current session and disconnect the transport. Safe to call
+ * when no session is active.
  */
 PromptClient.prototype.destroy = function () {
     if (this._isConnected) {

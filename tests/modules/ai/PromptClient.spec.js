@@ -3,10 +3,10 @@
 var PromptClient = require('../../../app/scripts/modules/ai/PromptClient.js');
 
 /**
- * Build a deterministic fake of the Chrome extension port surface
- * (`chrome.runtime.connect({ name: 'prompt-api' })`). Tests can record
- * messages posted by the PromptClient and emit responses through
- * `emit(message)` and `triggerDisconnect()`.
+ * Deterministic fake of the Chrome extension port surface
+ * (`chrome.runtime.connect({ name: 'prompt-api' })`). Records posted
+ * messages and emits responses through `emit(message)` and
+ * `triggerDisconnect()`.
  *
  * @returns {{port: Object, posted: Array, emit: Function, triggerDisconnect: Function}}
  */
@@ -52,9 +52,7 @@ function createFakePort() {
 }
 
 /**
- * Build a PromptClient wired to a fresh fake port. Convenience over the
- * 17-call-site preamble of constructing a fake port and threading it through
- * a `portFactory`.
+ * Build a PromptClient wired to a fresh fake port.
  *
  * @returns {{client: Object, fake: Object}}
  */
@@ -270,9 +268,9 @@ describe('PromptClient', function () {
             return sessionPromise.then(function () {
                 return client.promptStreaming('Pre-formatted user prompt');
             }).then(async function (stream) {
-                // Emit chunks BEFORE the consumer ever calls iterator.next().
-                // With a lazily-wired stream these chunks would be dropped;
-                // with a pre-wired buffer they must be delivered in order.
+                // Emit chunks before the consumer calls iterator.next().
+                // A lazily-wired stream would drop these; a pre-wired
+                // buffer must deliver them in order.
                 fake.emit({ type: 'chunk', content: 'first' });
                 fake.emit({ type: 'chunk', content: 'second' });
                 fake.emit({ type: 'complete' });
@@ -311,8 +309,8 @@ describe('PromptClient', function () {
                     var iterator = stream[Symbol.asyncIterator]();
                     var firstChunkPromise = iterator.next();
 
-                    // The first chunk handler is now wired; deliver chunks asynchronously
-                    // to mirror real port message arrival.
+                    // First chunk handler is wired; deliver chunks
+                    // asynchronously to mirror real port arrival.
                     fake.emit({ type: 'chunk', content: 'Hello' });
 
                     var first = await firstChunkPromise;

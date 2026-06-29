@@ -5,26 +5,18 @@ var PromptClient = require('./PromptClient.js');
 var ConversationStore = require('./ConversationStore.js');
 
 /**
- * AssistantController - thin workflow coordinator for the Inspector AI Assistant.
- *
- * Owns the Assistant Capability State, Conversation Memory lifecycle for the
- * current inspected URL, session creation and reseeding with Conversation Memory
- * replay, per-turn Inspection Context injection, streaming, and persistence of
- * completed user/assistant turns through the named Prompt Builder, Prompt Client,
- * and Conversation Store boundaries.
- *
- * The controller is the primary high-level test seam for the Inspector AI
- * Assistant. It depends only on the three named collaborators and does not
- * touch Chrome runtime, the DOM, or storage directly. The view (AIChat) listens
- * to events and calls controller methods; it does not own session lifecycle,
- * streaming orchestration, history persistence, or context injection logic.
+ * Workflow coordinator for the Inspector AI Assistant. Owns capability state,
+ * conversation memory for the current URL, session creation and reseeding,
+ * per-turn inspection context injection, streaming, and persistence through
+ * PromptBuilder, PromptClient, and ConversationStore. Has no direct Chrome
+ * runtime, DOM, or storage dependencies.
  *
  * @param {Object} [options]
  * @param {PromptBuilder} [options.promptBuilder]
  * @param {PromptClient} [options.promptClient]
  * @param {ConversationStore} [options.conversationStore]
  * @param {Function} [options.getAppInfo] - Returns the current application metadata
- *     snapshot used by the Prompt Builder when seeding the session.
+ *     snapshot used by PromptBuilder when seeding the session.
  * @constructor
  */
 function AssistantController(options) {
@@ -34,12 +26,9 @@ function AssistantController(options) {
     this._conversationStore = options.conversationStore || new ConversationStore();
     this._getAppInfo = options.getAppInfo || function () { return null; };
 
-    // Seed with a canonical PRD Assistant Capability State. The Inspector
-    // AI Assistant cannot serve prompts until `initialize()` has resolved
-    // the real availability from the Prompt Client; `unavailable` is the
-    // PRD vocabulary for "local AI cannot be used right now" and is the
-    // safest no-op state to surface before initialization runs. It is
-    // overwritten by the first real capability resolution.
+    // Seed with `unavailable` until `initialize()` resolves the real
+    // availability from PromptClient. Overwritten by the first real
+    // capability resolution.
     this._capabilityState = { status: 'unavailable', message: 'Checking model status...', progress: 0 };
     this._listeners = {};
     this._currentUrl = null;
@@ -59,13 +48,9 @@ function AssistantController(options) {
  *  - `stream-failed` (Error)
  *  - `conversation-cleared`
  *
- * This is a deliberate local, in-process event bus — not a `chrome.runtime`
- * message dispatch like the rest of the inspector. The Assistant Controller
- * and the AIChat view live in the same DevTools panel page; routing their
- * coupling through the background service worker would add latency, hide
- * the seam behind the message router, and make the controller untestable
- * without a real Chrome extension. The cross-process port protocol is
- * still owned exclusively by PromptClient.
+ * Local in-process event bus, not `chrome.runtime` message dispatch. The
+ * controller and the AIChat view live in the same DevTools panel page.
+ * The cross-process port protocol is owned by PromptClient.
  *
  * @param {string} event
  * @param {Function} handler
@@ -94,8 +79,7 @@ AssistantController.prototype._emit = function (event, payload) {
 };
 
 /**
- * @returns {{status: string, message: string, progress: number}} The current
- *     Assistant Capability State as resolved by the controller.
+ * @returns {{status: string, message: string, progress: number}}
  */
 AssistantController.prototype.getCapabilityState = function () {
     return this._capabilityState;
@@ -118,27 +102,17 @@ AssistantController.prototype._setCapabilityState = function (status, message, p
 };
 
 /**
- * Resolve the Assistant Capability State from the Prompt Client and broadcast it.
+ * Resolve capability state from PromptClient and broadcast it.
  *
- * The Prompt Client returns canonical Assistant Capability State names
- * directly (`unsupported`, `unavailable`, `downloadable`, `downloading`,
- * `ready`); the background service worker port-protocol dialect is the
- * Prompt Client's concern, not the controller's. The two controller-managed
- * lifecycle states (`session-failed`, `streaming-failed`) are produced
- * elsewhere in this module.
+ * PromptClient returns canonical capability names directly. The two
+ * controller-managed states (`session-failed`, `streaming-failed`) come
+ * from elsewhere in this module.
  *
- * A rejected capability check is treated as a normal `unavailable`
- * Assistant Capability State, not an exceptional throw — the AIChat
- * view stays the canonical-state consumer and never sees a raw error
- * from initialize.
+ * A rejected capability check resolves to `unavailable` rather than
+ * throwing, so the view always has a canonical state to render. The
+ * returned promise never rejects.
  *
- * The returned promise therefore never rejects. Callers do not need a
- * `.catch`; the canonical state has already been emitted by the time
- * the promise settles, and downstream UI updates flow through the
- * `capability-state-changed` event bus.
- *
- * @returns {Promise<void>} Always resolves; capability resolution
- *     failure is surfaced via an emitted `unavailable` state.
+ * @returns {Promise<void>}
  */
 AssistantController.prototype.initialize = function () {
     var that = this;
@@ -157,9 +131,7 @@ AssistantController.prototype.initialize = function () {
 
 /**
  * Create a fresh local AI session and translate any failure into a
- * `session-failed` Assistant Capability State rather than letting the
- * error propagate. PRD treats session creation failure as a normal
- * product state, not an exceptional throw.
+ * `session-failed` capability state rather than letting the error propagate.
  * @private
  * @returns {Promise<void>}
  */
@@ -171,8 +143,8 @@ AssistantController.prototype._seedSessionOrFail = function () {
 };
 
 /**
- * Create a fresh local AI session seeded with the system prompt and any
- * Conversation Memory turns currently held by the controller.
+ * Create a local AI session seeded with the system prompt and current
+ * conversation memory.
  * @private
  * @returns {Promise<void>}
  */
@@ -183,13 +155,11 @@ AssistantController.prototype._seedSession = function () {
 };
 
 /**
- * Send a user message through the Inspector AI Assistant: build the prompt
- * via PromptBuilder, stream the response from PromptClient, persist both
- * turns via ConversationStore, and surface stream-chunk / stream-complete
- * events to listeners.
+ * Send a user message: build the prompt, stream the response, persist both
+ * turns, and emit stream-chunk / stream-complete events.
  *
- * Inspection Context held by the controller is injected into this prompt
- * only and is never persisted as Conversation Memory.
+ * Inspection context is injected into this prompt only and is never
+ * persisted as conversation memory.
  *
  * @param {string} userMessage
  * @returns {Promise<{content: string}>}
@@ -206,8 +176,8 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
         return that._consumeStream(stream);
     }).then(function (fullText) {
         // Persist only completed turns. Appending the user turn before the
-        // stream finishes would leave an orphan user message in Conversation
-        // Memory on streaming failure, which would then leak into the next
+        // stream finishes would leave an orphan user message in conversation
+        // memory on streaming failure, which would then leak into the next
         // session seed and bias future answers.
         return that._conversationStore.append(that._currentUrl, {
             role: 'user',
@@ -222,10 +192,8 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
             that._conversationMemory.push({ role: 'assistant', content: fullText });
             that._isStreaming = false;
             // A successful turn after a prior streaming-failed state means
-            // the session has recovered; resurface a `ready` Assistant
-            // Capability State so the view does not stay stuck on a
-            // failure banner — see PRD user story #8 (graceful recovery,
-            // no permanent "thinking" state).
+            // the session has recovered. Resurface `ready` so the view does
+            // not stay stuck on a failure banner.
             if (that._capabilityState.status === 'streaming-failed') {
                 that._setCapabilityState('ready', 'Gemini Nano is ready', 0);
             }
@@ -241,8 +209,8 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
 };
 
 /**
- * Drain the streamed response from the Prompt Client, emitting each chunk
- * as a `stream-chunk` event and returning the joined response.
+ * Drain the streamed response, emit each chunk as `stream-chunk`, and
+ * return the joined response.
  * @private
  * @param {AsyncIterable<string>} stream
  * @returns {Promise<string>}
@@ -267,12 +235,12 @@ AssistantController.prototype._consumeStream = function (stream) {
 };
 
 /**
- * Set the inspected URL whose Conversation Memory is owned by the controller.
+ * Set the inspected URL whose conversation memory the controller owns.
  *
- * When called before initialization, this just records the URL. When called
- * after initialization with a different URL, the controller loads the new
- * URL's Conversation Memory, destroys the active session, and reseeds a
- * fresh session with the new history. Calling with the same URL is a no-op.
+ * Before initialization, this records the URL. After initialization with a
+ * different URL, the controller loads the new URL's conversation memory,
+ * destroys the active session, and reseeds with the new history. Same-URL
+ * calls are a no-op.
  *
  * @param {string} url
  * @returns {Promise<void>|undefined}
@@ -296,20 +264,19 @@ AssistantController.prototype.setUrl = function (url) {
 };
 
 /**
- * Update the pending Inspection Context to inject into the next user prompt.
+ * Update the pending inspection context for the next user prompt. Inspection
+ * context is consumed once and is never written to conversation memory.
+ * Pass `null` to clear.
  *
- * Inspection Context is consumed once and is never written to Conversation
- * Memory. Pass `null` (or no argument) to clear the pending context.
- *
- * @param {Object} [context] - Inspection Context with optional `control` snapshot.
+ * @param {Object} [context] - Inspection context with optional `control` snapshot.
  */
 AssistantController.prototype.updateInspectionContext = function (context) {
     this._pendingInspectionContext = context || null;
 };
 
 /**
- * Clear Conversation Memory for the current inspected URL, destroy the active
- * local AI session, and reseed a fresh session without prior turns.
+ * Clear conversation memory for the current URL, destroy the active session,
+ * and reseed without prior turns.
  *
  * @returns {Promise<void>}
  */
@@ -324,10 +291,9 @@ AssistantController.prototype.clearConversation = function () {
 };
 
 /**
- * Drive the Prompt Client model download. Emits transient `downloading`
- * Assistant Capability States carrying progress values in [0, 1], then a
- * `ready` capability state once the local model is available and the
- * session has been reseeded.
+ * Drive the PromptClient model download. Emits transient `downloading`
+ * capability states with progress in [0, 1], then `ready` once the model is
+ * available and the session has been reseeded.
  *
  * @returns {Promise<void>}
  */
@@ -346,7 +312,6 @@ AssistantController.prototype.downloadModel = function () {
 };
 
 /**
- * Resolve the current local AI session usage info from the Prompt Client.
  * @returns {Promise<Object|null>}
  */
 AssistantController.prototype.getUsageInfo = function () {
@@ -354,7 +319,7 @@ AssistantController.prototype.getUsageInfo = function () {
 };
 
 /**
- * Destroy the underlying local AI session and release listeners.
+ * Destroy the underlying session and release listeners.
  */
 AssistantController.prototype.destroy = function () {
     this._promptClient.destroy();
@@ -362,7 +327,7 @@ AssistantController.prototype.destroy = function () {
 };
 
 /**
- * Load Conversation Memory for the current inspected URL and surface it.
+ * Load conversation memory for the current URL and emit it.
  * @private
  * @returns {Promise<void>}
  */

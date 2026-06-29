@@ -214,10 +214,9 @@ describe('AssistantTranscript', function () {
 
     describe('Copy-button failure handling', function () {
         it('should append a "Failed to copy to clipboard" system message when the underlying copy command reports failure, so a denied or unsupported clipboard environment is not silently swallowed', function () {
-            // Force execCommand to return false (simulating browser
-            // policy denying the copy). The transcript must surface
-            // the failure as an inline system message — that was the
-            // pre-extraction behavior in AIChat._copyToClipboard.
+            // Force execCommand to return false to simulate the browser
+            // denying the copy. The transcript must surface the failure
+            // as an inline system message.
             var originalExecCommand = document.execCommand;
             document.execCommand = function () { return false; };
 
@@ -250,10 +249,9 @@ describe('AssistantTranscript', function () {
 
             var handle = transcript.beginAssistantTurn();
 
-            // Developer scrolls up after the assistant placeholder
-            // appears, to re-read an earlier turn while the model
-            // streams. Finalize must not yank the scroll position
-            // back to the bottom.
+            // Developer scrolls up after the placeholder appears, while
+            // the model streams. Finalize must not yank the scroll
+            // position back to the bottom.
             container.scrollTop = 0;
 
             handle.finalize('the assistant answer');

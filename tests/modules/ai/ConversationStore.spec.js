@@ -3,9 +3,8 @@
 var ConversationStore = require('../../../app/scripts/modules/ai/ConversationStore.js');
 
 /**
- * Build a deterministic in-memory fake of the `chrome.storage.local` surface
- * used by the ConversationStore. Tests can inspect `data` directly and seed
- * stored Conversation Memory before exercising the store.
+ * In-memory fake of the `chrome.storage.local` surface. Tests inspect
+ * `data` directly and seed stored conversation memory.
  *
  * @returns {{storage: Object, data: Object}}
  */

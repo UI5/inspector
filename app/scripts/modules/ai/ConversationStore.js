@@ -1,25 +1,19 @@
 'use strict';
 
 /**
- * ConversationStore - persistence boundary for Inspector AI Assistant
- * Conversation Memory.
+ * Persistence boundary for assistant conversation memory.
  *
- * Owns the storage-key shape for an inspected URL, the retention limit on
- * stored chat turns (50 most recent), and the load / append / clear
- * operations. Hides the underlying Chrome storage surface from the rest of
- * the assistant so that the Assistant Controller can talk to a small,
- * fakeable interface.
+ * Owns the storage-key shape for an inspected URL, the retention limit (50
+ * most recent turns), and load / append / clear. Hides Chrome storage from
+ * the rest of the assistant.
  *
- * Conversation Memory is strictly chat turns. Inspection Context must never
- * be persisted through this store.
+ * Only chat turns are persisted. Inspection context must not be stored here.
  *
  * @param {Object} [options]
- * @param {Object} [options.storage] - A storage surface compatible with
- *     `chrome.storage.local` (`get(keys, cb)`, `set(items, cb)`,
- *     `remove(keys, cb)`). Defaults to `chrome.storage.local`. Required to
- *     resolve to a real object — construction throws if no storage is
- *     available so that the failure is loud rather than deferred to the
- *     first `load` / `append` / `clear` call.
+ * @param {Object} [options.storage] - A `chrome.storage.local`-compatible
+ *     surface (`get(keys, cb)`, `set(items, cb)`, `remove(keys, cb)`).
+ *     Defaults to `chrome.storage.local`. Construction throws if no storage
+ *     is available, so the failure is loud rather than deferred to first use.
  * @constructor
  */
 function ConversationStore(options) {
@@ -35,15 +29,14 @@ function ConversationStore(options) {
 }
 
 /**
- * Maximum number of stored chat turns per inspected URL. Older turns are
- * dropped from the front when this limit is exceeded.
+ * Maximum stored chat turns per inspected URL. Older turns drop from the
+ * front when this limit is exceeded.
  * @type {number}
  */
 ConversationStore.RETENTION_LIMIT = 50;
 
 /**
- * Build the storage key for an inspected URL.
- * @param {string} url - The inspected URL.
+ * @param {string} url
  * @returns {string}
  */
 ConversationStore.prototype.keyForUrl = function (url) {
@@ -51,7 +44,6 @@ ConversationStore.prototype.keyForUrl = function (url) {
 };
 
 /**
- * Report a runtime error from the storage surface, if any.
  * @private
  * @returns {*|null}
  */
@@ -63,11 +55,9 @@ ConversationStore.prototype._lastError = function () {
 };
 
 /**
- * Load stored Conversation Memory for an inspected URL.
- * @param {string} url - The inspected URL.
- * @returns {Promise<Array>} Resolves with the array of stored chat turns
- *     (each with `role` and `content`), or an empty array if no
- *     Conversation Memory has been stored for the URL yet.
+ * Load stored conversation memory for a URL.
+ * @param {string} url
+ * @returns {Promise<Array>} Array of {role, content} turns, or empty array.
  */
 ConversationStore.prototype.load = function (url) {
     return new Promise((resolve, reject) => {
@@ -85,11 +75,10 @@ ConversationStore.prototype.load = function (url) {
 };
 
 /**
- * Append a chat turn to the Conversation Memory for an inspected URL.
- * Only `role` and `content` are persisted — Inspection Context and
- * transient fields like timestamps are intentionally excluded.
- * @param {string} url - The inspected URL.
- * @param {{role: string, content: string}} message - The chat turn to append.
+ * Append a chat turn. Only `role` and `content` are persisted; inspection
+ * context and timestamps are dropped.
+ * @param {string} url
+ * @param {{role: string, content: string}} message
  * @returns {Promise<void>}
  */
 ConversationStore.prototype.append = function (url, message) {
@@ -125,8 +114,8 @@ ConversationStore.prototype.append = function (url, message) {
 };
 
 /**
- * Clear stored Conversation Memory for an inspected URL.
- * @param {string} url - The inspected URL.
+ * Clear stored conversation memory for a URL.
+ * @param {string} url
  * @returns {Promise<void>}
  */
 ConversationStore.prototype.clear = function (url) {

@@ -4,12 +4,11 @@ var AssistantController = require('../../../app/scripts/modules/ai/AssistantCont
 var PromptBuilder = require('../../../app/scripts/modules/ai/PromptBuilder.js');
 
 /**
- * Build a deterministic fake of the {@link PromptClient} interface for
- * Assistant Controller tests. Records seed messages and user prompts sent
- * by the controller and lets each test script capability resolution,
- * session creation, streaming, usage info, and failures by hand.
+ * Deterministic fake of the {@link PromptClient} interface. Records seed
+ * messages and user prompts and lets tests script capability resolution,
+ * session creation, streaming, usage info, and failures.
  *
- * @returns {Object} fake PromptClient with helpers for test orchestration.
+ * @returns {Object}
  */
 function createFakePromptClient() {
     var fake = {
@@ -118,10 +117,10 @@ function createFakePromptClient() {
 }
 
 /**
- * Build a deterministic fake of {@link ConversationStore} for Assistant
- * Controller tests. Records load / append / clear interactions per URL.
+ * Deterministic fake of {@link ConversationStore}. Records load / append /
+ * clear interactions per URL.
  *
- * @returns {Object} fake ConversationStore with `data` map for assertions.
+ * @returns {Object}
  */
 function createFakeConversationStore() {
     var data = {};
@@ -155,7 +154,7 @@ function createFakeConversationStore() {
 /**
  * Convenience builder for an AssistantController with deterministic fakes.
  *
- * @param {Object} [overrides] - Test-specific overrides.
+ * @param {Object} [overrides]
  * @returns {{controller: Object, promptClient: Object, conversationStore: Object,
  *           events: Array, capabilityStates: Array}}
  */
@@ -205,14 +204,12 @@ function createController(overrides) {
 }
 
 /**
- * Drive a freshly built harness into the `ready` Assistant Capability State
- * by configuring its fake Prompt Client to report a ready local model, then
- * pointing the controller at the canonical test URL and running
- * `initialize()`. After this resolves the controller has created a session
- * with the seed messages from PromptBuilder and is ready to accept
- * `sendUserMessage()` calls.
+ * Drive a fresh harness into the `ready` capability state: configure the
+ * fake PromptClient to report ready, set the canonical test URL, and run
+ * `initialize()`. After this resolves the controller has a session seeded
+ * with PromptBuilder messages and accepts `sendUserMessage()`.
  *
- * @param {Object} harness - The result of `createController()`.
+ * @param {Object} harness
  * @returns {Promise<void>}
  */
 function initializedReady(harness) {
@@ -224,19 +221,16 @@ function initializedReady(harness) {
 }
 
 /**
- * Wait until the fake Prompt Client has registered a streaming call, then
- * return its controller object so the test can drive chunks, completion,
- * or error deterministically. The fake records a controller every time
- * the production code calls `promptStreaming()`; this helper polls because
- * `sendUserMessage()` reaches `promptStreaming` only after the awaited
- * `append`/`Promise.resolve(stream)` chain has flushed.
+ * Wait until the fake PromptClient has registered a streaming call, then
+ * return its controller so the test can drive chunks, completion, or
+ * error. Polls because `sendUserMessage()` reaches `promptStreaming` only
+ * after the awaited `append`/`Promise.resolve(stream)` chain has flushed.
  *
- * Bounded by `maxAttempts` so a test in which production code never
- * reaches `promptStreaming` fails fast with a descriptive error rather
- * than hanging until Mocha's suite-level timeout.
+ * Bounded by `maxAttempts` so a test where production code never reaches
+ * `promptStreaming` fails fast with a descriptive error.
  *
- * @param {Object} fakePromptClient - The fake from `createFakePromptClient()`.
- * @param {number} [maxAttempts=500] - Maximum 1ms polls before giving up.
+ * @param {Object} fakePromptClient
+ * @param {number} [maxAttempts=500]
  * @returns {Promise<{emitChunk: Function, emitComplete: Function, emitError: Function}>}
  */
 function awaitStreamController(fakePromptClient, maxAttempts) {

@@ -4,31 +4,26 @@ var AssistantController = require('../ai/AssistantController.js');
 var AssistantTranscript = require('../ai/AssistantTranscript.js');
 
 /**
- * AIChat - thin view over the Inspector AI Assistant.
+ * Thin view over the assistant. Owns the banner, input area, confirm dialog,
+ * token counter, and subscription to {@link AssistantController}. Does not
+ * own how a turn is rendered — markdown parsing, JSON / code viewers, scroll
+ * bookkeeping, the streaming render debounce, and clipboard helpers all live
+ * in {@link AssistantTranscript}.
  *
- * After Assistant Architecture V2, AIChat owns the banner, the input
- * area, the confirm dialog, the token counter, and the subscription to
- * the {@link AssistantController}. It does *not* own how an assistant
- * turn is rendered — markdown parsing, JSON / code viewers, scroll
- * bookkeeping, the streaming render debounce, and clipboard helpers for
- * transcript content all live behind the named {@link AssistantTranscript}
- * collaborator.
+ * The controller does not know the transcript exists. AIChat forwards
+ * transcript-shaped controller events to the transcript and consumes the
+ * controller's capability and usage surfaces for its own non-transcript
+ * widgets.
  *
- * The Assistant Controller is unaware that the transcript exists — the
- * view is still its only collaborator. AIChat forwards transcript-shaped
- * controller events to the transcript and consumes the controller's
- * capability and usage surfaces for its own non-transcript widgets.
- *
- * @param {string} containerId - ID of container element.
+ * @param {string} containerId
  * @param {Object} [options]
- * @param {Function} [options.getAppInfo] - Returns the current UI5 application
- *     metadata snapshot for the Prompt Builder.
+ * @param {Function} [options.getAppInfo] - Returns the UI5 application
+ *     metadata snapshot for PromptBuilder.
  * @param {AssistantController} [options.controller] - Pre-built controller
- *     for tests; defaults to a fresh AssistantController wired to the real
+ *     for tests. Defaults to a fresh AssistantController wired to the real
  *     PromptBuilder, PromptClient, and ConversationStore.
- * @param {Function} [options.transcriptFactory] - Test seam: a factory
- *     `(container) => AssistantTranscript` that returns a transcript
- *     bound to the messages container. Defaults to a real
+ * @param {Function} [options.transcriptFactory] - Test seam:
+ *     `(container) => AssistantTranscript`. Defaults to a real
  *     AssistantTranscript.
  * @constructor
  */
@@ -65,9 +60,8 @@ AIChat.prototype.init = function () {
 /**
  * Render the chat UI.
  *
- * The messages container element is created here but its contents are
- * owned by {@link AssistantTranscript}, which is constructed in
- * {@link AIChat#init} and writes directly into the container.
+ * The messages container is created here but its contents are owned by
+ * {@link AssistantTranscript}, constructed in {@link AIChat#init}.
  * @private
  */
 AIChat.prototype._render = function () {
@@ -197,9 +191,8 @@ AIChat.prototype._attachEventListeners = function () {
 };
 
 /**
- * Subscribe to {@link AssistantController} events and translate them
- * into transcript updates (via {@link AssistantTranscript}) and banner /
- * input state updates (handled directly).
+ * Subscribe to controller events and translate them into transcript updates
+ * and banner / input state updates.
  * @private
  */
 AIChat.prototype._attachControllerListeners = function () {
@@ -246,11 +239,10 @@ AIChat.prototype._attachControllerListeners = function () {
 };
 
 /**
- * Canonical Assistant Capability States surfaced by the controller. The
- * view derives its banner CSS class directly from these names with no
- * translation table: `status-<name>`. Any state outside this set is
- * routed to the unavailable banner so a future canonical state never
- * disappears silently from the developer's view.
+ * Canonical capability states surfaced by the controller. The banner CSS
+ * class derives directly: `status-<name>`. Any state outside this set is
+ * routed to the unavailable banner so a future canonical state does not
+ * disappear silently.
  * @private
  */
 AIChat._CANONICAL_CAPABILITY_STATES = [
@@ -264,22 +256,21 @@ AIChat._CANONICAL_CAPABILITY_STATES = [
 ];
 
 /**
- * React to an Assistant Capability State change from the controller.
+ * React to a capability state change.
  *
- * `streaming-failed` intentionally does not change the banner: it is
- * already surfaced as a system message via the `stream-failed` event,
- * and the banner stays on its prior `ready` state so the developer
- * sees the assistant recover on the next send (PRD user story #8).
+ * `streaming-failed` does not change the banner: it is already surfaced as a
+ * system message via the `stream-failed` event, and the banner stays on its
+ * prior `ready` state so the developer sees the assistant recover on the
+ * next send.
  *
- * For every other canonical state the view renders the banner directly
- * from the controller's state object: the CSS class is `status-<status>`
- * with no ad-hoc string mapping, the displayed text is `state.message`
- * (with one cosmetic adjustment for downloading progress), and the
- * download button is shown only for the two states that admit it.
+ * For every other canonical state the view renders the banner directly from
+ * the controller's state object: the CSS class is `status-<status>`, the
+ * text is `state.message` (with one cosmetic adjustment for downloading
+ * progress), and the download button shows only for the two states that
+ * admit it.
  *
- * Any non-canonical state falls back to the `unavailable` banner with
- * a console warning so the missing canonical state is detectable in
- * development without dropping a state from the developer's view.
+ * Non-canonical states fall back to the `unavailable` banner with a console
+ * warning so a missing canonical state is detectable in development.
  *
  * @private
  * @param {{status: string, message: string, progress: number}} state
@@ -304,10 +295,10 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
         }
         this._updateTokenCounter();
     } else if (status === 'session-failed') {
-        // The clear-history affordance is the user-facing recovery for a
-        // failed session: ConversationStore.clear() destroys the broken
-        // session and AssistantController reseeds a fresh one. Surface
-        // the button so the developer is not left without an action.
+        // Clear-history is the recovery for a failed session:
+        // ConversationStore.clear() destroys the broken session and the
+        // controller reseeds. Show the button so the developer has an
+        // action.
         const clearButton = document.getElementById('ai-clear-history-button');
         if (clearButton) {
             clearButton.style.display = 'inline-block';
@@ -318,11 +309,8 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
 /**
  * Drive the initial capability resolution through the controller.
  *
- * The controller is responsible for translating every error path into
- * a canonical Assistant Capability State and emitting it. The view
- * therefore does not render an ad-hoc error banner here — doing so
- * would race with the controller's emitted state and reintroduce the
- * view-private "error" vocabulary that this slice removes.
+ * The controller translates every error path into a canonical capability
+ * state and emits it. The view does not paint its own error banner here.
  * @private
  */
 AIChat.prototype._checkModelAvailability = function () {
@@ -332,10 +320,9 @@ AIChat.prototype._checkModelAvailability = function () {
 /**
  * Handle model download via the controller.
  *
- * The controller emits a canonical Assistant Capability State on both
- * success (`ready`) and failure (`unavailable`), so the view does not
- * need to paint its own error banner. It only re-enables the input
- * controls that were disabled while the download was in flight.
+ * The controller emits a canonical capability state on both success (`ready`)
+ * and failure (`unavailable`), so the view does not paint its own error
+ * banner. It only re-enables the input controls disabled during download.
  * @private
  */
 AIChat.prototype._handleDownloadModel = function () {
@@ -351,9 +338,9 @@ AIChat.prototype._handleDownloadModel = function () {
         input.disabled = false;
         sendButton.disabled = !input.value.trim().length;
     }, () => {
-        // Controller has already broadcast the `unavailable` capability
-        // state via `capability-state-changed`. Re-enable the inputs so
-        // the developer can retry once they understand the failure.
+        // Controller has already broadcast `unavailable` via
+        // `capability-state-changed`. Re-enable the inputs so the
+        // developer can retry.
         downloadButton.disabled = false;
         input.disabled = false;
     });
@@ -379,10 +366,10 @@ AIChat.prototype._handleSendMessage = function () {
     this._isStreaming = true;
     this._streamingHandle = this._transcript.beginAssistantTurn();
 
-    // The controller already owns Inspection Context. The view notifies the
-    // controller via updateContext()/_clearContext.
+    // The controller owns inspection context. The view notifies it via
+    // updateContext() / _clearContext().
     this._controller.sendUserMessage(userMessage).catch(() => {
-        // stream-failed event handler already surfaces the error.
+        // stream-failed event handler surfaces the error.
     });
 };
 
@@ -434,19 +421,16 @@ AIChat.prototype._performClearHistory = function () {
 };
 
 /**
- * Render the status banner from a canonical Assistant Capability State.
+ * Render the status banner from a canonical capability state.
  *
- * The CSS class is derived directly from the canonical status name
- * (`status-<status>`) — no view-private vocabulary, no translation
- * table. The banner text comes straight from `state.message`, with one
- * cosmetic adjustment for `downloading`: once progress is non-zero the
- * developer sees a percent indicator instead of the bare "starting
- * download" message. Download-button visibility is the only behavioral
- * branch and is bound to the two states that admit it.
+ * The CSS class is `status-<status>`. The banner text is `state.message`,
+ * with a cosmetic adjustment for `downloading`: once progress is non-zero
+ * the developer sees a percent indicator. Download-button visibility is
+ * the only behavioral branch, bound to the two states that admit it.
  *
  * @private
- * @param {string} status - Canonical Assistant Capability State name.
- * @param {{message: string, progress: number}} state - Full controller state.
+ * @param {string} status
+ * @param {{message: string, progress: number}} state
  */
 AIChat.prototype._renderCapabilityBanner = function (status, state) {
     const banner = document.getElementById('ai-status-banner');
@@ -515,9 +499,8 @@ AIChat.prototype._updateTokenCounter = function () {
 };
 
 /**
- * Check if token usage warning should be displayed.
  * @private
- * @param {number} percentUsed - Percentage of token quota used
+ * @param {number} percentUsed
  */
 AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
     if (percentUsed >= 70 && !this._hasShownUsageWarning) {
@@ -532,7 +515,7 @@ AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
 };
 
 /**
- * Clear current Inspection Context.
+ * Clear current inspection context.
  * @private
  */
 AIChat.prototype._clearContext = function () {
@@ -544,7 +527,7 @@ AIChat.prototype._clearContext = function () {
 };
 
 /**
- * Update current Inspection Context (control and app info).
+ * Update current inspection context (control and app info).
  * @param {Object} context - {control, appInfo}
  */
 AIChat.prototype.updateContext = function (context) {
@@ -571,9 +554,8 @@ AIChat.prototype.onTabActivated = function () {
 /**
  * Set current inspected URL.
  *
- * Delegates directly to the controller; the controller is responsible for
- * deduping repeated calls with the same URL, loading Conversation Memory,
- * destroying the active session, and reseeding with the new history.
+ * Delegates to the controller, which dedupes repeated calls, loads
+ * conversation memory, destroys the active session, and reseeds.
  * @param {string} url
  */
 AIChat.prototype.setUrl = function (url) {

@@ -3,13 +3,10 @@
 var AIChat = require('../../../app/scripts/modules/ui/AIChat.js');
 
 /**
- * Build a minimal AssistantController-shaped fake. The view talks only
- * to the controller surface, so the fake records event registrations and
- * exposes a `fire` helper that synchronously dispatches any event the
- * view subscribes to. The fake has no Chrome runtime, no storage, and no
- * capability behavior — which is exactly the AIChat test boundary the
- * Architecture V1 PRD demands ("must not depend on real session, storage,
- * or capability behavior").
+ * Minimal AssistantController-shaped fake. The view talks only to the
+ * controller surface, so the fake records event registrations and exposes
+ * a `fire` helper that dispatches any event the view subscribes to. No
+ * Chrome runtime, no storage, no capability behavior.
  * @returns {{listeners: Object, on: Function, fire: Function,
  *           initialize: Function, getUsageInfo: Function,
  *           updateInspectionContext: Function, setUrl: Function,
@@ -39,11 +36,10 @@ function createFakeController() {
 }
 
 /**
- * Build a minimal AssistantTranscript-shaped fake that records every
- * call from the view. The view only knows the transcript through this
- * small interface; the spec asserts the view forwards the right calls
- * to the transcript instead of probing markdown / JSON / scroll
- * internals (which are covered in AssistantTranscript.spec).
+ * Minimal AssistantTranscript-shaped fake. Records every call from the
+ * view. The spec asserts the view forwards the right calls to the
+ * transcript instead of probing markdown / JSON / scroll internals
+ * (covered in AssistantTranscript.spec).
  * @returns {{calls: Array, appendUserTurn: Function,
  *           appendSystemMessage: Function, beginAssistantTurn: Function,
  *           clear: Function, reset: Function, scrollToBottom: Function,
@@ -107,9 +103,8 @@ describe('AIChat', function () {
         });
 
         it('should construct the transcript with the messages container as host, so all transcript rendering writes into the DOM the view already laid out', function () {
-            // The fake transcript factory was called with the container element; the
-            // view should now drive turns through the fake rather than render them
-            // itself.
+            // The transcript factory was called with the container; the
+            // view drives turns through the fake instead of rendering itself.
             fakeController.fire('conversation-loaded', [{role: 'user', content: 'hi'}]);
             var resetCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'reset'; });
             resetCalls.length.should.equal(1);
@@ -128,8 +123,8 @@ describe('AIChat', function () {
             var container = document.getElementById('ai-messages-container');
             container.should.exist;
             container.getAttribute('role').should.equal('log');
-            // The view used to inject a welcome message here; that responsibility
-            // now lives in AssistantTranscript and is covered by its spec.
+            // The view used to inject a welcome message here. That now
+            // lives in AssistantTranscript.
             (container.querySelector('.ai-welcome-message') === null).should.be.true;
         });
 
@@ -409,8 +404,8 @@ describe('AIChat', function () {
 
         it('should expose the clear-history affordance when the controller reports session-failed, so the developer has a user-facing recovery action that destroys the broken session and reseeds a fresh one', function () {
             // Start from a ready state so the clear-history button is
-            // legitimately offered before session-failed arrives; the
-            // test then asserts session-failed keeps it offered.
+            // offered before session-failed arrives. The test then asserts
+            // session-failed keeps it offered.
             fakeController.fire('capability-state-changed', {
                 status: 'ready', message: 'ready', progress: 0
             });
@@ -448,8 +443,7 @@ describe('AIChat', function () {
                 status: 'ready', message: 'ready', progress: 0
             });
 
-            // getUsageInfo resolves to null in the fake controller; allow
-            // the microtask to drain.
+            // getUsageInfo resolves to null; drain the microtask.
             return Promise.resolve().then(function () {
                 return Promise.resolve();
             }).then(function () {
@@ -463,8 +457,8 @@ describe('AIChat', function () {
                 return Promise.resolve({inputUsage: 700, inputQuota: 1000, percentUsed: 75});
             };
 
-            // Two ready transitions to prove the warning is appended at
-            // most once even if _updateTokenCounter runs repeatedly.
+            // Two ready transitions to prove the warning appends at most
+            // once even if _updateTokenCounter runs repeatedly.
             fakeController.fire('capability-state-changed', {
                 status: 'ready', message: 'ready', progress: 0
             });
