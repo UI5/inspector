@@ -222,27 +222,27 @@
         return _section('Configuration', data);
     }
 
-    // Flatten an array into a 1-based-indexed map for DataView display.
-    function _listAsIndexedMap(arr) {
-        var data = {};
-        for (var i = 0; i < arr.length; i++) {
-            data[i + 1] = arr[i];
-        }
-        return data;
+    // DataView preserves array order (and sorts object keys alphabetically).
+    // For long lists we want a stable, readable order — sort the values
+    // alphabetically and emit as an array.
+    function _asSortedArray(arr) {
+        return arr.slice().sort(function (a, b) {
+            return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
+        });
     }
 
     function _registeredTagsSection(tags) {
         if (!Array.isArray(tags) || !tags.length) {
             return null;
         }
-        return _section('Registered tags (' + tags.length + ')', _listAsIndexedMap(tags), false);
+        return _section('Registered tags (' + tags.length + ')', _asSortedArray(tags), false);
     }
 
     function _registeredFeaturesSection(features) {
         if (!Array.isArray(features) || !features.length) {
             return null;
         }
-        return _section('Registered features (' + features.length + ')', _listAsIndexedMap(features), false);
+        return _section('Registered features (' + features.length + ')', _asSortedArray(features), false);
     }
 
     function _interopSection(primary) {
@@ -261,11 +261,11 @@
         if (runtimes.length <= 1) {
             return null;
         }
-        var data = {};
+        var data = [];
         for (var r = 0; r < runtimes.length; r++) {
             var rt = runtimes[r];
-            data[r + 1] = (rt.alias ? rt.alias + ' — ' : '') +
-                (rt.description || ('version ' + (rt.version || 'unknown')));
+            data.push((rt.alias ? rt.alias + ' — ' : '') +
+                (rt.description || ('version ' + (rt.version || 'unknown'))));
         }
         return _section('Runtimes (' + runtimes.length + ')', data);
     }
