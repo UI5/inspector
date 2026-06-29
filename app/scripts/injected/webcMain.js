@@ -69,7 +69,8 @@
         for (var key in props) {
             formattedProps[key] = Object.create(null);
             formattedProps[key].value = props[key].value;
-            formattedProps[key].isDefault = props[key].isDefault;
+            // No `isDefault`: see the note in WebComponentsToolsAPI.js.
+            // DataView omits the "(default)" badge when this is absent.
             types[key] = props[key].type || 'string';
         }
 

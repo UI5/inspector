@@ -94,33 +94,6 @@
         return 'string';
     }
 
-    // Resolve the framework-applied default for a property by reading it from
-    // the prototype chain BEFORE the instance has overridden it. With TS class
-    // field initializers the default ends up on the instance (`Object.hasOwn`),
-    // but with the framework's converter pattern it's typically on the
-    // prototype. We approximate by walking up the prototype chain looking for
-    // the first defined value; if none, fall back to type-based defaults.
-    function _getDefaultValue(element, propName, type) {
-        var proto = Object.getPrototypeOf(element);
-        while (proto && proto !== HTMLElement.prototype && proto !== Object.prototype) {
-            var desc = Object.getOwnPropertyDescriptor(proto, propName);
-            if (desc) {
-                if ('value' in desc) {
-                    return desc.value;
-                }
-                // It's a getter — can't safely invoke without side-effects, give up
-                break;
-            }
-            proto = Object.getPrototypeOf(proto);
-        }
-        // Type-based fallback (matches what the framework uses when no default
-        // is declared; see the defaultConverter in UI5Element.ts).
-        if (type === 'boolean') { return false; }
-        if (type === 'number') { return 0; }
-        if (type === 'string') { return ''; }
-        return undefined;
-    }
-
     // Slot mapping: a slot's content is exposed on the element under a
     // `propertyName` (defaults to the slot name). The framework populates
     // `element[propertyName]` with the array of assigned nodes.
@@ -187,14 +160,16 @@
                 if (key.charAt(0) === '_') {
                     continue;
                 }
-                var propType = _getPropertyType(propsMetadata[key]);
-                var currentValue = element[key];
-                var defaultValue = _getDefaultValue(element, key, propType);
-
+                // Note: `isDefault` is intentionally not reported. Web
+                // components has no declared `defaultValue` in metadata, and
+                // class field initializers compiled to ES2022 land on the
+                // instance, so we cannot reliably distinguish the framework
+                // default from a user-set value. A future implementation
+                // could snapshot defaults by sampling a fresh
+                // document.createElement(tag) per tag at startup.
                 result.own.properties[key] = Object.create(null);
-                result.own.properties[key].value = currentValue;
-                result.own.properties[key].type = propType;
-                result.own.properties[key].isDefault = currentValue === defaultValue;
+                result.own.properties[key].value = element[key];
+                result.own.properties[key].type = _getPropertyType(propsMetadata[key]);
             }
 
             result.inherited = [];
