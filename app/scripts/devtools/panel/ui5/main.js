@@ -2,8 +2,6 @@
 (function () {
     'use strict';
 
-
-
     // ================================================================================
     // Main controller for 'UI5' tab in devtools
     // ================================================================================
@@ -55,6 +53,10 @@
     var framesSelect;
     var displayFrameData;
     var updateSupportabilityOverlay;
+    // Synthetic root inserted under the merged tree (mixed pages) to group all
+    // WebC controls under one expandable header. Its id ('__webc_root__') is
+    // reserved: selecting or hovering it in the tree must be a no-op since it
+    // has no corresponding element on the page.
     var sharedDataViewOptions = {
 
         /**
@@ -86,6 +88,10 @@
          * @param {string} selectedElementId
          */
         onSelectionChanged: function (selectedElementId) {
+            // The synthetic WebC group root has no real element; skip.
+            if (selectedElementId === '__webc_root__') {
+                return;
+            }
             port.postMessage({
                 action: 'do-control-select',
                 target: selectedElementId,
@@ -99,6 +105,10 @@
          * @param {string} hoveredElementId
          */
         onHoverChanged: function (hoveredElementId) {
+            // The synthetic WebC group root has no real element; skip.
+            if (hoveredElementId === '__webc_root__') {
+                return;
+            }
             port.postMessage({
                 action: 'on-control-tree-hover',
                 target: hoveredElementId,
@@ -792,13 +802,19 @@
                 frameData[frameId] = {};
             }
             frameData[frameId].controlTreeWebC = message.controlTree;
-            // Only set application info if classic UI5 hasn't already provided richer info
+            // Precedence rule for the App Info tab on mixed pages: classic UI5
+            // wins because it provides richer info (loaded libraries, modules,
+            // bootstrap config, URL parameters), whereas WebC only emits a
+            // minimal "General" section. We populate from WebC only when
+            // classic hasn't already filled this in.
             if (!frameData[frameId].applicationInformation) {
                 frameData[frameId].applicationInformation = message.applicationInformation;
             }
 
             if (framesSelect.getSelectedId() === frameId) {
                 controlTree.setData(_getMergedControlTree(frameId));
+                // Avoid overwriting the App Info tab if classic UI5 will
+                // populate it shortly (or already did) — same precedence rule.
                 if (!frameData[frameId].isUI5Detected) {
                     appInfo.setData(frameData[frameId].applicationInformation);
                 }

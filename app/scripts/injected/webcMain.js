@@ -1,3 +1,38 @@
+/**
+ * UI5 Web Components — page-side script for the UI5 Inspector.
+ *
+ * Runs in the inspected page's MAIN world (injected by the background
+ * service worker via chrome.scripting.executeScript with world: 'MAIN').
+ * Running in MAIN is required to see the framework's classes and the
+ * isUI5Element getter on elements; the chrome.* APIs are not used here.
+ *
+ * Communication
+ * -------------
+ * Page <-> DevTools panel messages are bridged via CustomEvents on
+ * `document`, forwarded by content/detectWebComponents.js (isolated world):
+ *
+ *   panel  -- port.postMessage -->  background
+ *   background  -- chrome.tabs.sendMessage -->  content/detectWebComponents.js
+ *   content  -- CustomEvent('ui5-communication-with-injected-script') -->  this script
+ *   this script  -- CustomEvent('ui5-communication-with-content-script') -->  content
+ *   content  -- port.postMessage -->  background  -->  panel
+ *
+ * Action names
+ * ------------
+ *  - `*-webc` actions are WebC-specific (e.g. get-initial-information-webc).
+ *  - Shared actions (do-control-select, do-control-focus,
+ *    do-copy-control-to-console, do-control-copy-html, do-control-property-change,
+ *    on-control-tree-hover, on-hide-highlight, do-context-menu-control-select)
+ *    are also handled by injected/main.js for classic UI5. Each handler
+ *    here guards on WebCToolsAPI.getElementById, so the two coexist
+ *    cleanly on mixed pages: only the script that recognises the id
+ *    responds.
+ *
+ * Introspection is delegated to window.__ui5WebComponentsToolsAPI
+ * (defined in vendor/WebComponentsToolsAPI.js, injected just before this
+ * script). The control tree is rebuilt on DOM mutations, debounced to
+ * collapse rapid bursts (e.g. animations) into a single update.
+ */
 (function () {
     'use strict';
 
@@ -237,10 +272,15 @@
     // shadow root, by convention with id `<itemId>-<suffix>`.
     // ================================================================================
 
-    // Find an element inside `host`'s shadow root whose id starts with
-    // `idPrefix` and has a non-zero layout box.
-    function _findVisibleInShadow(host, idPrefix) {
-        var match = host.shadowRoot.querySelector('[id^="' + idPrefix + '"]');
+    // Find an element inside `host`'s shadow root whose id exactly equals
+    // `id` or begins with `id-` (the framework convention for derived ids,
+    // e.g. ui5wc_104 -> ui5wc_104-link-wrapper). We avoid a plain prefix
+    // match like `[id^="ui5wc_1"]` because it also matches ui5wc_10,
+    // ui5wc_100, etc. The selected match must have a non-zero layout box.
+    function _findVisibleInShadow(host, id) {
+        var match = host.shadowRoot.querySelector(
+            '[id="' + id + '"], [id^="' + id + '-"]'
+        );
         if (!match) {
             return null;
         }
@@ -385,9 +425,10 @@
         // Walk up to find the nearest UI5 web component ancestor
         while (target && target !== document.body) {
             if (target.isUI5Element === true) {
+                // UI5Element guarantees _id (lazy getter, see UI5Element.ts)
                 message.send({
                     action: 'on-right-click',
-                    target: target._id || target.id
+                    target: target._id
                 });
                 return;
             }
