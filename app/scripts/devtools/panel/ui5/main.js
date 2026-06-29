@@ -442,6 +442,19 @@
         aiChat.destroy();
     });
 
+    // Notify the AI tab when it becomes active so the transcript scrolls to the
+    // latest turn. Deferred via requestAnimationFrame so the scroll runs after the
+    // TabBar click handler has flipped the `selected` attribute and the content is
+    // visible (scrollHeight on a hidden element is meaningless).
+    var aiTabElement = document.getElementById('ai-tab');
+    if (aiTabElement) {
+        aiTabElement.addEventListener('click', function () {
+            window.requestAnimationFrame(function () {
+                aiChat.onTabActivated();
+            });
+        });
+    }
+
     // ================================================================================
     // Communication
     // ================================================================================
