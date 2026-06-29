@@ -321,6 +321,34 @@ describe('AssistantController', function () {
             });
         });
 
+        it('should resolve the Assistant Capability State to downloading when the Prompt Client reports the local model is mid-download, instead of collapsing it into unavailable', function () {
+            var harness = createController();
+            harness.promptClient.availabilityResult = {
+                available: false,
+                status: 'downloading',
+                message: 'Gemini Nano is downloading'
+            };
+
+            return harness.controller.initialize().then(function () {
+                harness.controller.getCapabilityState().status.should.equal('downloading');
+                harness.controller.getCapabilityState().message.should.equal('Gemini Nano is downloading');
+            });
+        });
+
+        it('should resolve the Assistant Capability State to unavailable when the Prompt Client reports a background-worker error, preserving the transport-supplied message rather than substituting a generic one', function () {
+            var harness = createController();
+            harness.promptClient.availabilityResult = {
+                available: false,
+                status: 'error',
+                message: 'Background worker availability check threw: boom'
+            };
+
+            return harness.controller.initialize().then(function () {
+                harness.controller.getCapabilityState().status.should.equal('unavailable');
+                harness.controller.getCapabilityState().message.should.equal('Background worker availability check threw: boom');
+            });
+        });
+
         it('should resolve the Assistant Capability State to unavailable when the Prompt Client capability check itself throws, instead of letting initialize reject and leave the view without a canonical state to render', function () {
             var harness = createController();
             harness.promptClient.checkAvailability = function () {

@@ -129,6 +129,19 @@ AssistantController.prototype._setCapabilityState = function (status, message, p
 /**
  * Map a Prompt Client availability result onto the Inspector AI Assistant's
  * canonical Assistant Capability State vocabulary.
+ *
+ * The background service worker speaks a transport-level status dialect
+ * (`ready`, `needs-download`, `downloading`, `unsupported`, `error`,
+ * `unknown`). This controller translates those into the canonical
+ * Assistant Capability States defined in CONTEXT.md: `ready`,
+ * `downloadable`, `downloading`, `unsupported`, `unavailable`.
+ *
+ * The `error` transport status is mapped to `unavailable` rather than
+ * exposed as a distinct state — the AIChat view treats it the same as
+ * any other unavailable cause — but the transport-supplied message is
+ * preserved so the developer sees the actual failure reason instead of
+ * a generic banner.
+ *
  * @private
  * @param {{available: boolean, status: string, message: string}} availability
  * @returns {{status: string, message: string}}
@@ -140,6 +153,9 @@ AssistantController.prototype._mapAvailability = function (availability) {
     }
     if (status === 'needs-download') {
         return { status: 'downloadable', message: availability.message };
+    }
+    if (status === 'downloading') {
+        return { status: 'downloading', message: availability.message };
     }
     if (status === 'unsupported') {
         return { status: 'unsupported', message: availability.message };
