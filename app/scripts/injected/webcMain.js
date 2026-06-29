@@ -158,24 +158,146 @@
         return result;
     }
 
-    // Build application info in the same shape as classic UI5's applicationUtils.getApplicationInfo()
-    function _buildApplicationInfo(frameworkInformation) {
-        var common = frameworkInformation.commonInformation;
+    // Build a single DataView section: {options, data}. Used by the App Info
+    // tab, which expects this shape per section (see classic UI5's
+    // applicationUtils.getApplicationInfo()).
+    function _section(title, data, expanded) {
+        return {
+            options: {
+                title: title,
+                expandable: true,
+                expanded: expanded !== false
+            },
+            data: data
+        };
+    }
+
+    // Stringify a configuration value for display in the App Info tab.
+    function _formatConfigValue(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (typeof value === 'object') {
+            try {
+                return JSON.stringify(value);
+            } catch (e) {
+                return String(value);
+            }
+        }
+        return value;
+    }
+
+    // Build application info in the same shape as classic UI5's
+    // applicationUtils.getApplicationInfo(). Surfaces what the framework
+    // exposes through `meta.Runtimes` (see packages/base/src/Runtimes.ts):
+    // configuration (theme, language, timezone, ...), registered tags and
+    // features, and a list of runtimes when more than one is active on the
+    // page.
+    // --- App Info section builders. Each returns a {options, data} section
+    // or null if there's nothing to report. ---
+
+    function _generalSection(common) {
         var general = {};
         general[common.frameworkName] = common.version || '(unknown)';
+        if (common.description) {
+            general.Description = common.description;
+        }
         general['User Agent'] = navigator.userAgent;
         general.Application = location.href;
+        return _section('General', general);
+    }
 
-        return {
-            common: {
-                options: {
-                    title: 'General',
-                    expandable: true,
-                    expanded: true
-                },
-                data: general
-            }
+    function _configurationSection(configuration) {
+        if (!configuration) {
+            return null;
+        }
+        var keys = Object.keys(configuration);
+        if (!keys.length) {
+            return null;
+        }
+        var data = {};
+        for (var i = 0; i < keys.length; i++) {
+            data[keys[i]] = _formatConfigValue(configuration[keys[i]]);
+        }
+        return _section('Configuration', data);
+    }
+
+    // Flatten an array into a 1-based-indexed map for DataView display.
+    function _listAsIndexedMap(arr) {
+        var data = {};
+        for (var i = 0; i < arr.length; i++) {
+            data[i + 1] = arr[i];
+        }
+        return data;
+    }
+
+    function _registeredTagsSection(tags) {
+        if (!Array.isArray(tags) || !tags.length) {
+            return null;
+        }
+        return _section('Registered tags (' + tags.length + ')', _listAsIndexedMap(tags), false);
+    }
+
+    function _registeredFeaturesSection(features) {
+        if (!Array.isArray(features) || !features.length) {
+            return null;
+        }
+        return _section('Registered features (' + features.length + ')', _listAsIndexedMap(features), false);
+    }
+
+    function _interopSection(primary) {
+        if (typeof primary.openUI5Detected !== 'boolean') {
+            return null;
+        }
+        var interop = {};
+        interop['OpenUI5 detected'] = primary.openUI5Detected;
+        if (typeof primary.openUI5LoadedFirst === 'boolean') {
+            interop['OpenUI5 loaded first'] = primary.openUI5LoadedFirst;
+        }
+        return _section('Interop', interop);
+    }
+
+    function _runtimesSection(runtimes) {
+        if (runtimes.length <= 1) {
+            return null;
+        }
+        var data = {};
+        for (var r = 0; r < runtimes.length; r++) {
+            var rt = runtimes[r];
+            data[r + 1] = (rt.alias ? rt.alias + ' — ' : '') +
+                (rt.description || ('version ' + (rt.version || 'unknown')));
+        }
+        return _section('Runtimes (' + runtimes.length + ')', data);
+    }
+
+    // Build application info in the same shape as classic UI5's
+    // applicationUtils.getApplicationInfo(). Surfaces what the framework
+    // exposes through `meta.Runtimes` (see packages/base/src/Runtimes.ts):
+    // configuration (theme, language, timezone, ...), registered tags and
+    // features, and a list of runtimes when more than one is active on the
+    // page.
+    function _buildApplicationInfo(frameworkInformation) {
+        var common = frameworkInformation.commonInformation;
+        var runtimes = (frameworkInformation.runtimes && frameworkInformation.runtimes.length) ?
+            frameworkInformation.runtimes : [];
+        var primary = runtimes[0] || {};
+        var sections = {
+            common: _generalSection(common),
+            configuration: _configurationSection(primary.configuration),
+            registeredTags: _registeredTagsSection(primary.registeredTags),
+            registeredFeatures: _registeredFeaturesSection(primary.registeredFeatures),
+            interop: _interopSection(primary),
+            runtimes: _runtimesSection(runtimes)
         };
+
+        var result = {};
+        var keys = Object.keys(sections);
+        for (var i = 0; i < keys.length; i++) {
+            if (sections[keys[i]]) {
+                result[keys[i]] = sections[keys[i]];
+            }
+        }
+        return result;
     }
 
     // Send the current control tree to the panel
@@ -319,6 +441,12 @@
         return visible || host;
     }
 
+    // Note: payload shapes vary per action because they are determined by
+    // the panel side, not by this script. Some actions ship the id as
+    // `event.detail.target`, others as `event.detail.data.controlId`,
+    // others as `event.detail.data` blobs. Matching the corresponding
+    // shape in injected/main.js keeps the message contracts identical
+    // across the two frameworks.
     var messageHandler = {
 
         'get-initial-information-webc': function () {

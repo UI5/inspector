@@ -122,14 +122,37 @@
         return slotData.type === Node ? 'Node' : 'HTMLElement';
     }
 
+    // Returns the array of runtime descriptors the framework registers on the
+    // shared-resources meta element. See packages/base/src/Runtimes.ts.
+    // Each runtime exposes: version, alias, description, registeredTags,
+    // registeredFeatures, configuration (theme, language, timezone, etc.),
+    // openUI5Detected, openUI5LoadedFirst, and more. Returns [] if the
+    // meta element or Runtimes property is missing.
+    function _getRuntimes() {
+        try {
+            var meta = document.querySelector('meta[name="ui5-shared-resources"]');
+            if (meta && Array.isArray(meta.Runtimes)) {
+                return meta.Runtimes;
+            }
+        } catch (e) {
+            // best-effort
+        }
+        return [];
+    }
+
     window.__ui5WebComponentsToolsAPI = {
 
         getFrameworkInformation: function () {
+            var runtimes = _getRuntimes();
+            var primary = runtimes[0] || {};
             return Promise.resolve({
                 commonInformation: {
                     frameworkName: 'UI5 Web Components',
-                    version: _getVersion()
-                }
+                    version: _getVersion(),
+                    buildTime: primary.buildTime,
+                    description: primary.description
+                },
+                runtimes: runtimes
             });
         },
 
