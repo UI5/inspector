@@ -234,7 +234,7 @@ describe('AssistantController', function () {
             const harness = createController();
 
             const canonicalStates = ['unsupported', 'unavailable', 'downloadable', 'downloading', 'ready', 'session-failed', 'streaming-failed'];
-            canonicalStates.should.include(harness.controller.getCapabilityState().status);
+            canonicalStates.should.include(harness.controller._capabilityState.status);
         });
     });
 
@@ -247,7 +247,7 @@ describe('AssistantController', function () {
             };
 
             return harness.controller.initialize().then(function () {
-                harness.controller.getCapabilityState().status.should.equal('ready');
+                harness.controller._capabilityState.status.should.equal('ready');
                 harness.capabilityStates.should.deep.include({
                     status: 'ready',
                     message: 'Gemini Nano is ready',
@@ -264,7 +264,7 @@ describe('AssistantController', function () {
             };
 
             return harness.controller.initialize().then(function () {
-                harness.controller.getCapabilityState().status.should.equal('downloadable');
+                harness.controller._capabilityState.status.should.equal('downloadable');
             });
         });
 
@@ -276,7 +276,7 @@ describe('AssistantController', function () {
             };
 
             return harness.controller.initialize().then(function () {
-                harness.controller.getCapabilityState().status.should.equal('unsupported');
+                harness.controller._capabilityState.status.should.equal('unsupported');
             });
         });
 
@@ -288,8 +288,8 @@ describe('AssistantController', function () {
             };
 
             return harness.controller.initialize().then(function () {
-                harness.controller.getCapabilityState().status.should.equal('downloading');
-                harness.controller.getCapabilityState().message.should.equal('Gemini Nano is downloading');
+                harness.controller._capabilityState.status.should.equal('downloading');
+                harness.controller._capabilityState.message.should.equal('Gemini Nano is downloading');
             });
         });
 
@@ -301,8 +301,8 @@ describe('AssistantController', function () {
             };
 
             return harness.controller.initialize().then(function () {
-                harness.controller.getCapabilityState().status.should.equal('unavailable');
-                harness.controller.getCapabilityState().message.should.equal('Background worker availability check threw: boom');
+                harness.controller._capabilityState.status.should.equal('unavailable');
+                harness.controller._capabilityState.message.should.equal('Background worker availability check threw: boom');
             });
         });
 
@@ -313,8 +313,8 @@ describe('AssistantController', function () {
             };
 
             return harness.controller.initialize().then(function () {
-                harness.controller.getCapabilityState().status.should.equal('unavailable');
-                harness.controller.getCapabilityState().message.should.contain('runtime port disconnected');
+                harness.controller._capabilityState.status.should.equal('unavailable');
+                harness.controller._capabilityState.message.should.contain('runtime port disconnected');
             });
         });
     });
@@ -385,8 +385,8 @@ describe('AssistantController', function () {
             harness.promptClient.createSessionError = new Error('Session create failed');
 
             return harness.controller.initialize().then(function () {
-                harness.controller.getCapabilityState().status.should.equal('session-failed');
-                harness.controller.getCapabilityState().message.should.equal('Session create failed');
+                harness.controller._capabilityState.status.should.equal('session-failed');
+                harness.controller._capabilityState.message.should.equal('Session create failed');
             });
         });
 
@@ -478,7 +478,7 @@ describe('AssistantController', function () {
                     });
                 }).then(function () {
                     harness.controller._isStreaming.should.be.false;
-                    harness.controller.getCapabilityState().status.should.equal('streaming-failed');
+                    harness.controller._capabilityState.status.should.equal('streaming-failed');
                     const failed = harness.events.filter(function (e) {
                         return e.type === 'stream-failed';
                     });
@@ -514,7 +514,7 @@ describe('AssistantController', function () {
                     streamCtrl.emitError(new Error('model crashed'));
                     return firstSend.catch(function () { /* expected */ });
                 }).then(function () {
-                    harness.controller.getCapabilityState().status.should.equal('streaming-failed');
+                    harness.controller._capabilityState.status.should.equal('streaming-failed');
 
                     const secondSend = harness.controller.sendUserMessage('Second, will succeed');
                     return awaitStreamController(harness.promptClient).then(function (streamCtrl2) {
@@ -523,7 +523,7 @@ describe('AssistantController', function () {
                         return secondSend;
                     });
                 }).then(function () {
-                    harness.controller.getCapabilityState().status.should.equal('ready');
+                    harness.controller._capabilityState.status.should.equal('ready');
                 });
             });
         });
@@ -671,7 +671,7 @@ describe('AssistantController', function () {
             harness.promptClient.downloadProgressValues = [0.25, 0.5, 1.0];
 
             return harness.controller.initialize().then(function () {
-                harness.controller.getCapabilityState().status.should.equal('downloadable');
+                harness.controller._capabilityState.status.should.equal('downloadable');
 
                 return harness.controller.downloadModel();
             }).then(function () {
@@ -696,7 +696,7 @@ describe('AssistantController', function () {
                 harness.promptClient.createSessionError = new Error('reseed failed after clear');
                 return harness.controller.clearConversation();
             }).then(function () {
-                harness.controller.getCapabilityState().status.should.equal('session-failed');
+                harness.controller._capabilityState.status.should.equal('session-failed');
             });
         });
 
@@ -707,7 +707,7 @@ describe('AssistantController', function () {
                 harness.promptClient.createSessionError = new Error('reseed failed after url change');
                 return harness.controller.setUrl('https://other.example.com');
             }).then(function () {
-                harness.controller.getCapabilityState().status.should.equal('session-failed');
+                harness.controller._capabilityState.status.should.equal('session-failed');
             });
         });
 
@@ -721,7 +721,7 @@ describe('AssistantController', function () {
                 harness.promptClient.createSessionError = new Error('reseed failed after download');
                 return harness.controller.downloadModel();
             }).then(function () {
-                harness.controller.getCapabilityState().status.should.equal('session-failed');
+                harness.controller._capabilityState.status.should.equal('session-failed');
             });
         });
     });

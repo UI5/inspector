@@ -70,13 +70,6 @@ AssistantController.prototype._emit = function (event, payload) {
 };
 
 /**
- * @returns {{status: string, message: string, progress: number}}
- */
-AssistantController.prototype.getCapabilityState = function () {
-    return this._capabilityState;
-};
-
-/**
  * @private
  * @param {string} status
  * @param {string} [message]
