@@ -43,8 +43,6 @@ function AIChat(containerId, {
     this.init();
 }
 
-/**
- */
 AIChat.prototype.init = function () {
     this._render();
     this._transcript = this._transcriptFactory(document.getElementById('ai-messages-container'));
@@ -475,8 +473,6 @@ AIChat.prototype.updateContext = function (context) {
     }
 };
 
-/**
- */
 AIChat.prototype.onTabActivated = function () {
     this._transcript.scrollToBottom(true);
 };
@@ -490,8 +486,6 @@ AIChat.prototype.setUrl = function (url) {
     this._controller.setUrl(url);
 };
 
-/**
- */
 AIChat.prototype.destroy = function () {
     this._controller.destroy();
     if (this._transcript && typeof this._transcript.destroy === 'function') {

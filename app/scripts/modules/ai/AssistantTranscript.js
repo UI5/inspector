@@ -126,8 +126,6 @@ AssistantTranscript.prototype.beginAssistantTurn = function () {
     };
 };
 
-/**
- */
 AssistantTranscript.prototype.clear = function () {
     // Safe innerHTML: literal string with no interpolation.
     this._container.innerHTML = '' +

@@ -280,8 +280,6 @@ AssistantController.prototype.getUsageInfo = function () {
     return this._promptClient.getUsageInfo();
 };
 
-/**
- */
 AssistantController.prototype.destroy = function () {
     this._promptClient.destroy();
     this._listeners = {};
