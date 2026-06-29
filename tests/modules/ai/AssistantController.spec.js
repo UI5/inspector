@@ -13,7 +13,7 @@ var PromptBuilder = require('../../../app/scripts/modules/ai/PromptBuilder.js');
  */
 function createFakePromptClient() {
     var fake = {
-        availabilityResult: { available: true, status: 'ready', message: 'Model is ready' },
+        availabilityResult: { status: 'ready', message: 'Model is ready' },
         sessionCreated: true,
         createSessionError: null,
         usageInfo: null,
@@ -225,7 +225,7 @@ function createController(overrides) {
  */
 function initializedReady(harness) {
     harness.promptClient.availabilityResult = {
-        available: true, status: 'ready', message: 'ready'
+        status: 'ready', message: 'ready'
     };
     harness.controller.setUrl('https://example.com');
     return harness.controller.initialize();
@@ -280,7 +280,6 @@ describe('AssistantController', function () {
         it('should resolve the Assistant Capability State to ready and notify listeners when the Prompt Client reports the local model is ready', function () {
             var harness = createController();
             harness.promptClient.availabilityResult = {
-                available: true,
                 status: 'ready',
                 message: 'Gemini Nano is ready'
             };
@@ -298,8 +297,7 @@ describe('AssistantController', function () {
         it('should resolve the Assistant Capability State to downloadable when the Prompt Client reports the local model needs download', function () {
             var harness = createController();
             harness.promptClient.availabilityResult = {
-                available: true,
-                status: 'needs-download',
+                status: 'downloadable',
                 message: 'Model can be downloaded'
             };
 
@@ -311,7 +309,6 @@ describe('AssistantController', function () {
         it('should resolve the Assistant Capability State to unsupported when the Prompt Client reports an unsupported browser', function () {
             var harness = createController();
             harness.promptClient.availabilityResult = {
-                available: false,
                 status: 'unsupported',
                 message: 'Browser unsupported'
             };
@@ -324,7 +321,6 @@ describe('AssistantController', function () {
         it('should resolve the Assistant Capability State to downloading when the Prompt Client reports the local model is mid-download, instead of collapsing it into unavailable', function () {
             var harness = createController();
             harness.promptClient.availabilityResult = {
-                available: false,
                 status: 'downloading',
                 message: 'Gemini Nano is downloading'
             };
@@ -335,11 +331,10 @@ describe('AssistantController', function () {
             });
         });
 
-        it('should resolve the Assistant Capability State to unavailable when the Prompt Client reports a background-worker error, preserving the transport-supplied message rather than substituting a generic one', function () {
+        it('should resolve the Assistant Capability State to unavailable when the Prompt Client reports an unavailable transport, preserving the transport-supplied message rather than substituting a generic one', function () {
             var harness = createController();
             harness.promptClient.availabilityResult = {
-                available: false,
-                status: 'error',
+                status: 'unavailable',
                 message: 'Background worker availability check threw: boom'
             };
 
@@ -411,7 +406,6 @@ describe('AssistantController', function () {
         it('should not attempt to create a session when the Assistant Capability State is not ready', function () {
             var harness = createController();
             harness.promptClient.availabilityResult = {
-                available: false,
                 status: 'unsupported',
                 message: 'Browser unsupported'
             };
@@ -424,7 +418,7 @@ describe('AssistantController', function () {
         it('should resolve the Assistant Capability State to session-failed when the Prompt Client reports ready but session creation throws', function () {
             var harness = createController();
             harness.promptClient.availabilityResult = {
-                available: true, status: 'ready', message: 'ready'
+                status: 'ready', message: 'ready'
             };
             harness.promptClient.createSessionError = new Error('Session create failed');
 
@@ -667,7 +661,7 @@ describe('AssistantController', function () {
                 { role: 'user', content: 'B1' }
             ];
             harness.promptClient.availabilityResult = {
-                available: true, status: 'ready', message: 'ready'
+                status: 'ready', message: 'ready'
             };
             harness.controller.setUrl('https://a.example.com');
 
@@ -693,7 +687,7 @@ describe('AssistantController', function () {
         it('should not reseed when setUrl is called with the same inspected URL', function () {
             var harness = createController();
             harness.promptClient.availabilityResult = {
-                available: true, status: 'ready', message: 'ready'
+                status: 'ready', message: 'ready'
             };
             harness.controller.setUrl('https://example.com');
 
@@ -711,7 +705,7 @@ describe('AssistantController', function () {
         it('should drive the Prompt Client download flow, emit downloading capability state with progress, and resolve to a ready capability state once the local model is available', function () {
             var harness = createController();
             harness.promptClient.availabilityResult = {
-                available: true, status: 'needs-download', message: 'Needs download'
+                status: 'downloadable', message: 'Needs download'
             };
             harness.promptClient.downloadProgressValues = [0.25, 0.5, 1.0];
 
@@ -759,7 +753,7 @@ describe('AssistantController', function () {
         it('should resolve the Assistant Capability State to session-failed when downloadModel succeeds but reseed afterwards fails', function () {
             var harness = createController();
             harness.promptClient.availabilityResult = {
-                available: true, status: 'needs-download', message: 'Needs download'
+                status: 'downloadable', message: 'Needs download'
             };
 
             return harness.controller.initialize().then(function () {

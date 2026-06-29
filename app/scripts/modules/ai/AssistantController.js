@@ -127,44 +127,14 @@ AssistantController.prototype._setCapabilityState = function (status, message, p
 };
 
 /**
- * Map a Prompt Client availability result onto the Inspector AI Assistant's
- * canonical Assistant Capability State vocabulary.
- *
- * The background service worker speaks a transport-level status dialect
- * (`ready`, `needs-download`, `downloading`, `unsupported`, `error`,
- * `unknown`). This controller translates those into the canonical
- * Assistant Capability States defined in CONTEXT.md: `ready`,
- * `downloadable`, `downloading`, `unsupported`, `unavailable`.
- *
- * The `error` transport status is mapped to `unavailable` rather than
- * exposed as a distinct state — the AIChat view treats it the same as
- * any other unavailable cause — but the transport-supplied message is
- * preserved so the developer sees the actual failure reason instead of
- * a generic banner.
- *
- * @private
- * @param {{available: boolean, status: string, message: string}} availability
- * @returns {{status: string, message: string}}
- */
-AssistantController.prototype._mapAvailability = function (availability) {
-    var status = availability.status;
-    if (status === 'ready') {
-        return { status: 'ready', message: availability.message };
-    }
-    if (status === 'needs-download') {
-        return { status: 'downloadable', message: availability.message };
-    }
-    if (status === 'downloading') {
-        return { status: 'downloading', message: availability.message };
-    }
-    if (status === 'unsupported') {
-        return { status: 'unsupported', message: availability.message };
-    }
-    return { status: 'unavailable', message: availability.message || '' };
-};
-
-/**
  * Resolve the Assistant Capability State from the Prompt Client and broadcast it.
+ *
+ * The Prompt Client returns canonical Assistant Capability State names
+ * directly (`unsupported`, `unavailable`, `downloadable`, `downloading`,
+ * `ready`); the background service worker port-protocol dialect is the
+ * Prompt Client's concern, not the controller's. The two controller-managed
+ * lifecycle states (`session-failed`, `streaming-failed`) are produced
+ * elsewhere in this module.
  *
  * A rejected capability check is treated as a normal `unavailable`
  * Assistant Capability State, not an exceptional throw — the AIChat
@@ -181,11 +151,10 @@ AssistantController.prototype._mapAvailability = function (availability) {
  */
 AssistantController.prototype.initialize = function () {
     var that = this;
-    return this._promptClient.checkAvailability().then(function (availability) {
-        var mapped = that._mapAvailability(availability);
-        that._setCapabilityState(mapped.status, mapped.message, 0);
+    return this._promptClient.checkAvailability().then(function (capability) {
+        that._setCapabilityState(capability.status, capability.message, 0);
         return that._loadConversationMemory().then(function () {
-            if (mapped.status === 'ready') {
+            if (capability.status === 'ready') {
                 return that._seedSessionOrFail();
             }
             return undefined;

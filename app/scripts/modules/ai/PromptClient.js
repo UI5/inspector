@@ -89,8 +89,52 @@ PromptClient.prototype._send = function (message) {
 };
 
 /**
+ * Translate a background service worker port-protocol availability status
+ * into the canonical Assistant Capability State vocabulary defined in
+ * CONTEXT.md. Kept module-private; the only caller is `checkAvailability`.
+ *
+ * @private
+ * @param {string} portStatus - Status string from the background port.
+ * @returns {string} Canonical Assistant Capability State name.
+ */
+function toCanonicalCapabilityState(portStatus) {
+    if (portStatus === 'ready') {
+        return 'ready';
+    }
+    if (portStatus === 'needs-download') {
+        return 'downloadable';
+    }
+    if (portStatus === 'downloading') {
+        return 'downloading';
+    }
+    if (portStatus === 'unsupported') {
+        return 'unsupported';
+    }
+    // `unavailable`, `error`, and any unrecognized status collapse to
+    // canonical `unavailable`. The transport-supplied message is preserved
+    // by the caller so the developer still sees the actual cause.
+    return 'unavailable';
+}
+
+/**
  * Resolve the current Assistant Capability State from the transport.
- * @returns {Promise<{available: boolean, status: string, message: string}>}
+ *
+ * Translates the background service worker's port-protocol status dialect
+ * (`ready`, `needs-download`, `downloading`, `unsupported`, `unavailable`,
+ * `error`) into the canonical Assistant Capability State vocabulary
+ * defined in CONTEXT.md (`ready`, `downloadable`, `downloading`,
+ * `unsupported`, `unavailable`). The background port protocol itself does
+ * not change — the translation lives at this seam so the rest of the
+ * Inspector AI Assistant speaks only the canonical vocabulary.
+ *
+ * The `error` transport status is collapsed to canonical `unavailable`
+ * (the view treats it the same as any other unavailable cause) but the
+ * transport-supplied message is preserved so the developer sees the
+ * actual failure reason instead of a generic banner. Any unrecognized
+ * transport status also resolves to `unavailable` to keep the controller
+ * and view on canonical ground.
+ *
+ * @returns {Promise<{status: string, message: string}>} Canonical state.
  */
 PromptClient.prototype.checkAvailability = function () {
     return new Promise((resolve) => {
@@ -99,8 +143,7 @@ PromptClient.prototype.checkAvailability = function () {
         this._on('availability', (message) => {
             this._off('availability');
             resolve({
-                available: message.status === 'ready' || message.status === 'needs-download',
-                status: message.status,
+                status: toCanonicalCapabilityState(message.status),
                 message: message.message
             });
         });

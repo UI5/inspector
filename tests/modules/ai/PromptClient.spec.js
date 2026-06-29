@@ -53,7 +53,7 @@ function createFakePort() {
 
 describe('PromptClient', function () {
     describe('#checkAvailability()', function () {
-        it('should resolve with the Assistant Capability State reported by the transport when the model is ready', function () {
+        it('should resolve with the canonical `ready` Assistant Capability State when the background port reports `ready`', function () {
             var fake = createFakePort();
             var client = new PromptClient({
                 portFactory: function () {
@@ -62,9 +62,9 @@ describe('PromptClient', function () {
             });
 
             var promise = client.checkAvailability().then(function (result) {
-                result.available.should.be.true;
                 result.status.should.equal('ready');
                 result.message.should.equal('Model is ready');
+                result.should.not.have.property('available');
             });
 
             fake.posted.should.deep.include({ type: 'check-availability' });
@@ -73,7 +73,7 @@ describe('PromptClient', function () {
             return promise;
         });
 
-        it('should mark the Assistant Capability State as unavailable when the transport reports an unsupported status', function () {
+        it('should translate the background port `needs-download` status to the canonical `downloadable` Assistant Capability State', function () {
             var fake = createFakePort();
             var client = new PromptClient({
                 portFactory: function () {
@@ -82,11 +82,100 @@ describe('PromptClient', function () {
             });
 
             var promise = client.checkAvailability().then(function (result) {
-                result.available.should.be.false;
+                result.status.should.equal('downloadable');
+                result.message.should.equal('Needs download');
+            });
+
+            fake.emit({ type: 'availability', status: 'needs-download', message: 'Needs download' });
+
+            return promise;
+        });
+
+        it('should pass through the background port `downloading` status as the canonical `downloading` Assistant Capability State, preserving the transport-supplied message', function () {
+            var fake = createFakePort();
+            var client = new PromptClient({
+                portFactory: function () {
+                    return fake.port;
+                }
+            });
+
+            var promise = client.checkAvailability().then(function (result) {
+                result.status.should.equal('downloading');
+                result.message.should.equal('Gemini Nano is downloading');
+            });
+
+            fake.emit({ type: 'availability', status: 'downloading', message: 'Gemini Nano is downloading' });
+
+            return promise;
+        });
+
+        it('should pass through the background port `unsupported` status as the canonical `unsupported` Assistant Capability State', function () {
+            var fake = createFakePort();
+            var client = new PromptClient({
+                portFactory: function () {
+                    return fake.port;
+                }
+            });
+
+            var promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('unsupported');
+                result.message.should.equal('Browser unsupported');
             });
 
             fake.emit({ type: 'availability', status: 'unsupported', message: 'Browser unsupported' });
+
+            return promise;
+        });
+
+        it('should pass through the background port `unavailable` status as the canonical `unavailable` Assistant Capability State', function () {
+            var fake = createFakePort();
+            var client = new PromptClient({
+                portFactory: function () {
+                    return fake.port;
+                }
+            });
+
+            var promise = client.checkAvailability().then(function (result) {
+                result.status.should.equal('unavailable');
+                result.message.should.equal('Gemini Nano is not available on this device');
+            });
+
+            fake.emit({ type: 'availability', status: 'unavailable', message: 'Gemini Nano is not available on this device' });
+
+            return promise;
+        });
+
+        it('should translate the background port `error` status to the canonical `unavailable` Assistant Capability State, preserving the transport-supplied error message', function () {
+            var fake = createFakePort();
+            var client = new PromptClient({
+                portFactory: function () {
+                    return fake.port;
+                }
+            });
+
+            var promise = client.checkAvailability().then(function (result) {
+                result.status.should.equal('unavailable');
+                result.message.should.equal('Error: boom');
+            });
+
+            fake.emit({ type: 'availability', status: 'error', message: 'Error: boom' });
+
+            return promise;
+        });
+
+        it('should default to the canonical `unavailable` Assistant Capability State for any unrecognized background port status', function () {
+            var fake = createFakePort();
+            var client = new PromptClient({
+                portFactory: function () {
+                    return fake.port;
+                }
+            });
+
+            var promise = client.checkAvailability().then(function (result) {
+                result.status.should.equal('unavailable');
+            });
+
+            fake.emit({ type: 'availability', status: 'something-new', message: '' });
 
             return promise;
         });
