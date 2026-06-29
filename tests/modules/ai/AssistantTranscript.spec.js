@@ -1,11 +1,11 @@
 'use strict';
 
-var AssistantTranscript = require('../../../app/scripts/modules/ai/AssistantTranscript.js');
+const AssistantTranscript = require('../../../app/scripts/modules/ai/AssistantTranscript.js');
 
 describe('AssistantTranscript', function () {
-    var fixtures = document.getElementById('fixtures');
-    var container;
-    var transcript;
+    const fixtures = document.getElementById('fixtures');
+    let container;
+    let transcript;
 
     beforeEach(function () {
         fixtures.innerHTML = '<div id="transcript-host"></div>';
@@ -76,7 +76,7 @@ describe('AssistantTranscript', function () {
 
     describe('#beginAssistantTurn()', function () {
         it('should return a handle so the view can drive a streamed assistant turn without owning the streaming DOM', function () {
-            var handle = transcript.beginAssistantTurn();
+            const handle = transcript.beginAssistantTurn();
 
             handle.should.exist;
             (typeof handle.streamChunk).should.equal('function');
@@ -91,7 +91,7 @@ describe('AssistantTranscript', function () {
         });
 
         it('should render markdown formatting once finalize() is called, so a final assistant turn shows bold/italic/links rendered, not as raw markdown', function () {
-            var handle = transcript.beginAssistantTurn();
+            const handle = transcript.beginAssistantTurn();
 
             handle.finalize('This is **bold** text');
 
@@ -99,7 +99,7 @@ describe('AssistantTranscript', function () {
         });
 
         it('should render a JSON viewer for a fenced ```json block in the final assistant content, so the developer gets the expand/collapse tree, not a raw blob', function () {
-            var handle = transcript.beginAssistantTurn();
+            const handle = transcript.beginAssistantTurn();
 
             handle.finalize('Here is data:\n```json\n{"a":1}\n```');
 
@@ -108,7 +108,7 @@ describe('AssistantTranscript', function () {
         });
 
         it('should render a code viewer for a fenced ```js block in the final assistant content, with a copy button so the developer can grab the snippet', function () {
-            var handle = transcript.beginAssistantTurn();
+            const handle = transcript.beginAssistantTurn();
 
             handle.finalize('Try:\n```js\nvar x = 1;\n```');
 
@@ -117,7 +117,7 @@ describe('AssistantTranscript', function () {
         });
 
         it('should remove the loading indicator once finalize() runs, since the assistant is no longer thinking', function () {
-            var handle = transcript.beginAssistantTurn();
+            const handle = transcript.beginAssistantTurn();
             container.querySelector('.loading-indicator').should.exist;
 
             handle.finalize('Done');
@@ -126,7 +126,7 @@ describe('AssistantTranscript', function () {
         });
 
         it('should add a copy-response button to the finalized assistant turn so the developer can copy the answer in one click', function () {
-            var handle = transcript.beginAssistantTurn();
+            const handle = transcript.beginAssistantTurn();
 
             handle.finalize('answer');
 
@@ -134,7 +134,7 @@ describe('AssistantTranscript', function () {
         });
 
         it('should buffer streaming chunks behind a debounce timer so a noisy stream does not thrash markdown rendering on every token', function (done) {
-            var handle = transcript.beginAssistantTurn();
+            const handle = transcript.beginAssistantTurn();
 
             handle.streamChunk('Hello ');
             handle.streamChunk('**world**');
@@ -193,12 +193,12 @@ describe('AssistantTranscript', function () {
 
     describe('JSON viewer expand/collapse', function () {
         it('should toggle a JSON content section when the toggle indicator is clicked, so the developer can fold and unfold nested structures', function () {
-            var handle = transcript.beginAssistantTurn();
+            const handle = transcript.beginAssistantTurn();
             handle.finalize('```json\n{"a":{"b":1}}\n```');
 
-            var toggle = container.querySelector('.json-toggle');
-            var targetId = toggle.getAttribute('data-target');
-            var content = document.getElementById(targetId);
+            const toggle = container.querySelector('.json-toggle');
+            const targetId = toggle.getAttribute('data-target');
+            const content = document.getElementById(targetId);
 
             toggle.click();
             content.style.display.should.equal('none');
@@ -215,14 +215,14 @@ describe('AssistantTranscript', function () {
             // Force execCommand to return false to simulate the browser
             // denying the copy. The transcript must surface the failure
             // as an inline system message.
-            var originalExecCommand = document.execCommand;
+            const originalExecCommand = document.execCommand;
             document.execCommand = function () { return false; };
 
             try {
-                var handle = transcript.beginAssistantTurn();
+                const handle = transcript.beginAssistantTurn();
                 handle.finalize('an answer');
 
-                var copyButton = container.querySelector('.copy-response-button');
+                const copyButton = container.querySelector('.copy-response-button');
                 copyButton.should.exist;
                 copyButton.click();
 
@@ -245,7 +245,7 @@ describe('AssistantTranscript', function () {
             transcript.appendUserTurn('second user message');
             transcript.appendUserTurn('third user message');
 
-            var handle = transcript.beginAssistantTurn();
+            const handle = transcript.beginAssistantTurn();
 
             // Developer scrolls up after the placeholder appears, while
             // the model streams. Finalize must not yank the scroll

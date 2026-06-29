@@ -18,7 +18,7 @@
  */
 function ConversationStore(options) {
     options = options || {};
-    var storage = options.storage;
+    let storage = options.storage;
     if (!storage && typeof chrome !== 'undefined' && chrome.storage) {
         storage = chrome.storage.local;
     }

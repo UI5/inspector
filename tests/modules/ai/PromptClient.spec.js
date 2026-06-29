@@ -1,6 +1,6 @@
 'use strict';
 
-var PromptClient = require('../../../app/scripts/modules/ai/PromptClient.js');
+const PromptClient = require('../../../app/scripts/modules/ai/PromptClient.js');
 
 /**
  * Deterministic fake of the Chrome extension port surface
@@ -11,10 +11,10 @@ var PromptClient = require('../../../app/scripts/modules/ai/PromptClient.js');
  * @returns {{port: Object, posted: Array, emit: Function, triggerDisconnect: Function}}
  */
 function createFakePort() {
-    var messageListeners = [];
-    var disconnectListeners = [];
+    const messageListeners = [];
+    const disconnectListeners = [];
 
-    var port = {
+    const port = {
         postMessage: function (message) {
             port.posted.push(message);
         },
@@ -57,8 +57,8 @@ function createFakePort() {
  * @returns {{client: Object, fake: Object}}
  */
 function createClient() {
-    var fake = createFakePort();
-    var client = new PromptClient({
+    const fake = createFakePort();
+    const client = new PromptClient({
         portFactory: function () {
             return fake.port;
         }
@@ -69,11 +69,11 @@ function createClient() {
 describe('PromptClient', function () {
     describe('#checkAvailability()', function () {
         it('should resolve with the canonical `ready` Assistant Capability State when the background port reports `ready`', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var promise = client.checkAvailability().then(function (result) {
+            const promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('ready');
                 result.message.should.equal('Model is ready');
                 result.should.not.have.property('available');
@@ -86,11 +86,11 @@ describe('PromptClient', function () {
         });
 
         it('should translate the background port `needs-download` status to the canonical `downloadable` Assistant Capability State', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var promise = client.checkAvailability().then(function (result) {
+            const promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('downloadable');
                 result.message.should.equal('Needs download');
             });
@@ -101,11 +101,11 @@ describe('PromptClient', function () {
         });
 
         it('should pass through the background port `downloading` status as the canonical `downloading` Assistant Capability State, preserving the transport-supplied message', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var promise = client.checkAvailability().then(function (result) {
+            const promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('downloading');
                 result.message.should.equal('Gemini Nano is downloading');
             });
@@ -116,11 +116,11 @@ describe('PromptClient', function () {
         });
 
         it('should pass through the background port `unsupported` status as the canonical `unsupported` Assistant Capability State', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var promise = client.checkAvailability().then(function (result) {
+            const promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('unsupported');
                 result.message.should.equal('Browser unsupported');
             });
@@ -131,11 +131,11 @@ describe('PromptClient', function () {
         });
 
         it('should pass through the background port `unavailable` status as the canonical `unavailable` Assistant Capability State', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var promise = client.checkAvailability().then(function (result) {
+            const promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('unavailable');
                 result.message.should.equal('Gemini Nano is not available on this device');
             });
@@ -146,11 +146,11 @@ describe('PromptClient', function () {
         });
 
         it('should translate the background port `error` status to the canonical `unavailable` Assistant Capability State, preserving the transport-supplied error message', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var promise = client.checkAvailability().then(function (result) {
+            const promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('unavailable');
                 result.message.should.equal('Error: boom');
             });
@@ -161,11 +161,11 @@ describe('PromptClient', function () {
         });
 
         it('should default to the canonical `unavailable` Assistant Capability State for any unrecognized background port status', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var promise = client.checkAvailability().then(function (result) {
+            const promise = client.checkAvailability().then(function (result) {
                 result.status.should.equal('unavailable');
             });
 
@@ -177,12 +177,12 @@ describe('PromptClient', function () {
 
     describe('#downloadModel()', function () {
         it('should report progress callbacks for every download-progress message and resolve on download-complete', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var progressUpdates = [];
-            var promise = client.downloadModel(function (progress) {
+            const progressUpdates = [];
+            const promise = client.downloadModel(function (progress) {
                 progressUpdates.push(progress);
             }).then(function () {
                 progressUpdates.should.deep.equal([0.25, 0.5, 1.0]);
@@ -200,17 +200,17 @@ describe('PromptClient', function () {
 
     describe('#createSession()', function () {
         it('should forward the supplied seed messages to the transport and resolve when the session is created', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var seedMessages = [
+            const seedMessages = [
                 { role: 'system', content: 'system prompt' },
                 { role: 'user', content: 'Hello' },
                 { role: 'assistant', content: 'Hi' }
             ];
 
-            var promise = client.createSession(seedMessages).then(function (created) {
+            const promise = client.createSession(seedMessages).then(function (created) {
                 created.should.be.true;
                 client._hasActiveSession.should.be.true;
             });
@@ -223,16 +223,16 @@ describe('PromptClient', function () {
         });
 
         it('should keep the active session flag set when a subsequent createSession fails', async function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var first = client.createSession([]);
+            const first = client.createSession([]);
             fake.emit({ type: 'session-created' });
             await first;
             client._hasActiveSession.should.be.true;
 
-            var second = client.createSession([]);
+            const second = client.createSession([]);
             fake.emit({ type: 'error', message: 'Session init failed' });
             try {
                 await second;
@@ -246,9 +246,9 @@ describe('PromptClient', function () {
 
     describe('#promptStreaming()', function () {
         it('should reject when called before a session has been created', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
             return client.promptStreaming('Hello').then(function () {
                 throw new Error('Expected promptStreaming to reject without an active session');
@@ -258,11 +258,11 @@ describe('PromptClient', function () {
         });
 
         it('should buffer chunks emitted between sending the prompt and the first iterator.next() call', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var sessionPromise = client.createSession([]);
+            const sessionPromise = client.createSession([]);
             fake.emit({ type: 'session-created' });
 
             return sessionPromise.then(function () {
@@ -275,56 +275,56 @@ describe('PromptClient', function () {
                 fake.emit({ type: 'chunk', content: 'second' });
                 fake.emit({ type: 'complete' });
 
-                var iterator = stream[Symbol.asyncIterator]();
+                const iterator = stream[Symbol.asyncIterator]();
 
-                var first = await iterator.next();
+                const first = await iterator.next();
                 first.value.should.equal('first');
                 first.done.should.be.false;
 
-                var second = await iterator.next();
+                const second = await iterator.next();
                 second.value.should.equal('second');
                 second.done.should.be.false;
 
-                var done = await iterator.next();
+                const done = await iterator.next();
                 done.done.should.be.true;
             });
         });
 
         it('should forward the already-formatted prompt to the transport and yield streamed chunks until complete', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var sessionPromise = client.createSession([]);
+            const sessionPromise = client.createSession([]);
             fake.emit({ type: 'session-created' });
 
             return sessionPromise.then(function () {
-                var streamPromise = client.promptStreaming('Pre-formatted user prompt');
+                const streamPromise = client.promptStreaming('Pre-formatted user prompt');
 
-                var streamMessage = fake.posted[fake.posted.length - 1];
+                const streamMessage = fake.posted[fake.posted.length - 1];
                 streamMessage.type.should.equal('prompt-streaming');
                 streamMessage.data.userMessage.should.equal('Pre-formatted user prompt');
 
                 return streamPromise.then(async function (stream) {
-                    var iterator = stream[Symbol.asyncIterator]();
-                    var firstChunkPromise = iterator.next();
+                    const iterator = stream[Symbol.asyncIterator]();
+                    const firstChunkPromise = iterator.next();
 
                     // First chunk handler is wired; deliver chunks
                     // asynchronously to mirror real port arrival.
                     fake.emit({ type: 'chunk', content: 'Hello' });
 
-                    var first = await firstChunkPromise;
+                    const first = await firstChunkPromise;
                     first.value.should.equal('Hello');
                     first.done.should.be.false;
 
-                    var secondChunkPromise = iterator.next();
+                    const secondChunkPromise = iterator.next();
                     fake.emit({ type: 'chunk', content: ' world' });
-                    var second = await secondChunkPromise;
+                    const second = await secondChunkPromise;
                     second.value.should.equal(' world');
 
-                    var donePromise = iterator.next();
+                    const donePromise = iterator.next();
                     fake.emit({ type: 'complete' });
-                    var doneResult = await donePromise;
+                    const doneResult = await donePromise;
                     doneResult.done.should.be.true;
                 });
             });
@@ -333,11 +333,11 @@ describe('PromptClient', function () {
 
     describe('#getUsageInfo()', function () {
         it('should resolve with the usage data payload reported by the transport', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var promise = client.getUsageInfo().then(function (data) {
+            const promise = client.getUsageInfo().then(function (data) {
                 data.should.deep.equal({
                     inputUsage: 1024,
                     inputQuota: 4096,
@@ -357,23 +357,23 @@ describe('PromptClient', function () {
 
     describe('error and disconnect handling', function () {
         it('should surface a streaming-failed Assistant Capability State by throwing through the async iterator when the transport reports an error mid-stream', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var sessionPromise = client.createSession([]);
+            const sessionPromise = client.createSession([]);
             fake.emit({ type: 'session-created' });
 
             return sessionPromise.then(function () {
                 return client.promptStreaming('Prompt');
             }).then(async function (stream) {
-                var iterator = stream[Symbol.asyncIterator]();
-                var firstChunk = iterator.next();
+                const iterator = stream[Symbol.asyncIterator]();
+                const firstChunk = iterator.next();
                 fake.emit({ type: 'chunk', content: 'partial' });
-                var first = await firstChunk;
+                const first = await firstChunk;
                 first.value.should.equal('partial');
 
-                var errorChunk = iterator.next();
+                const errorChunk = iterator.next();
                 fake.emit({ type: 'error', message: 'model crashed' });
 
                 try {
@@ -386,11 +386,11 @@ describe('PromptClient', function () {
         });
 
         it('should disconnect the transport on destroy and clear active-session state', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var sessionPromise = client.createSession([]);
+            const sessionPromise = client.createSession([]);
             fake.emit({ type: 'session-created' });
 
             return sessionPromise.then(function () {
@@ -405,18 +405,18 @@ describe('PromptClient', function () {
         });
 
         it('should surface a streaming-failed Assistant Capability State when the transport disconnects mid-stream', function () {
-            var harness = createClient();
-            var fake = harness.fake;
-            var client = harness.client;
+            const harness = createClient();
+            const fake = harness.fake;
+            const client = harness.client;
 
-            var sessionPromise = client.createSession([]);
+            const sessionPromise = client.createSession([]);
             fake.emit({ type: 'session-created' });
 
             return sessionPromise.then(function () {
                 return client.promptStreaming('Prompt');
             }).then(async function (stream) {
-                var iterator = stream[Symbol.asyncIterator]();
-                var chunkPromise = iterator.next();
+                const iterator = stream[Symbol.asyncIterator]();
+                const chunkPromise = iterator.next();
                 fake.triggerDisconnect();
 
                 try {

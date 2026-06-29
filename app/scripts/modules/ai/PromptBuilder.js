@@ -19,7 +19,7 @@ function PromptBuilder() {
  * @returns {string}
  */
 PromptBuilder.prototype.buildSystemPrompt = function (appInfo) {
-    var prompt = 'You are an AI assistant embedded in the UI5 Inspector, specialized in SAP UI5, OpenUI5, and UI5 Web Components. Your role is to help developers understand, debug, and build UI5-based applications.\n' +
+    let prompt = 'You are an AI assistant embedded in the UI5 Inspector, specialized in SAP UI5, OpenUI5, and UI5 Web Components. Your role is to help developers understand, debug, and build UI5-based applications.\n' +
         'Provide clear, accurate, and practical guidance on components, APIs, accessibility, theming, layout, performance, and best practices. Prefer concise answers, but explain reasoning when needed. Use code snippets where helpful and format code clearly.\n' +
         'Assume familiarity with JavaScript, HTML, and modern frameworks. When information is uncertain or version-dependent, say so clearly. Do not invent APIs or unsupported features.\n' +
         'You cannot browse the web or open links. If external content is required, ask the user to paste it.\n' +
@@ -29,7 +29,7 @@ PromptBuilder.prototype.buildSystemPrompt = function (appInfo) {
         prompt += '\n\nCurrent Application Context:\n';
 
         if (appInfo.common && appInfo.common.data) {
-            var frameworkInfo = appInfo.common.data.OpenUI5 || appInfo.common.data.SAPUI5;
+            const frameworkInfo = appInfo.common.data.OpenUI5 || appInfo.common.data.SAPUI5;
             if (frameworkInfo) {
                 prompt += '- Framework: ' + frameworkInfo + '\n';
             }
@@ -40,7 +40,7 @@ PromptBuilder.prototype.buildSystemPrompt = function (appInfo) {
         }
 
         if (appInfo.loadedLibraries && appInfo.loadedLibraries.data) {
-            var libraries = Object.keys(appInfo.loadedLibraries.data);
+            const libraries = Object.keys(appInfo.loadedLibraries.data);
             if (libraries.length > 0) {
                 prompt += '- Loaded Libraries: ' + libraries.join(', ') + '\n';
             }
@@ -67,9 +67,9 @@ PromptBuilder.prototype.buildUserPrompt = function (userMessage, inspectionConte
         return userMessage;
     }
 
-    var MAX_SECTION_LENGTH = 2000;
-    var control = inspectionContext.control;
-    var contextString = 'Current UI5 Control Context:\n';
+    const MAX_SECTION_LENGTH = 2000;
+    const control = inspectionContext.control;
+    let contextString = 'Current UI5 Control Context:\n';
     contextString += '- Type: ' + (control.type || 'Unknown') + '\n';
     contextString += '- ID: ' + (control.id || 'None') + '\n';
     contextString += this._addPropertiesContext(control, MAX_SECTION_LENGTH);
@@ -89,7 +89,7 @@ PromptBuilder.prototype.buildUserPrompt = function (userMessage, inspectionConte
  */
 PromptBuilder.prototype._truncateJson = function (data, maxLength) {
     try {
-        var json = JSON.stringify(data, null, 2);
+        const json = JSON.stringify(data, null, 2);
         if (json.length > maxLength) {
             return json.substring(0, maxLength) + '... [truncated]';
         }
@@ -108,15 +108,15 @@ PromptBuilder.prototype._truncateJson = function (data, maxLength) {
  * @returns {string}
  */
 PromptBuilder.prototype._addPropertiesContext = function (control, maxLength) {
-    var props = control.properties;
+    const props = control.properties;
     if (!props || !props.own || !props.own.data) {
         return '';
     }
-    var keys = Object.keys(props.own.data);
+    const keys = Object.keys(props.own.data);
     if (keys.length === 0) {
         return '';
     }
-    var propsJson = JSON.stringify(props.own.data);
+    let propsJson = JSON.stringify(props.own.data);
     if (propsJson.length > maxLength) {
         propsJson = propsJson.substring(0, maxLength) + '... [truncated]';
     }
@@ -133,7 +133,7 @@ PromptBuilder.prototype._addBindingsContext = function (bindings, maxLength) {
     if (!bindings || Object.keys(bindings).length === 0) {
         return '';
     }
-    var result = '- Bindings (' + Object.keys(bindings).length + '):\n';
+    let result = '- Bindings (' + Object.keys(bindings).length + '):\n';
     result += this._truncateJson(bindings, maxLength) + '\n';
     return result;
 };
@@ -148,11 +148,11 @@ PromptBuilder.prototype._addAggregationsContext = function (aggregations, maxLen
     if (!aggregations || !aggregations.own || !aggregations.own.data) {
         return '';
     }
-    var keys = Object.keys(aggregations.own.data);
+    const keys = Object.keys(aggregations.own.data);
     if (keys.length === 0) {
         return '';
     }
-    var result = '- Aggregations (' + keys.length + '):\n';
+    let result = '- Aggregations (' + keys.length + '):\n';
     result += this._truncateJson(aggregations.own.data, maxLength) + '\n';
     return result;
 };
@@ -170,13 +170,13 @@ PromptBuilder.prototype._addAggregationsContext = function (aggregations, maxLen
  * @returns {Array<{role: string, content: string}>}
  */
 PromptBuilder.prototype.buildSeedMessages = function (appInfo, conversationMemory) {
-    var seed = [
+    const seed = [
         { role: 'system', content: this.buildSystemPrompt(appInfo) }
     ];
 
     if (conversationMemory && conversationMemory.length) {
-        for (var i = 0; i < conversationMemory.length; i++) {
-            var turn = conversationMemory[i];
+        for (let i = 0; i < conversationMemory.length; i++) {
+            const turn = conversationMemory[i];
             if ((turn.role === 'user' || turn.role === 'assistant') && turn.content) {
                 seed.push({ role: turn.role, content: turn.content });
             }

@@ -1,7 +1,7 @@
 'use strict';
 
-var AssistantController = require('../ai/AssistantController.js');
-var AssistantTranscript = require('../ai/AssistantTranscript.js');
+const AssistantController = require('../ai/AssistantController.js');
+const AssistantTranscript = require('../ai/AssistantTranscript.js');
 
 /**
  * Thin view over the assistant. Owns the banner, input area, confirm dialog,

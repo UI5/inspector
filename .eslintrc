@@ -66,6 +66,8 @@
         "space-before-blocks": [2, "always"],
         "consistent-this": [1, "that"],
         "linebreak-style": [2, "unix"],
-        "quotes": [2, "single"]
+        "quotes": [2, "single"],
+        "no-var": 1,
+        "prefer-const": 1
     }
 }

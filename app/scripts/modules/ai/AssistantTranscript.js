@@ -76,28 +76,28 @@ AssistantTranscript.prototype.appendSystemMessage = function (message) {
  * }}
  */
 AssistantTranscript.prototype.beginAssistantTurn = function () {
-    var messageElement = this._appendMessage('assistant', '', false);
-    var contentElement = messageElement.querySelector('.message-content');
-    var headerElement = messageElement.querySelector('.message-header');
+    const messageElement = this._appendMessage('assistant', '', false);
+    const contentElement = messageElement.querySelector('.message-content');
+    const headerElement = messageElement.querySelector('.message-header');
 
-    var loadingIndicator = document.createElement('span');
+    const loadingIndicator = document.createElement('span');
     loadingIndicator.className = 'loading-indicator';
     loadingIndicator.textContent = 'Thinking';
-    var loadingDots = document.createElement('span');
+    const loadingDots = document.createElement('span');
     loadingDots.className = 'loading-dots';
     loadingIndicator.appendChild(loadingDots);
     contentElement.appendChild(loadingIndicator);
 
-    var self = this;
-    var buffer = '';
-    var debounceTimer = null;
-    var pendingText = null;
+    const that = this;
+    let buffer = '';
+    let debounceTimer = null;
+    let pendingText = null;
 
     function flush() {
         if (pendingText !== null && contentElement.isConnected !== false) {
-            contentElement.innerHTML = self._parseMarkdown(pendingText);
-            self._initializeJsonViewers(contentElement);
-            self.scrollToBottom(false);
+            contentElement.innerHTML = that._parseMarkdown(pendingText);
+            that._initializeJsonViewers(contentElement);
+            that.scrollToBottom(false);
         }
         debounceTimer = null;
     }
@@ -109,7 +109,7 @@ AssistantTranscript.prototype.beginAssistantTurn = function () {
             if (debounceTimer) {
                 return;
             }
-            debounceTimer = setTimeout(flush, self._streamDebounceMs);
+            debounceTimer = setTimeout(flush, that._streamDebounceMs);
         },
         finalize: function (fullContent) {
             if (debounceTimer) {
@@ -119,16 +119,16 @@ AssistantTranscript.prototype.beginAssistantTurn = function () {
             pendingText = null;
             buffer = '';
 
-            contentElement.innerHTML = self._parseMarkdown(fullContent);
-            self._initializeJsonViewers(contentElement);
+            contentElement.innerHTML = that._parseMarkdown(fullContent);
+            that._initializeJsonViewers(contentElement);
 
-            var copyButton = document.createElement('button');
+            const copyButton = document.createElement('button');
             copyButton.className = 'copy-response-button';
             copyButton.title = 'Copy response';
             copyButton.setAttribute('aria-label', 'Copy response');
             copyButton.textContent = 'Copy';
             copyButton.addEventListener('click', function (e) {
-                self._copyToClipboard(fullContent, e.currentTarget);
+                that._copyToClipboard(fullContent, e.currentTarget);
             });
             headerElement.appendChild(copyButton);
 
@@ -159,7 +159,7 @@ AssistantTranscript.prototype.reset = function (turns) {
     if (!turns || turns.length === 0) {
         return;
     }
-    for (var i = 0; i < turns.length; i++) {
+    for (let i = 0; i < turns.length; i++) {
         this._appendMessage(turns[i].role, turns[i].content);
     }
     this.scrollToBottom(true);
@@ -173,7 +173,7 @@ AssistantTranscript.prototype.reset = function (turns) {
  *     yank the developer's reading position.
  */
 AssistantTranscript.prototype.scrollToBottom = function (force) {
-    var container = this._container;
+    const container = this._container;
     if (!container || container.scrollHeight === undefined) {
         return;
     }
@@ -193,13 +193,13 @@ AssistantTranscript.prototype.destroy = function () {};
  * @private
  */
 AssistantTranscript.prototype._isScrolledToBottom = function () {
-    var container = this._container;
+    const container = this._container;
     if (!container) {
         return true;
     }
-    var threshold = 100;
-    var scrollPosition = container.scrollTop + container.clientHeight;
-    var scrollHeight = container.scrollHeight;
+    const threshold = 100;
+    const scrollPosition = container.scrollTop + container.clientHeight;
+    const scrollHeight = container.scrollHeight;
     return scrollHeight - scrollPosition < threshold;
 };
 
@@ -207,17 +207,17 @@ AssistantTranscript.prototype._isScrolledToBottom = function () {
  * @private
  */
 AssistantTranscript.prototype._appendMessage = function (role, content, showCopyButton) {
-    var welcomeMessage = this._container.querySelector('.ai-welcome-message');
+    const welcomeMessage = this._container.querySelector('.ai-welcome-message');
     if (welcomeMessage) {
         welcomeMessage.remove();
     }
 
-    var messageElement = document.createElement('div');
+    const messageElement = document.createElement('div');
     messageElement.className = 'ai-message message-' + role;
 
-    var formattedContent = role === 'assistant' ? this._parseMarkdown(content) : this._escapeHtml(content);
-    var shouldShowCopyButton = role === 'assistant' && (showCopyButton === undefined || showCopyButton === true);
-    var roleLabel = role === 'user' ? 'You' : role === 'assistant' ? 'AI' : 'System';
+    const formattedContent = role === 'assistant' ? this._parseMarkdown(content) : this._escapeHtml(content);
+    const shouldShowCopyButton = role === 'assistant' && (showCopyButton === undefined || showCopyButton === true);
+    const roleLabel = role === 'user' ? 'You' : role === 'assistant' ? 'AI' : 'System';
 
     // Safe innerHTML: roleLabel is from a fixed set, formattedContent is
     // either escaped or markdown-parsed (which itself escapes anything it
@@ -232,14 +232,14 @@ AssistantTranscript.prototype._appendMessage = function (role, content, showCopy
     this._container.appendChild(messageElement);
 
     if (role === 'assistant') {
-        var contentElement = messageElement.querySelector('.message-content');
+        const contentElement = messageElement.querySelector('.message-content');
         this._initializeJsonViewers(contentElement);
 
-        var copyButton = messageElement.querySelector('.copy-response-button');
+        const copyButton = messageElement.querySelector('.copy-response-button');
         if (copyButton) {
-            var self = this;
+            const that = this;
             copyButton.addEventListener('click', function (e) {
-                self._copyToClipboard(content, e.currentTarget);
+                that._copyToClipboard(content, e.currentTarget);
             });
         }
     }
@@ -252,7 +252,7 @@ AssistantTranscript.prototype._appendMessage = function (role, content, showCopy
  * @private
  */
 AssistantTranscript.prototype._escapeHtml = function (text) {
-    var div = document.createElement('div');
+    const div = document.createElement('div');
     div.textContent = (text === null || text === undefined) ? '' : String(text);
     return div.innerHTML;
 };
@@ -261,9 +261,9 @@ AssistantTranscript.prototype._escapeHtml = function (text) {
  * @private
  */
 AssistantTranscript.prototype._parseMarkdown = function (text) {
-    var placeholders = { codeBlocks: [], inlineCode: [] };
+    const placeholders = { codeBlocks: [], inlineCode: [] };
 
-    var html = this._extractCodeBlocks(text, placeholders);
+    let html = this._extractCodeBlocks(text, placeholders);
     html = this._extractInlineCode(html, placeholders);
     html = this._escapeHtml(html);
     html = this._applyMarkdownFormatting(html);
@@ -280,9 +280,9 @@ AssistantTranscript.prototype._parseMarkdown = function (text) {
  */
 AssistantTranscript.prototype._extractCodeBlocks = function (text, placeholders) {
     return text.replace(/```([\w]*)?\n([\s\S]*?)```/g, function (match, lang, code) {
-        var index = placeholders.codeBlocks.length;
-        var trimmedCode = code.trim();
-        var isJson = lang === 'json' || (!lang && /^[\[\{]/.test(trimmedCode));
+        const index = placeholders.codeBlocks.length;
+        const trimmedCode = code.trim();
+        const isJson = lang === 'json' || (!lang && /^[\[\{]/.test(trimmedCode));
 
         if (isJson) {
             try {
@@ -303,7 +303,7 @@ AssistantTranscript.prototype._extractCodeBlocks = function (text, placeholders)
  */
 AssistantTranscript.prototype._extractInlineCode = function (text, placeholders) {
     return text.replace(/`([^`]+)`/g, function (match, code) {
-        var index = placeholders.inlineCode.length;
+        const index = placeholders.inlineCode.length;
         placeholders.inlineCode.push(code);
         return '___INLINECODE_' + index + '___';
     });
@@ -324,9 +324,9 @@ AssistantTranscript.prototype._applyMarkdownFormatting = function (text) {
  * @private
  */
 AssistantTranscript.prototype._restoreInlineCode = function (text, inlineCode) {
-    var self = this;
+    const that = this;
     inlineCode.forEach(function (code, index) {
-        text = text.replace('___INLINECODE_' + index + '___', '<code>' + self._escapeHtml(code) + '</code>');
+        text = text.replace('___INLINECODE_' + index + '___', '<code>' + that._escapeHtml(code) + '</code>');
     });
     return text;
 };
@@ -335,13 +335,13 @@ AssistantTranscript.prototype._restoreInlineCode = function (text, inlineCode) {
  * @private
  */
 AssistantTranscript.prototype._restoreCodeBlocks = function (text, codeBlocks) {
-    var self = this;
+    const that = this;
     codeBlocks.forEach(function (block, index) {
-        var replacement;
+        let replacement;
         if (block.type === 'json') {
-            replacement = self._createJsonViewer(block.data);
+            replacement = that._createJsonViewer(block.data);
         } else {
-            replacement = self._createCodeViewer(block.code, block.lang);
+            replacement = that._createCodeViewer(block.code, block.lang);
         }
         text = text.replace('___CODEBLOCK_' + index + '___', replacement);
     });
@@ -352,7 +352,7 @@ AssistantTranscript.prototype._restoreCodeBlocks = function (text, codeBlocks) {
  * @private
  */
 AssistantTranscript.prototype._createJsonViewer = function (data) {
-    var jsonString = JSON.stringify(data).replace(/'/g, '&#39;');
+    const jsonString = JSON.stringify(data).replace(/'/g, '&#39;');
     return '<div class="json-viewer" data-json=\'' + jsonString + '\'></div>';
 };
 
@@ -360,7 +360,7 @@ AssistantTranscript.prototype._createJsonViewer = function (data) {
  * @private
  */
 AssistantTranscript.prototype._createCodeViewer = function (code, lang) {
-    var escapedCode = code.replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+    const escapedCode = code.replace(/'/g, '&#39;').replace(/"/g, '&quot;');
     return '<div class="code-viewer" data-code=\'' + escapedCode + '\' data-lang=\'' + lang + '\'></div>';
 };
 
@@ -371,22 +371,22 @@ AssistantTranscript.prototype._renderJsonValue = function (value, key, isLast, d
     depth = depth || 0;
 
     if (depth > this._maxJsonDepth) {
-        var commaTrunc = isLast ? '' : ',';
+        const commaTrunc = isLast ? '' : ',';
         return this._renderJsonLine(key, '<span class="json-truncated">[Max depth reached]</span>' + commaTrunc);
     }
 
-    var comma = isLast ? '' : ',';
-    var self = this;
-    var handlers = {
-        'null': function () { return self._renderJsonLine(key, '<span class="json-null">null</span>' + comma); },
-        'boolean': function () { return self._renderJsonLine(key, '<span class="json-boolean">' + value + '</span>' + comma); },
-        'number': function () { return self._renderJsonLine(key, '<span class="json-number">' + value + '</span>' + comma); },
-        'string': function () { return self._renderJsonString(key, value, comma); },
-        'array': function () { return self._renderJsonArray(key, value, comma, depth); },
-        'object': function () { return self._renderJsonObject(key, value, comma, depth); }
+    const comma = isLast ? '' : ',';
+    const that = this;
+    const handlers = {
+        'null': function () { return that._renderJsonLine(key, '<span class="json-null">null</span>' + comma); },
+        'boolean': function () { return that._renderJsonLine(key, '<span class="json-boolean">' + value + '</span>' + comma); },
+        'number': function () { return that._renderJsonLine(key, '<span class="json-number">' + value + '</span>' + comma); },
+        'string': function () { return that._renderJsonString(key, value, comma); },
+        'array': function () { return that._renderJsonArray(key, value, comma, depth); },
+        'object': function () { return that._renderJsonObject(key, value, comma, depth); }
     };
 
-    var type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+    const type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
     return handlers[type] ? handlers[type]() : this._renderJsonLine(key, this._escapeHtml(String(value)) + comma);
 };
 
@@ -394,7 +394,7 @@ AssistantTranscript.prototype._renderJsonValue = function (value, key, isLast, d
  * @private
  */
 AssistantTranscript.prototype._renderJsonString = function (key, value, comma) {
-    var escaped = this._escapeHtml(value);
+    const escaped = this._escapeHtml(value);
     return this._renderJsonLine(key, '<span class="json-string">"' + escaped + '"</span>' + comma);
 };
 
@@ -406,11 +406,11 @@ AssistantTranscript.prototype._renderJsonArray = function (key, value, comma, de
         return this._renderJsonLine(key, '<span class="json-bracket">[]</span>' + comma);
     }
 
-    var id = 'json-' + Math.random().toString(36).substring(2, 11);
-    var keyHtml = key ? '<span class="json-key">"' + this._escapeHtml(key) + '"</span>: ' : '';
-    var self = this;
-    var items = value.map(function (item, i) {
-        return self._renderJsonValue(item, null, i === value.length - 1, depth + 1);
+    const id = 'json-' + Math.random().toString(36).substring(2, 11);
+    const keyHtml = key ? '<span class="json-key">"' + this._escapeHtml(key) + '"</span>: ' : '';
+    const that = this;
+    const items = value.map(function (item, i) {
+        return that._renderJsonValue(item, null, i === value.length - 1, depth + 1);
     }).join('');
 
     return '<div class="json-line">' + keyHtml + '<span class="json-toggle" data-target="' + id + '">\u25BC</span> <span class="json-bracket">[</span><span class="json-count">' + value.length + ' items</span></div>' +
@@ -421,16 +421,16 @@ AssistantTranscript.prototype._renderJsonArray = function (key, value, comma, de
  * @private
  */
 AssistantTranscript.prototype._renderJsonObject = function (key, value, comma, depth) {
-    var keys = Object.keys(value);
+    const keys = Object.keys(value);
     if (keys.length === 0) {
         return this._renderJsonLine(key, '<span class="json-bracket">{}</span>' + comma);
     }
 
-    var id = 'json-' + Math.random().toString(36).substring(2, 11);
-    var keyHtml = key ? '<span class="json-key">"' + this._escapeHtml(key) + '"</span>: ' : '';
-    var self = this;
-    var items = keys.map(function (k, i) {
-        return self._renderJsonValue(value[k], k, i === keys.length - 1, depth + 1);
+    const id = 'json-' + Math.random().toString(36).substring(2, 11);
+    const keyHtml = key ? '<span class="json-key">"' + this._escapeHtml(key) + '"</span>: ' : '';
+    const that = this;
+    const items = keys.map(function (k, i) {
+        return that._renderJsonValue(value[k], k, i === keys.length - 1, depth + 1);
     }).join('');
 
     return '<div class="json-line">' + keyHtml + '<span class="json-toggle" data-target="' + id + '">\u25BC</span> <span class="json-bracket">{</span><span class="json-count">' + keys.length + ' keys</span></div>' +
@@ -441,7 +441,7 @@ AssistantTranscript.prototype._renderJsonObject = function (key, value, comma, d
  * @private
  */
 AssistantTranscript.prototype._renderJsonLine = function (key, content) {
-    var html = '<div class="json-line">';
+    let html = '<div class="json-line">';
     if (key !== null) {
         html += '<span class="json-key">"' + this._escapeHtml(key) + '"</span>: ';
     }
@@ -454,26 +454,26 @@ AssistantTranscript.prototype._renderJsonLine = function (key, content) {
  * @private
  */
 AssistantTranscript.prototype._initializeJsonViewers = function (element) {
-    var self = this;
+    const that = this;
 
     element.querySelectorAll('.json-viewer').forEach(function (viewer) {
-        var jsonData = viewer.getAttribute('data-json');
+        const jsonData = viewer.getAttribute('data-json');
         if (!jsonData) {
             return;
         }
         try {
-            var parsed = JSON.parse(jsonData);
+            const parsed = JSON.parse(jsonData);
             viewer.innerHTML = '<div class="json-wrapper">' +
                 '<button class="copy-code-button" title="Copy JSON" aria-label="Copy JSON">Copy</button>' +
-                '<div class="json-tree">' + self._renderJsonValue(parsed, null, true) + '</div>' +
+                '<div class="json-tree">' + that._renderJsonValue(parsed, null, true) + '</div>' +
                 '</div>';
 
-            self._setupJsonToggleHandlers(viewer);
+            that._setupJsonToggleHandlers(viewer);
 
-            var copyButton = viewer.querySelector('.copy-code-button');
+            const copyButton = viewer.querySelector('.copy-code-button');
             if (copyButton) {
                 copyButton.addEventListener('click', function (e) {
-                    self._copyToClipboard(JSON.stringify(parsed, null, 2), e.currentTarget);
+                    that._copyToClipboard(JSON.stringify(parsed, null, 2), e.currentTarget);
                 });
             }
         } catch (e) {
@@ -482,17 +482,17 @@ AssistantTranscript.prototype._initializeJsonViewers = function (element) {
     });
 
     element.querySelectorAll('.code-viewer').forEach(function (viewer) {
-        var code = viewer.getAttribute('data-code');
-        var lang = viewer.getAttribute('data-lang');
+        const code = viewer.getAttribute('data-code');
+        const lang = viewer.getAttribute('data-lang');
         if (!code) {
             return;
         }
         try {
-            viewer.innerHTML = self._renderCodeBlock(code, lang);
-            var copyButton = viewer.querySelector('.copy-code-button');
+            viewer.innerHTML = that._renderCodeBlock(code, lang);
+            const copyButton = viewer.querySelector('.copy-code-button');
             if (copyButton) {
                 copyButton.addEventListener('click', function (e) {
-                    self._copyToClipboard(code, e.currentTarget);
+                    that._copyToClipboard(code, e.currentTarget);
                 });
             }
         } catch (e) {
@@ -510,9 +510,9 @@ AssistantTranscript.prototype._setupJsonToggleHandlers = function (viewer) {
             e.preventDefault();
             e.stopPropagation();
 
-            var content = document.getElementById(toggle.getAttribute('data-target'));
+            const content = document.getElementById(toggle.getAttribute('data-target'));
             if (content) {
-                var isCollapsed = content.style.display === 'none';
+                const isCollapsed = content.style.display === 'none';
                 content.style.display = isCollapsed ? 'block' : 'none';
                 toggle.textContent = isCollapsed ? '\u25BC' : '\u25B6';
             }
@@ -524,15 +524,15 @@ AssistantTranscript.prototype._setupJsonToggleHandlers = function (viewer) {
  * @private
  */
 AssistantTranscript.prototype._renderCodeBlock = function (code, lang) {
-    var self = this;
-    var lines = code.split('\n');
-    var linesHtml = lines.map(function (line) {
-        var escapedLine = self._escapeHtml(line || ' ');
+    const that = this;
+    const lines = code.split('\n');
+    const linesHtml = lines.map(function (line) {
+        const escapedLine = that._escapeHtml(line || ' ');
         return '<div class="code-line">' + escapedLine + '</div>';
     }).join('');
 
-    var langLabel = lang && lang !== 'plaintext' ? '<div class="code-lang">' + lang + '</div>' : '';
-    var copyButton = '<button class="copy-code-button" title="Copy code" aria-label="Copy code">Copy</button>';
+    const langLabel = lang && lang !== 'plaintext' ? '<div class="code-lang">' + lang + '</div>' : '';
+    const copyButton = '<button class="copy-code-button" title="Copy code" aria-label="Copy code">Copy</button>';
 
     return '<div class="code-wrapper">' + langLabel + copyButton + '<div class="code-content">' + linesHtml + '</div></div>';
 };
@@ -546,7 +546,7 @@ AssistantTranscript.prototype._renderCodeBlock = function (code, lang) {
  * @private
  */
 AssistantTranscript.prototype._copyToClipboard = function (text, button) {
-    var textarea = document.createElement('textarea');
+    const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.style.position = 'fixed';
     textarea.style.top = '-9999px';
@@ -558,7 +558,7 @@ AssistantTranscript.prototype._copyToClipboard = function (text, button) {
     textarea.select();
     textarea.setSelectionRange(0, text.length);
 
-    var copied = false;
+    let copied = false;
     try {
         copied = document.execCommand('copy');
     } catch (err) {
@@ -568,7 +568,7 @@ AssistantTranscript.prototype._copyToClipboard = function (text, button) {
     }
 
     if (copied) {
-        var originalText = button.textContent;
+        const originalText = button.textContent;
         button.textContent = 'Copied!';
         button.disabled = true;
         setTimeout(function () {

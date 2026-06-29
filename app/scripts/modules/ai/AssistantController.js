@@ -1,8 +1,8 @@
 'use strict';
 
-var PromptBuilder = require('./PromptBuilder.js');
-var PromptClient = require('./PromptClient.js');
-var ConversationStore = require('./ConversationStore.js');
+const PromptBuilder = require('./PromptBuilder.js');
+const PromptClient = require('./PromptClient.js');
+const ConversationStore = require('./ConversationStore.js');
 
 /**
  * Workflow coordinator for the Inspector AI Assistant. Owns capability state,
@@ -68,11 +68,11 @@ AssistantController.prototype.on = function (event, handler) {
  * @param {*} [payload]
  */
 AssistantController.prototype._emit = function (event, payload) {
-    var handlers = this._listeners[event];
+    const handlers = this._listeners[event];
     if (!handlers) {
         return;
     }
-    for (var i = 0; i < handlers.length; i++) {
+    for (let i = 0; i < handlers.length; i++) {
         handlers[i](payload);
     }
 };
@@ -113,7 +113,7 @@ AssistantController.prototype._setCapabilityState = function (status, message, p
  * @returns {Promise<void>}
  */
 AssistantController.prototype.initialize = function () {
-    var that = this;
+    const that = this;
     return this._promptClient.checkAvailability().then(function (capability) {
         that._setCapabilityState(capability.status, capability.message, 0);
         return that._loadConversationMemory().then(function () {
@@ -134,7 +134,7 @@ AssistantController.prototype.initialize = function () {
  * @returns {Promise<void>}
  */
 AssistantController.prototype._seedSessionOrFail = function () {
-    var that = this;
+    const that = this;
     return this._seedSession().then(undefined, function (err) {
         that._setCapabilityState('session-failed', err && err.message ? err.message : 'Session creation failed', 0);
     });
@@ -147,8 +147,8 @@ AssistantController.prototype._seedSessionOrFail = function () {
  * @returns {Promise<void>}
  */
 AssistantController.prototype._seedSession = function () {
-    var appInfo = this._getAppInfo();
-    var seed = this._promptBuilder.buildSeedMessages(appInfo, this._conversationMemory);
+    const appInfo = this._getAppInfo();
+    const seed = this._promptBuilder.buildSeedMessages(appInfo, this._conversationMemory);
     return this._promptClient.createSession(seed);
 };
 
@@ -163,10 +163,10 @@ AssistantController.prototype._seedSession = function () {
  * @returns {Promise<{content: string}>}
  */
 AssistantController.prototype.sendUserMessage = function (userMessage) {
-    var that = this;
-    var contextForThisTurn = this._pendingInspectionContext;
+    const that = this;
+    const contextForThisTurn = this._pendingInspectionContext;
     this._pendingInspectionContext = null;
-    var formatted = this._promptBuilder.buildUserPrompt(userMessage, contextForThisTurn);
+    const formatted = this._promptBuilder.buildUserPrompt(userMessage, contextForThisTurn);
 
     this._isStreaming = true;
 
@@ -214,9 +214,9 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
  * @returns {Promise<string>}
  */
 AssistantController.prototype._consumeStream = function (stream) {
-    var that = this;
-    var iterator = stream[Symbol.asyncIterator]();
-    var fullText = '';
+    const that = this;
+    const iterator = stream[Symbol.asyncIterator]();
+    let fullText = '';
 
     function step() {
         return iterator.next().then(function (result) {
@@ -254,7 +254,7 @@ AssistantController.prototype.setUrl = function (url) {
         return Promise.resolve();
     }
 
-    var that = this;
+    const that = this;
     return this._loadConversationMemory().then(function () {
         that._promptClient.destroy();
         return that._seedSessionOrFail();
@@ -279,7 +279,7 @@ AssistantController.prototype.updateInspectionContext = function (context) {
  * @returns {Promise<void>}
  */
 AssistantController.prototype.clearConversation = function () {
-    var that = this;
+    const that = this;
     return this._conversationStore.clear(this._currentUrl).then(function () {
         that._conversationMemory = [];
         that._promptClient.destroy();
@@ -296,7 +296,7 @@ AssistantController.prototype.clearConversation = function () {
  * @returns {Promise<void>}
  */
 AssistantController.prototype.downloadModel = function () {
-    var that = this;
+    const that = this;
     that._setCapabilityState('downloading', 'Starting download...', 0);
     return this._promptClient.downloadModel(function (progress) {
         that._setCapabilityState('downloading', 'Downloading model', progress);
@@ -328,7 +328,7 @@ AssistantController.prototype.destroy = function () {
  * @returns {Promise<void>}
  */
 AssistantController.prototype._loadConversationMemory = function () {
-    var that = this;
+    const that = this;
     return this._conversationStore.load(this._currentUrl).then(function (turns) {
         that._conversationMemory = turns || [];
         that._emit('conversation-loaded', that._conversationMemory.slice());

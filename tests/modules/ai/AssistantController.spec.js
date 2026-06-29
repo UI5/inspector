@@ -1,7 +1,7 @@
 'use strict';
 
-var AssistantController = require('../../../app/scripts/modules/ai/AssistantController.js');
-var PromptBuilder = require('../../../app/scripts/modules/ai/PromptBuilder.js');
+const AssistantController = require('../../../app/scripts/modules/ai/AssistantController.js');
+const PromptBuilder = require('../../../app/scripts/modules/ai/PromptBuilder.js');
 
 /**
  * Deterministic fake of the {@link PromptClient} interface. Records seed
@@ -11,7 +11,7 @@ var PromptBuilder = require('../../../app/scripts/modules/ai/PromptBuilder.js');
  * @returns {Object}
  */
 function createFakePromptClient() {
-    var fake = {
+    const fake = {
         availabilityResult: { status: 'ready', message: 'Model is ready' },
         sessionCreated: true,
         createSessionError: null,
@@ -51,34 +51,34 @@ function createFakePromptClient() {
         promptStreaming: function (formattedUserMessage) {
             fake.userPromptsByCall.push(formattedUserMessage);
 
-            var chunks = [];
-            var done = false;
-            var error = null;
-            var notify = null;
+            const chunks = [];
+            let done = false;
+            let error = null;
+            let notify = null;
 
-            var controller = {
+            const controller = {
                 emitChunk: function (text) {
                     chunks.push(text);
-                    var fn = notify;
+                    const fn = notify;
                     notify = null;
                     if (fn) { fn(); }
                 },
                 emitComplete: function () {
                     done = true;
-                    var fn = notify;
+                    const fn = notify;
                     notify = null;
                     if (fn) { fn(); }
                 },
                 emitError: function (err) {
                     error = err;
-                    var fn = notify;
+                    const fn = notify;
                     notify = null;
                     if (fn) { fn(); }
                 }
             };
             fake.pendingStreamControllers.push(controller);
 
-            var stream = {
+            const stream = {
                 [Symbol.asyncIterator]: function () {
                     return {
                         next: function () {
@@ -123,8 +123,8 @@ function createFakePromptClient() {
  * @returns {Object}
  */
 function createFakeConversationStore() {
-    var data = {};
-    var fake = {
+    const data = {};
+    const fake = {
         data: data,
         appended: [],
         cleared: [],
@@ -160,20 +160,20 @@ function createFakeConversationStore() {
  */
 function createController(overrides) {
     overrides = overrides || {};
-    var promptClient = overrides.promptClient || createFakePromptClient();
-    var conversationStore = overrides.conversationStore || createFakeConversationStore();
-    var promptBuilder = overrides.promptBuilder || new PromptBuilder();
-    var getAppInfo = overrides.getAppInfo || function () { return null; };
+    const promptClient = overrides.promptClient || createFakePromptClient();
+    const conversationStore = overrides.conversationStore || createFakeConversationStore();
+    const promptBuilder = overrides.promptBuilder || new PromptBuilder();
+    const getAppInfo = overrides.getAppInfo || function () { return null; };
 
-    var controller = new AssistantController({
+    const controller = new AssistantController({
         promptBuilder: promptBuilder,
         promptClient: promptClient,
         conversationStore: conversationStore,
         getAppInfo: getAppInfo
     });
 
-    var events = [];
-    var capabilityStates = [];
+    const events = [];
+    const capabilityStates = [];
     controller.on('capability-state-changed', function (state) {
         capabilityStates.push(state);
         events.push({ type: 'capability-state-changed', state: state });
@@ -234,7 +234,7 @@ function initializedReady(harness) {
  * @returns {Promise<{emitChunk: Function, emitComplete: Function, emitError: Function}>}
  */
 function awaitStreamController(fakePromptClient, maxAttempts) {
-    var attemptsLeft = typeof maxAttempts === 'number' ? maxAttempts : 500;
+    let attemptsLeft = typeof maxAttempts === 'number' ? maxAttempts : 500;
     return new Promise(function (resolve, reject) {
         function poll() {
             if (fakePromptClient.pendingStreamControllers.length > 0) {
@@ -255,16 +255,16 @@ function awaitStreamController(fakePromptClient, maxAttempts) {
 describe('AssistantController', function () {
     describe('initial Assistant Capability State', function () {
         it('should seed the Assistant Capability State to a canonical PRD state (not the ad-hoc string \'unknown\') before initialization runs', function () {
-            var harness = createController();
+            const harness = createController();
 
-            var canonicalStates = ['unsupported', 'unavailable', 'downloadable', 'downloading', 'ready', 'session-failed', 'streaming-failed'];
+            const canonicalStates = ['unsupported', 'unavailable', 'downloadable', 'downloading', 'ready', 'session-failed', 'streaming-failed'];
             canonicalStates.should.include(harness.controller.getCapabilityState().status);
         });
     });
 
     describe('#initialize() — Assistant Capability State resolution', function () {
         it('should resolve the Assistant Capability State to ready and notify listeners when the Prompt Client reports the local model is ready', function () {
-            var harness = createController();
+            const harness = createController();
             harness.promptClient.availabilityResult = {
                 status: 'ready',
                 message: 'Gemini Nano is ready'
@@ -281,7 +281,7 @@ describe('AssistantController', function () {
         });
 
         it('should resolve the Assistant Capability State to downloadable when the Prompt Client reports the local model needs download', function () {
-            var harness = createController();
+            const harness = createController();
             harness.promptClient.availabilityResult = {
                 status: 'downloadable',
                 message: 'Model can be downloaded'
@@ -293,7 +293,7 @@ describe('AssistantController', function () {
         });
 
         it('should resolve the Assistant Capability State to unsupported when the Prompt Client reports an unsupported browser', function () {
-            var harness = createController();
+            const harness = createController();
             harness.promptClient.availabilityResult = {
                 status: 'unsupported',
                 message: 'Browser unsupported'
@@ -305,7 +305,7 @@ describe('AssistantController', function () {
         });
 
         it('should resolve the Assistant Capability State to downloading when the Prompt Client reports the local model is mid-download, instead of collapsing it into unavailable', function () {
-            var harness = createController();
+            const harness = createController();
             harness.promptClient.availabilityResult = {
                 status: 'downloading',
                 message: 'Gemini Nano is downloading'
@@ -318,7 +318,7 @@ describe('AssistantController', function () {
         });
 
         it('should resolve the Assistant Capability State to unavailable when the Prompt Client reports an unavailable transport, preserving the transport-supplied message rather than substituting a generic one', function () {
-            var harness = createController();
+            const harness = createController();
             harness.promptClient.availabilityResult = {
                 status: 'unavailable',
                 message: 'Background worker availability check threw: boom'
@@ -331,7 +331,7 @@ describe('AssistantController', function () {
         });
 
         it('should resolve the Assistant Capability State to unavailable when the Prompt Client capability check itself throws, instead of letting initialize reject and leave the view without a canonical state to render', function () {
-            var harness = createController();
+            const harness = createController();
             harness.promptClient.checkAvailability = function () {
                 return Promise.reject(new Error('runtime port disconnected'));
             };
@@ -345,7 +345,7 @@ describe('AssistantController', function () {
 
     describe('#initialize() — Conversation Memory loading', function () {
         it('should load stored Conversation Memory for the current inspected URL and emit it to listeners', function () {
-            var harness = createController();
+            const harness = createController();
             harness.conversationStore.data['https://example.com'] = [
                 { role: 'user', content: 'hello' },
                 { role: 'assistant', content: 'hi there' }
@@ -353,7 +353,7 @@ describe('AssistantController', function () {
             harness.controller.setUrl('https://example.com');
 
             return harness.controller.initialize().then(function () {
-                var loaded = harness.events.filter(function (e) {
+                const loaded = harness.events.filter(function (e) {
                     return e.type === 'conversation-loaded';
                 });
                 loaded.should.have.length(1);
@@ -367,10 +367,10 @@ describe('AssistantController', function () {
 
     describe('#initialize() — session seeding', function () {
         it('should create the local AI session seeded with the Prompt Builder system prompt and the loaded Conversation Memory turns', function () {
-            var appInfo = {
+            const appInfo = {
                 common: { data: { SAPUI5: '1.120.0' } }
             };
-            var harness = createController({
+            const harness = createController({
                 getAppInfo: function () { return appInfo; }
             });
             harness.conversationStore.data['https://example.com'] = [
@@ -381,7 +381,7 @@ describe('AssistantController', function () {
 
             return harness.controller.initialize().then(function () {
                 harness.promptClient.seedMessagesByCall.should.have.length(1);
-                var seed = harness.promptClient.seedMessagesByCall[0];
+                const seed = harness.promptClient.seedMessagesByCall[0];
                 seed[0].role.should.equal('system');
                 seed[0].content.should.contain('Framework: 1.120.0');
                 seed[1].should.deep.equal({ role: 'user', content: 'previous question' });
@@ -390,7 +390,7 @@ describe('AssistantController', function () {
         });
 
         it('should not attempt to create a session when the Assistant Capability State is not ready', function () {
-            var harness = createController();
+            const harness = createController();
             harness.promptClient.availabilityResult = {
                 status: 'unsupported',
                 message: 'Browser unsupported'
@@ -402,7 +402,7 @@ describe('AssistantController', function () {
         });
 
         it('should resolve the Assistant Capability State to session-failed when the Prompt Client reports ready but session creation throws', function () {
-            var harness = createController();
+            const harness = createController();
             harness.promptClient.availabilityResult = {
                 status: 'ready', message: 'ready'
             };
@@ -415,7 +415,7 @@ describe('AssistantController', function () {
         });
 
         it('should skip empty assistant placeholders when seeding from Conversation Memory', function () {
-            var harness = createController();
+            const harness = createController();
             harness.conversationStore.data['https://example.com'] = [
                 { role: 'user', content: 'previous question' },
                 { role: 'assistant', content: 'previous answer' },
@@ -425,7 +425,7 @@ describe('AssistantController', function () {
             harness.controller.setUrl('https://example.com');
 
             return harness.controller.initialize().then(function () {
-                var seed = harness.promptClient.seedMessagesByCall[0];
+                const seed = harness.promptClient.seedMessagesByCall[0];
                 seed.should.have.length(4);
                 seed[0].role.should.equal('system');
                 seed[1].should.deep.equal({ role: 'user', content: 'previous question' });
@@ -437,10 +437,10 @@ describe('AssistantController', function () {
 
     describe('#sendUserMessage() — Agent Validation Loop streaming', function () {
         it('should forward the Prompt Builder-formatted user prompt to the Prompt Client and emit streamed chunks and a complete event with the joined response', function () {
-            var harness = createController();
+            const harness = createController();
 
             return initializedReady(harness).then(function () {
-                var sendPromise = harness.controller.sendUserMessage('What is sap.m.Button?');
+                const sendPromise = harness.controller.sendUserMessage('What is sap.m.Button?');
 
                 return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
                     streamCtrl.emitChunk('Hello ');
@@ -451,12 +451,12 @@ describe('AssistantController', function () {
                     harness.promptClient.userPromptsByCall.should.deep.equal([
                         'What is sap.m.Button?'
                     ]);
-                    var chunkEvents = harness.events.filter(function (e) {
+                    const chunkEvents = harness.events.filter(function (e) {
                         return e.type === 'stream-chunk';
                     });
                     chunkEvents.map(function (e) { return e.chunk; }).should.deep.equal(['Hello ', 'world']);
 
-                    var completeEvents = harness.events.filter(function (e) {
+                    const completeEvents = harness.events.filter(function (e) {
                         return e.type === 'stream-complete';
                     });
                     completeEvents.should.have.length(1);
@@ -466,10 +466,10 @@ describe('AssistantController', function () {
         });
 
         it('should append the user turn and the completed assistant turn to the Conversation Store under the current inspected URL', function () {
-            var harness = createController();
+            const harness = createController();
 
             return initializedReady(harness).then(function () {
-                var sendPromise = harness.controller.sendUserMessage('Question 1');
+                const sendPromise = harness.controller.sendUserMessage('Question 1');
 
                 return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
                     streamCtrl.emitChunk('Answer 1');
@@ -487,10 +487,10 @@ describe('AssistantController', function () {
 
     describe('streaming failure recovery', function () {
         it('should surface a streaming-failed Assistant Capability State and clear the thinking state when the Prompt Client throws mid-stream', function () {
-            var harness = createController();
+            const harness = createController();
 
             return initializedReady(harness).then(function () {
-                var sendPromise = harness.controller.sendUserMessage('Question that crashes');
+                const sendPromise = harness.controller.sendUserMessage('Question that crashes');
 
                 return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
                     streamCtrl.emitChunk('partial');
@@ -503,7 +503,7 @@ describe('AssistantController', function () {
                 }).then(function () {
                     harness.controller._isStreaming.should.be.false;
                     harness.controller.getCapabilityState().status.should.equal('streaming-failed');
-                    var failed = harness.events.filter(function (e) {
+                    const failed = harness.events.filter(function (e) {
                         return e.type === 'stream-failed';
                     });
                     failed.should.have.length(1);
@@ -512,10 +512,10 @@ describe('AssistantController', function () {
         });
 
         it('should leave Conversation Memory untouched when streaming fails — neither the user turn nor the assistant turn should be persisted, so reseed never replays an orphan user message', function () {
-            var harness = createController();
+            const harness = createController();
 
             return initializedReady(harness).then(function () {
-                var sendPromise = harness.controller.sendUserMessage('Question that crashes');
+                const sendPromise = harness.controller.sendUserMessage('Question that crashes');
 
                 return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
                     streamCtrl.emitError(new Error('model crashed'));
@@ -523,24 +523,24 @@ describe('AssistantController', function () {
                         // expected
                     });
                 }).then(function () {
-                    var stored = harness.conversationStore.data['https://example.com'];
+                    const stored = harness.conversationStore.data['https://example.com'];
                     (stored === undefined || stored.length === 0).should.be.true;
                 });
             });
         });
 
         it('should recover the Assistant Capability State to ready when a subsequent sendUserMessage succeeds after a prior streaming failure, so the tab does not get stuck on a failure banner', function () {
-            var harness = createController();
+            const harness = createController();
 
             return initializedReady(harness).then(function () {
-                var firstSend = harness.controller.sendUserMessage('First, will crash');
+                const firstSend = harness.controller.sendUserMessage('First, will crash');
                 return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
                     streamCtrl.emitError(new Error('model crashed'));
                     return firstSend.catch(function () { /* expected */ });
                 }).then(function () {
                     harness.controller.getCapabilityState().status.should.equal('streaming-failed');
 
-                    var secondSend = harness.controller.sendUserMessage('Second, will succeed');
+                    const secondSend = harness.controller.sendUserMessage('Second, will succeed');
                     return awaitStreamController(harness.promptClient).then(function (streamCtrl2) {
                         streamCtrl2.emitChunk('ok');
                         streamCtrl2.emitComplete();
@@ -555,20 +555,20 @@ describe('AssistantController', function () {
 
     describe('#updateInspectionContext()', function () {
         it('should inject the selected-control Inspection Context into the next sendUserMessage prompt only', function () {
-            var harness = createController();
+            const harness = createController();
 
             return initializedReady(harness).then(function () {
                 harness.controller.updateInspectionContext({
                     control: { type: 'sap.m.Button', id: 'okButton' }
                 });
 
-                var first = harness.controller.sendUserMessage('Explain this');
+                const first = harness.controller.sendUserMessage('Explain this');
                 return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
                     streamCtrl.emitChunk('It is a button');
                     streamCtrl.emitComplete();
                     return first;
                 }).then(function () {
-                    var second = harness.controller.sendUserMessage('And now?');
+                    const second = harness.controller.sendUserMessage('And now?');
                     return awaitStreamController(harness.promptClient).then(function (streamCtrl2) {
                         streamCtrl2.emitChunk('Generic answer');
                         streamCtrl2.emitComplete();
@@ -584,20 +584,20 @@ describe('AssistantController', function () {
         });
 
         it('should never persist Inspection Context as Conversation Memory', function () {
-            var harness = createController();
+            const harness = createController();
 
             return initializedReady(harness).then(function () {
                 harness.controller.updateInspectionContext({
                     control: { type: 'sap.m.Button', id: 'okButton' }
                 });
 
-                var sendPromise = harness.controller.sendUserMessage('Explain this');
+                const sendPromise = harness.controller.sendUserMessage('Explain this');
                 return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
                     streamCtrl.emitChunk('It is a button');
                     streamCtrl.emitComplete();
                     return sendPromise;
                 }).then(function () {
-                    var stored = harness.conversationStore.data['https://example.com'];
+                    const stored = harness.conversationStore.data['https://example.com'];
                     stored.should.deep.equal([
                         { role: 'user', content: 'Explain this' },
                         { role: 'assistant', content: 'It is a button' }
@@ -609,7 +609,7 @@ describe('AssistantController', function () {
 
     describe('#clearConversation()', function () {
         it('should clear stored Conversation Memory for the inspected URL, destroy the active session, and reseed a fresh session without prior turns', function () {
-            var harness = createController();
+            const harness = createController();
             harness.conversationStore.data['https://example.com'] = [
                 { role: 'user', content: 'old' },
                 { role: 'assistant', content: 'old answer' }
@@ -627,7 +627,7 @@ describe('AssistantController', function () {
                 harness.promptClient.seedMessagesByCall[1].should.have.length(1);
                 harness.promptClient.seedMessagesByCall[1][0].role.should.equal('system');
 
-                var clearedEvents = harness.events.filter(function (e) {
+                const clearedEvents = harness.events.filter(function (e) {
                     return e.type === 'conversation-cleared';
                 });
                 clearedEvents.should.have.length(1);
@@ -637,7 +637,7 @@ describe('AssistantController', function () {
 
     describe('#setUrl() — reseed on URL change', function () {
         it('should load the Conversation Memory for the new inspected URL and reseed the session with its prior turns', function () {
-            var harness = createController();
+            const harness = createController();
             harness.conversationStore.data['https://a.example.com'] = [
                 { role: 'user', content: 'A1' },
                 { role: 'assistant', content: 'A2' }
@@ -657,11 +657,11 @@ describe('AssistantController', function () {
             }).then(function () {
                 harness.promptClient.destroyed.should.be.at.least(1);
                 harness.promptClient.seedMessagesByCall.should.have.length(2);
-                var lastSeed = harness.promptClient.seedMessagesByCall[1];
+                const lastSeed = harness.promptClient.seedMessagesByCall[1];
                 lastSeed[0].role.should.equal('system');
                 lastSeed[1].should.deep.equal({ role: 'user', content: 'B1' });
 
-                var loadedEvents = harness.events.filter(function (e) {
+                const loadedEvents = harness.events.filter(function (e) {
                     return e.type === 'conversation-loaded';
                 });
                 loadedEvents.should.have.length(2);
@@ -670,7 +670,7 @@ describe('AssistantController', function () {
         });
 
         it('should not reseed when setUrl is called with the same inspected URL', function () {
-            var harness = createController();
+            const harness = createController();
             harness.promptClient.availabilityResult = {
                 status: 'ready', message: 'ready'
             };
@@ -688,7 +688,7 @@ describe('AssistantController', function () {
 
     describe('#downloadModel()', function () {
         it('should drive the Prompt Client download flow, emit downloading capability state with progress, and resolve to a ready capability state once the local model is available', function () {
-            var harness = createController();
+            const harness = createController();
             harness.promptClient.availabilityResult = {
                 status: 'downloadable', message: 'Needs download'
             };
@@ -699,11 +699,11 @@ describe('AssistantController', function () {
 
                 return harness.controller.downloadModel();
             }).then(function () {
-                var states = harness.capabilityStates.map(function (s) { return s.status; });
+                const states = harness.capabilityStates.map(function (s) { return s.status; });
                 states.should.include('downloading');
                 states.should.include('ready');
 
-                var downloadingStates = harness.capabilityStates.filter(function (s) {
+                const downloadingStates = harness.capabilityStates.filter(function (s) {
                     return s.status === 'downloading';
                 });
                 downloadingStates.length.should.be.at.least(1);
@@ -714,7 +714,7 @@ describe('AssistantController', function () {
 
     describe('session reseed failures', function () {
         it('should resolve the Assistant Capability State to session-failed when clearConversation cannot reseed the session', function () {
-            var harness = createController();
+            const harness = createController();
 
             return initializedReady(harness).then(function () {
                 harness.promptClient.createSessionError = new Error('reseed failed after clear');
@@ -725,7 +725,7 @@ describe('AssistantController', function () {
         });
 
         it('should resolve the Assistant Capability State to session-failed when setUrl reseed fails for the new inspected URL', function () {
-            var harness = createController();
+            const harness = createController();
 
             return initializedReady(harness).then(function () {
                 harness.promptClient.createSessionError = new Error('reseed failed after url change');
@@ -736,7 +736,7 @@ describe('AssistantController', function () {
         });
 
         it('should resolve the Assistant Capability State to session-failed when downloadModel succeeds but reseed afterwards fails', function () {
-            var harness = createController();
+            const harness = createController();
             harness.promptClient.availabilityResult = {
                 status: 'downloadable', message: 'Needs download'
             };

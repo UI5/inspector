@@ -1,6 +1,6 @@
 'use strict';
 
-var AIChat = require('../../../app/scripts/modules/ui/AIChat.js');
+const AIChat = require('../../../app/scripts/modules/ui/AIChat.js');
 
 /**
  * Minimal AssistantController-shaped fake. The view talks only to the
@@ -14,7 +14,7 @@ var AIChat = require('../../../app/scripts/modules/ui/AIChat.js');
  *           clearConversation: Function, destroy: Function}}
  */
 function createFakeController() {
-    var listeners = {};
+    const listeners = {};
     return {
         listeners: listeners,
         on: function (event, handler) {
@@ -46,8 +46,8 @@ function createFakeController() {
  *           destroy: Function}}
  */
 function createFakeTranscript() {
-    var calls = [];
-    var streamingHandle = {
+    const calls = [];
+    const streamingHandle = {
         streamChunk: function (chunk) { calls.push({type: 'streamChunk', chunk: chunk}); },
         finalize: function (content) { calls.push({type: 'finalize', content: content}); }
     };
@@ -67,10 +67,10 @@ function createFakeTranscript() {
 }
 
 describe('AIChat', function () {
-    var fixtures = document.getElementById('fixtures');
-    var aiChat;
-    var fakeController;
-    var fakeTranscript;
+    const fixtures = document.getElementById('fixtures');
+    let aiChat;
+    let fakeController;
+    let fakeTranscript;
 
     beforeEach(function () {
         fixtures.innerHTML = '<div id="ai-chat"></div>';
@@ -106,40 +106,40 @@ describe('AIChat', function () {
             // The transcript factory was called with the container; the
             // view drives turns through the fake instead of rendering itself.
             fakeController.fire('conversation-loaded', [{role: 'user', content: 'hi'}]);
-            var resetCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'reset'; });
+            const resetCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'reset'; });
             resetCalls.length.should.equal(1);
         });
     });
 
     describe('#_render()', function () {
         it('should render chat wrapper with ARIA attributes', function () {
-            var wrapper = document.querySelector('.ai-chat-wrapper');
+            const wrapper = document.querySelector('.ai-chat-wrapper');
             wrapper.should.exist;
             wrapper.getAttribute('role').should.equal('region');
             wrapper.getAttribute('aria-label').should.equal('AI Chat');
         });
 
         it('should render messages container as an empty host node owned by the transcript collaborator, with no view-private welcome HTML', function () {
-            var container = document.getElementById('ai-messages-container');
+            const container = document.getElementById('ai-messages-container');
             container.should.exist;
             container.getAttribute('role').should.equal('log');
             (container.querySelector('.ai-welcome-message') === null).should.be.true;
         });
 
         it('should render input with aria-label', function () {
-            var input = document.getElementById('ai-input');
+            const input = document.getElementById('ai-input');
             input.should.exist;
             input.getAttribute('aria-label').should.equal('Message input');
         });
 
         it('should render send button with aria-label', function () {
-            var button = document.getElementById('ai-send-button');
+            const button = document.getElementById('ai-send-button');
             button.should.exist;
             button.getAttribute('aria-label').should.equal('Send message');
         });
 
         it('should render dialog with ARIA attributes', function () {
-            var dialog = document.getElementById('ai-confirm-dialog');
+            const dialog = document.getElementById('ai-confirm-dialog');
             dialog.should.exist;
             dialog.getAttribute('role').should.equal('dialog');
             dialog.getAttribute('aria-modal').should.equal('true');
@@ -148,21 +148,21 @@ describe('AIChat', function () {
 
     describe('Sending a message', function () {
         it('should forward a user-typed message to the transcript as a user turn and ask the transcript to begin an assistant turn, so transcript-shaped DOM work stays out of the view', function () {
-            var input = document.getElementById('ai-input');
-            var sendButton = document.getElementById('ai-send-button');
+            const input = document.getElementById('ai-input');
+            const sendButton = document.getElementById('ai-send-button');
             input.value = 'How does binding work?';
             input.dispatchEvent(new Event('input'));
             sendButton.click();
 
-            var userTurns = fakeTranscript.calls.filter(function (c) { return c.type === 'appendUserTurn'; });
-            var assistantTurns = fakeTranscript.calls.filter(function (c) { return c.type === 'beginAssistantTurn'; });
+            const userTurns = fakeTranscript.calls.filter(function (c) { return c.type === 'appendUserTurn'; });
+            const assistantTurns = fakeTranscript.calls.filter(function (c) { return c.type === 'beginAssistantTurn'; });
             userTurns.length.should.equal(1);
             userTurns[0].content.should.equal('How does binding work?');
             assistantTurns.length.should.equal(1);
         });
 
         it('should forward controller stream chunks to the transcript handle returned by beginAssistantTurn, so the view does not buffer chunks itself', function () {
-            var input = document.getElementById('ai-input');
+            const input = document.getElementById('ai-input');
             input.value = 'q';
             input.dispatchEvent(new Event('input'));
             document.getElementById('ai-send-button').click();
@@ -170,34 +170,34 @@ describe('AIChat', function () {
             fakeController.fire('stream-chunk', 'partial ');
             fakeController.fire('stream-chunk', 'answer');
 
-            var chunkCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'streamChunk'; });
+            const chunkCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'streamChunk'; });
             chunkCalls.length.should.equal(2);
             chunkCalls[0].chunk.should.equal('partial ');
             chunkCalls[1].chunk.should.equal('answer');
         });
 
         it('should finalize the transcript streaming handle with the controller\'s full response, so the assistant turn is committed exactly once per stream', function () {
-            var input = document.getElementById('ai-input');
+            const input = document.getElementById('ai-input');
             input.value = 'q';
             input.dispatchEvent(new Event('input'));
             document.getElementById('ai-send-button').click();
 
             fakeController.fire('stream-complete', {content: 'full response'});
 
-            var finalizeCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'finalize'; });
+            const finalizeCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'finalize'; });
             finalizeCalls.length.should.equal(1);
             finalizeCalls[0].content.should.equal('full response');
         });
 
         it('should surface a streaming failure as a transcript system message instead of rendering its own error DOM', function () {
-            var input = document.getElementById('ai-input');
+            const input = document.getElementById('ai-input');
             input.value = 'q';
             input.dispatchEvent(new Event('input'));
             document.getElementById('ai-send-button').click();
 
             fakeController.fire('stream-failed', new Error('boom'));
 
-            var systemMessages = fakeTranscript.calls.filter(function (c) { return c.type === 'appendSystemMessage'; });
+            const systemMessages = fakeTranscript.calls.filter(function (c) { return c.type === 'appendSystemMessage'; });
             systemMessages.length.should.equal(1);
             systemMessages[0].message.should.contain('boom');
         });
@@ -205,13 +205,13 @@ describe('AIChat', function () {
 
     describe('Conversation lifecycle', function () {
         it('should ask the transcript to reset to the loaded prior turns when the controller emits conversation-loaded', function () {
-            var turns = [
+            const turns = [
                 {role: 'user', content: 'older question'},
                 {role: 'assistant', content: 'older answer'}
             ];
             fakeController.fire('conversation-loaded', turns);
 
-            var resetCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'reset'; });
+            const resetCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'reset'; });
             resetCalls.length.should.equal(1);
             resetCalls[0].turns.should.equal(turns);
         });
@@ -219,8 +219,8 @@ describe('AIChat', function () {
         it('should clear the transcript and then append a "cleared" system message when the controller emits conversation-cleared, so the developer sees both the empty state and an explanatory note', function () {
             fakeController.fire('conversation-cleared');
 
-            var clearCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'clear'; });
-            var systemCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'appendSystemMessage'; });
+            const clearCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'clear'; });
+            const systemCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'appendSystemMessage'; });
             clearCalls.length.should.equal(1);
             systemCalls.length.should.equal(1);
             systemCalls[0].message.should.contain('cleared');
@@ -229,7 +229,7 @@ describe('AIChat', function () {
         it('should scroll the transcript to the bottom when the tab is activated, so the developer sees the most recent turn without scrolling manually', function () {
             aiChat.onTabActivated();
 
-            var scrollCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'scrollToBottom'; });
+            const scrollCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'scrollToBottom'; });
             scrollCalls.length.should.equal(1);
             scrollCalls[0].force.should.be.true;
         });
@@ -239,12 +239,12 @@ describe('AIChat', function () {
         describe('#_showConfirmDialog()', function () {
             it('should display dialog', function () {
                 aiChat._showConfirmDialog();
-                var dialog = document.getElementById('ai-confirm-dialog');
+                const dialog = document.getElementById('ai-confirm-dialog');
                 dialog.style.display.should.equal('flex');
             });
 
             it('should store previous focus', function () {
-                var input = document.getElementById('ai-input');
+                const input = document.getElementById('ai-input');
                 input.focus();
                 aiChat._showConfirmDialog();
                 aiChat._previousFocus.should.equal(input);
@@ -252,7 +252,7 @@ describe('AIChat', function () {
 
             it('should focus cancel button', function () {
                 aiChat._showConfirmDialog();
-                var cancelButton = document.getElementById('ai-confirm-cancel');
+                const cancelButton = document.getElementById('ai-confirm-cancel');
                 document.activeElement.should.equal(cancelButton);
             });
         });
@@ -261,12 +261,12 @@ describe('AIChat', function () {
             it('should hide dialog', function () {
                 aiChat._showConfirmDialog();
                 aiChat._hideConfirmDialog();
-                var dialog = document.getElementById('ai-confirm-dialog');
+                const dialog = document.getElementById('ai-confirm-dialog');
                 dialog.style.display.should.equal('none');
             });
 
             it('should restore previous focus', function () {
-                var input = document.getElementById('ai-input');
+                const input = document.getElementById('ai-input');
                 input.focus();
                 aiChat._showConfirmDialog();
                 aiChat._hideConfirmDialog();
@@ -277,13 +277,13 @@ describe('AIChat', function () {
 
     describe('Event Listeners', function () {
         it('should have send button', function () {
-            var button = document.getElementById('ai-send-button');
+            const button = document.getElementById('ai-send-button');
             button.should.exist;
         });
 
         it('should enable send button when input has text', function () {
-            var input = document.getElementById('ai-input');
-            var sendButton = document.getElementById('ai-send-button');
+            const input = document.getElementById('ai-input');
+            const sendButton = document.getElementById('ai-send-button');
 
             sendButton.disabled.should.be.true;
             input.value = 'Test message';
@@ -292,12 +292,12 @@ describe('AIChat', function () {
         });
 
         it('should have clear history button', function () {
-            var button = document.getElementById('ai-clear-history-button');
+            const button = document.getElementById('ai-clear-history-button');
             button.should.exist;
         });
 
         it('should have context clear button', function () {
-            var button = document.getElementById('ai-context-clear-button');
+            const button = document.getElementById('ai-context-clear-button');
             button.should.exist;
         });
     });
@@ -310,7 +310,7 @@ describe('AIChat', function () {
                 progress: 0
             });
 
-            var banner = document.getElementById('ai-status-banner');
+            const banner = document.getElementById('ai-status-banner');
             banner.className.should.contain('status-unavailable');
             banner.querySelector('.status-text').textContent.should.equal('something happened');
         });
@@ -320,7 +320,7 @@ describe('AIChat', function () {
                 status: 'ready', message: 'Gemini Nano is ready', progress: 0
             });
 
-            var banner = document.getElementById('ai-status-banner');
+            const banner = document.getElementById('ai-status-banner');
             banner.className.should.contain('status-ready');
             banner.querySelector('.status-text').textContent.should.equal('Gemini Nano is ready');
         });
@@ -330,7 +330,7 @@ describe('AIChat', function () {
                 status: 'downloadable', message: 'Model can be downloaded', progress: 0
             });
 
-            var banner = document.getElementById('ai-status-banner');
+            const banner = document.getElementById('ai-status-banner');
             banner.className.should.contain('status-downloadable');
             banner.className.should.not.contain('status-needs-download');
         });
@@ -340,7 +340,7 @@ describe('AIChat', function () {
                 status: 'downloadable', message: 'Model can be downloaded', progress: 0
             });
 
-            var downloadButton = document.getElementById('ai-download-button');
+            const downloadButton = document.getElementById('ai-download-button');
             downloadButton.style.display.should.not.equal('none');
             downloadButton.disabled.should.be.false;
         });
@@ -350,10 +350,10 @@ describe('AIChat', function () {
                 status: 'downloading', message: 'Downloading model', progress: 0.42
             });
 
-            var banner = document.getElementById('ai-status-banner');
+            const banner = document.getElementById('ai-status-banner');
             banner.className.should.contain('status-downloading');
             banner.querySelector('.status-text').textContent.should.contain('42');
-            var downloadButton = document.getElementById('ai-download-button');
+            const downloadButton = document.getElementById('ai-download-button');
             downloadButton.style.display.should.not.equal('none');
             downloadButton.disabled.should.be.true;
         });
@@ -363,7 +363,7 @@ describe('AIChat', function () {
                 status: 'session-failed', message: 'unable to create local AI session', progress: 0
             });
 
-            var banner = document.getElementById('ai-status-banner');
+            const banner = document.getElementById('ai-status-banner');
             banner.className.should.contain('status-session-failed');
             banner.className.should.not.contain('status-error');
             banner.querySelector('.status-text').textContent.should.contain('unable to create local AI session');
@@ -374,7 +374,7 @@ describe('AIChat', function () {
                 status: 'unsupported', message: 'Browser unsupported', progress: 0
             });
 
-            var banner = document.getElementById('ai-status-banner');
+            const banner = document.getElementById('ai-status-banner');
             banner.className.should.contain('status-unsupported');
             banner.querySelector('.status-text').textContent.should.equal('Browser unsupported');
         });
@@ -384,18 +384,18 @@ describe('AIChat', function () {
                 status: 'unavailable', message: 'Local AI cannot run on this device', progress: 0
             });
 
-            var banner = document.getElementById('ai-status-banner');
+            const banner = document.getElementById('ai-status-banner');
             banner.className.should.contain('status-unavailable');
             banner.querySelector('.status-text').textContent.should.equal('Local AI cannot run on this device');
         });
 
         it('should hide the download button for every non-download Assistant Capability State that paints a banner, so the developer is not invited to re-download a ready model', function () {
-            var nonDownloadStates = ['ready', 'unsupported', 'unavailable', 'session-failed'];
+            const nonDownloadStates = ['ready', 'unsupported', 'unavailable', 'session-failed'];
             nonDownloadStates.forEach(function (status) {
                 fakeController.fire('capability-state-changed', {
                     status: status, message: status, progress: 0
                 });
-                var downloadButton = document.getElementById('ai-download-button');
+                const downloadButton = document.getElementById('ai-download-button');
                 downloadButton.style.display.should.equal('none');
             });
         });
@@ -411,7 +411,7 @@ describe('AIChat', function () {
                 status: 'session-failed', message: 'session creation failed', progress: 0
             });
 
-            var clearButton = document.getElementById('ai-clear-history-button');
+            const clearButton = document.getElementById('ai-clear-history-button');
             clearButton.style.display.should.not.equal('none');
         });
 
@@ -421,15 +421,15 @@ describe('AIChat', function () {
             fakeController.fire('capability-state-changed', {
                 status: 'ready', message: 'Gemini Nano is ready', progress: 0
             });
-            var bannerBefore = document.getElementById('ai-status-banner');
-            var classBefore = bannerBefore.className;
-            var textBefore = bannerBefore.querySelector('.status-text').textContent;
+            const bannerBefore = document.getElementById('ai-status-banner');
+            const classBefore = bannerBefore.className;
+            const textBefore = bannerBefore.querySelector('.status-text').textContent;
 
             fakeController.fire('capability-state-changed', {
                 status: 'streaming-failed', message: 'model crashed', progress: 0
             });
 
-            var bannerAfter = document.getElementById('ai-status-banner');
+            const bannerAfter = document.getElementById('ai-status-banner');
             bannerAfter.className.should.equal(classBefore);
             bannerAfter.querySelector('.status-text').textContent.should.equal(textBefore);
         });
@@ -445,7 +445,7 @@ describe('AIChat', function () {
             return Promise.resolve().then(function () {
                 return Promise.resolve();
             }).then(function () {
-                var counter = document.getElementById('ai-token-counter');
+                const counter = document.getElementById('ai-token-counter');
                 counter.textContent.should.equal('');
             });
         });
@@ -465,7 +465,7 @@ describe('AIChat', function () {
             });
 
             return new Promise(function (resolve) { setTimeout(resolve, 20); }).then(function () {
-                var warnings = fakeTranscript.calls.filter(function (c) {
+                const warnings = fakeTranscript.calls.filter(function (c) {
                     return c.type === 'appendSystemMessage' && c.message.indexOf('token limit') !== -1;
                 });
                 warnings.length.should.equal(1);
