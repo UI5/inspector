@@ -207,7 +207,9 @@ AssistantController.prototype._consumeStream = function (stream) {
  * Set the inspected URL whose conversation memory the controller owns.
  *
  * Before initialization, records the URL. After initialization with a different URL, loads the new
- * URL's memory, destroys the active session, and reseeds. Same-URL calls are a no-op.
+ * URL's memory, destroys the active session, and reseeds. On successful reseed, re-emits a `ready`
+ * capability state so the view can refresh state tied to the live session (e.g. the token counter).
+ * Same-URL calls are a no-op.
  *
  * @param {string} url
  * @returns {Promise<void>|undefined}
@@ -225,7 +227,7 @@ AssistantController.prototype.setUrl = function (url) {
 
     return this._loadConversationMemory().then(() => {
         this._promptClient.destroy();
-        return this._seedSessionOrFail();
+        return this._reseedAndAnnounceReady();
     });
 };
 
@@ -243,6 +245,11 @@ AssistantController.prototype.updateInspectionContext = function (context) {
  * Clear conversation memory for the current URL, destroy the active session, and reseed without
  * prior turns.
  *
+ * On successful reseed, re-emits a `ready` capability state so the view can refresh state tied to
+ * the live session — most importantly the token counter, which otherwise keeps showing the
+ * pre-clear `inputUsage` (and any `quota-exhausted` styling / disabled input) even though the
+ * underlying session is fresh.
+ *
  * @returns {Promise<void>}
  */
 AssistantController.prototype.clearConversation = function () {
@@ -250,7 +257,27 @@ AssistantController.prototype.clearConversation = function () {
         this._conversationMemory = [];
         this._promptClient.destroy();
         this._emit('conversation-cleared');
-        return this._seedSessionOrFail();
+        return this._reseedAndAnnounceReady();
+    });
+};
+
+/**
+ * Reseed the local AI session and, on success, re-emit a `ready` capability state so view-level
+ * state derived from the live session (token counter, quota styling, input enablement) refreshes.
+ * On failure, `_seedSessionOrFail` already surfaces `session-failed`, so this method does not
+ * emit `ready`.
+ *
+ * @private
+ * @returns {Promise<void>}
+ */
+AssistantController.prototype._reseedAndAnnounceReady = function () {
+    return this._seedSessionOrFail().then(() => {
+        // `_seedSessionOrFail` resolves either with the session ready or after having flipped
+        // capability state to `session-failed`. Re-emit `ready` only in the former case so a
+        // failed reseed's `session-failed` banner is not immediately overwritten.
+        if (this._capabilityState.status === 'ready') {
+            this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
+        }
     });
 };
 

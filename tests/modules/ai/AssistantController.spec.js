@@ -688,6 +688,92 @@ describe('AssistantController', function () {
         });
     });
 
+    describe('capability-state refresh on successful reseed', function () {
+        it('should emit a ready Assistant Capability State after clearConversation reseeds the session, so the panel can reset the token counter, drop quota-exhausted styling, and re-enable the input', function () {
+            const harness = createController();
+            harness.conversationStore.data['https://example.com'] = [
+                { role: 'user', content: 'old' },
+                { role: 'assistant', content: 'old answer' }
+            ];
+
+            return initializedReady(harness).then(function () {
+                const stateCountBeforeClear = harness.capabilityStates.length;
+
+                return harness.controller.clearConversation().then(function () {
+                    const newStates = harness.capabilityStates.slice(stateCountBeforeClear);
+                    newStates.should.have.length(1);
+                    newStates[0].status.should.equal('ready');
+                    newStates[0].progress.should.equal(0);
+                });
+            });
+        });
+
+        it('should emit the ready Assistant Capability State after the conversation-cleared event, so listeners that refresh usage info see a fresh session', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                const eventCountBeforeClear = harness.events.length;
+
+                return harness.controller.clearConversation().then(function () {
+                    const newEvents = harness.events.slice(eventCountBeforeClear);
+                    const clearedIndex = newEvents.findIndex(function (e) { return e.type === 'conversation-cleared'; });
+                    const readyIndex = newEvents.findIndex(function (e) {
+                        return e.type === 'capability-state-changed' && e.state.status === 'ready';
+                    });
+                    clearedIndex.should.be.at.least(0);
+                    readyIndex.should.be.at.least(0);
+                    readyIndex.should.be.above(clearedIndex);
+                });
+            });
+        });
+
+        it('should emit a ready Assistant Capability State after setUrl reseeds the session for a new inspected URL, so the panel refreshes the token counter for the fresh session', function () {
+            const harness = createController();
+            harness.conversationStore.data['https://a.example.com'] = [
+                { role: 'user', content: 'A1' }
+            ];
+
+            return initializedReady(harness).then(function () {
+                const stateCountBeforeSwitch = harness.capabilityStates.length;
+
+                return harness.controller.setUrl('https://other.example.com').then(function () {
+                    const newStates = harness.capabilityStates.slice(stateCountBeforeSwitch);
+                    newStates.should.have.length(1);
+                    newStates[0].status.should.equal('ready');
+                    newStates[0].progress.should.equal(0);
+                });
+            });
+        });
+
+        it('should not emit a redundant ready Assistant Capability State when setUrl is called with the same inspected URL (no reseed happened)', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                const stateCountBeforeNoop = harness.capabilityStates.length;
+
+                return harness.controller.setUrl('https://example.com').then(function () {
+                    harness.capabilityStates.length.should.equal(stateCountBeforeNoop);
+                });
+            });
+        });
+
+        it('should not emit a ready Assistant Capability State when clearConversation reseed fails, so the session-failed banner is not immediately overwritten with ready', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                harness.promptClient.createSessionError = new Error('reseed failed after clear');
+                const stateCountBeforeClear = harness.capabilityStates.length;
+
+                return harness.controller.clearConversation().then(function () {
+                    const newStates = harness.capabilityStates.slice(stateCountBeforeClear);
+                    const readyAfterFailure = newStates.filter(function (s) { return s.status === 'ready'; });
+                    readyAfterFailure.should.have.length(0);
+                    harness.controller._capabilityState.status.should.equal('session-failed');
+                });
+            });
+        });
+    });
+
     describe('session reseed failures', function () {
         it('should resolve the Assistant Capability State to session-failed when clearConversation cannot reseed the session', function () {
             const harness = createController();
