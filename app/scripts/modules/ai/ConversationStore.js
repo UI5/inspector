@@ -55,7 +55,6 @@ ConversationStore.prototype._lastError = function () {
 };
 
 /**
- * Load stored conversation memory for a URL.
  * @param {string} url
  * @returns {Promise<Array>} Array of {role, content} turns, or empty array.
  */
@@ -114,7 +113,6 @@ ConversationStore.prototype.append = function (url, message) {
 };
 
 /**
- * Clear stored conversation memory for a URL.
  * @param {string} url
  * @returns {Promise<void>}
  */

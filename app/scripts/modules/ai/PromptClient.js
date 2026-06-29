@@ -25,7 +25,6 @@ function PromptClient(options) {
 }
 
 /**
- * Connect to the transport.
  * @private
  */
 PromptClient.prototype._connect = function () {
@@ -58,7 +57,6 @@ PromptClient.prototype._connect = function () {
 };
 
 /**
- * Register a message handler.
  * @private
  * @param {string} type
  * @param {Function} handler
@@ -68,7 +66,6 @@ PromptClient.prototype._on = function (type, handler) {
 };
 
 /**
- * Remove a message handler.
  * @private
  * @param {string} type
  */
@@ -77,7 +74,6 @@ PromptClient.prototype._off = function (type) {
 };
 
 /**
- * Post a message to the transport.
  * @private
  * @param {Object} message
  */
@@ -306,7 +302,6 @@ PromptClient.prototype.promptStreaming = function (formattedUserMessage) {
 };
 
 /**
- * Resolve current session usage info from the transport.
  * @returns {Promise<Object|null>} {inputUsage, inputQuota, percentUsed} or null.
  */
 PromptClient.prototype.getUsageInfo = function () {

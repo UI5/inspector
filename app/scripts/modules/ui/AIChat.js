@@ -47,7 +47,6 @@ function AIChat(containerId, options) {
 }
 
 /**
- * Initialize the AIChat component.
  */
 AIChat.prototype.init = function () {
     this._render();
@@ -58,8 +57,6 @@ AIChat.prototype.init = function () {
 };
 
 /**
- * Render the chat UI.
- *
  * The messages container is created here but its contents are owned by
  * {@link AssistantTranscript}, constructed in {@link AIChat#init}.
  * @private
@@ -124,7 +121,6 @@ AIChat.prototype._render = function () {
 };
 
 /**
- * Attach event listeners.
  * @private
  */
 AIChat.prototype._attachEventListeners = function () {
@@ -347,7 +343,6 @@ AIChat.prototype._handleDownloadModel = function () {
 };
 
 /**
- * Handle the user sending a message via the controller.
  * @private
  */
 AIChat.prototype._handleSendMessage = function () {
@@ -366,15 +361,12 @@ AIChat.prototype._handleSendMessage = function () {
     this._isStreaming = true;
     this._streamingHandle = this._transcript.beginAssistantTurn();
 
-    // The controller owns inspection context. The view notifies it via
-    // updateContext() / _clearContext().
     this._controller.sendUserMessage(userMessage).catch(() => {
         // stream-failed event handler surfaces the error.
     });
 };
 
 /**
- * Handle clear history.
  * @private
  */
 AIChat.prototype._handleClearHistory = function () {
@@ -382,7 +374,6 @@ AIChat.prototype._handleClearHistory = function () {
 };
 
 /**
- * Show confirmation dialog.
  * @private
  */
 AIChat.prototype._showConfirmDialog = function () {
@@ -398,7 +389,6 @@ AIChat.prototype._showConfirmDialog = function () {
 };
 
 /**
- * Hide confirmation dialog.
  * @private
  */
 AIChat.prototype._hideConfirmDialog = function () {
@@ -411,7 +401,6 @@ AIChat.prototype._hideConfirmDialog = function () {
 };
 
 /**
- * Perform clear history action via the controller.
  * @private
  */
 AIChat.prototype._performClearHistory = function () {
@@ -460,7 +449,6 @@ AIChat.prototype._renderCapabilityBanner = function (status, state) {
 };
 
 /**
- * Update token counter display.
  * @private
  */
 AIChat.prototype._updateTokenCounter = function () {
@@ -515,7 +503,6 @@ AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
 };
 
 /**
- * Clear current inspection context.
  * @private
  */
 AIChat.prototype._clearContext = function () {
@@ -527,7 +514,6 @@ AIChat.prototype._clearContext = function () {
 };
 
 /**
- * Update current inspection context (control and app info).
  * @param {Object} context - {control, appInfo}
  */
 AIChat.prototype.updateContext = function (context) {
@@ -545,7 +531,6 @@ AIChat.prototype.updateContext = function (context) {
 };
 
 /**
- * Called when AI tab is activated.
  */
 AIChat.prototype.onTabActivated = function () {
     this._transcript.scrollToBottom(true);
@@ -563,7 +548,6 @@ AIChat.prototype.setUrl = function (url) {
 };
 
 /**
- * Destroy the component and cleanup.
  */
 AIChat.prototype.destroy = function () {
     this._controller.destroy();

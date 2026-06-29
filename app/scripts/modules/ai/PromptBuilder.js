@@ -12,8 +12,8 @@ function PromptBuilder() {
 }
 
 /**
- * Build the system prompt. Includes a Current Application Context section
- * when app metadata is provided.
+ * Includes a Current Application Context section when app metadata is
+ * provided.
  *
  * @param {Object} [appInfo]
  * @returns {string}
@@ -124,7 +124,6 @@ PromptBuilder.prototype._addPropertiesContext = function (control, maxLength) {
 };
 
 /**
- * Format control bindings as a truncated JSON block.
  * @private
  * @param {Object} bindings
  * @param {number} maxLength
@@ -140,7 +139,6 @@ PromptBuilder.prototype._addBindingsContext = function (bindings, maxLength) {
 };
 
 /**
- * Format control "own" aggregations as a truncated JSON block.
  * @private
  * @param {Object} aggregations
  * @param {number} maxLength

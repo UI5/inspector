@@ -624,7 +624,6 @@ describe('AssistantController', function () {
                 harness.conversationStore.cleared.should.deep.equal(['https://example.com']);
                 harness.promptClient.destroyed.should.equal(1);
                 harness.promptClient.seedMessagesByCall.should.have.length(2);
-                // After clear, the new seed should only contain the system prompt.
                 harness.promptClient.seedMessagesByCall[1].should.have.length(1);
                 harness.promptClient.seedMessagesByCall[1][0].role.should.equal('system');
 

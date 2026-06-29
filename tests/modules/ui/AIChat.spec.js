@@ -123,8 +123,6 @@ describe('AIChat', function () {
             var container = document.getElementById('ai-messages-container');
             container.should.exist;
             container.getAttribute('role').should.equal('log');
-            // The view used to inject a welcome message here. That now
-            // lives in AssistantTranscript.
             (container.querySelector('.ai-welcome-message') === null).should.be.true;
         });
 

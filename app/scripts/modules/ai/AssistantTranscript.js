@@ -32,7 +32,6 @@ function AssistantTranscript(container, options) {
 }
 
 /**
- * Render the initial empty-state welcome panel.
  * @private
  */
 AssistantTranscript.prototype._renderEmptyState = function () {
@@ -49,7 +48,6 @@ AssistantTranscript.prototype._renderEmptyState = function () {
 };
 
 /**
- * Append a user turn.
  * @param {string} content - Raw user input, escaped before insertion.
  * @returns {HTMLElement}
  */
@@ -58,7 +56,6 @@ AssistantTranscript.prototype.appendUserTurn = function (content) {
 };
 
 /**
- * Append a system message (status, error, hint).
  * @param {string} message - Plain text, escaped before insertion.
  * @returns {HTMLElement}
  */
@@ -144,7 +141,6 @@ AssistantTranscript.prototype.beginAssistantTurn = function () {
 };
 
 /**
- * Clear the transcript and show a "cleared" empty-state.
  */
 AssistantTranscript.prototype.clear = function () {
     // Safe innerHTML: literal string with no interpolation.
@@ -156,8 +152,6 @@ AssistantTranscript.prototype.clear = function () {
 };
 
 /**
- * Replace the transcript with the supplied prior turns.
- *
  * @param {Array<{role: string, content: string}>} turns - May be empty.
  */
 AssistantTranscript.prototype.reset = function (turns) {
@@ -195,8 +189,6 @@ AssistantTranscript.prototype.scrollToBottom = function (force) {
  */
 AssistantTranscript.prototype.destroy = function () {};
 
-// ---- private rendering helpers ---------------------------------------
-
 /**
  * @private
  */
@@ -212,7 +204,6 @@ AssistantTranscript.prototype._isScrolledToBottom = function () {
 };
 
 /**
- * Append a single message of the given role.
  * @private
  */
 AssistantTranscript.prototype._appendMessage = function (role, content, showCopyButton) {

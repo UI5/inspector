@@ -63,7 +63,6 @@ AssistantController.prototype.on = function (event, handler) {
 };
 
 /**
- * Emit an internal event to all registered listeners.
  * @private
  * @param {string} event
  * @param {*} [payload]
@@ -86,7 +85,6 @@ AssistantController.prototype.getCapabilityState = function () {
 };
 
 /**
- * Set and broadcast the Assistant Capability State.
  * @private
  * @param {string} status
  * @param {string} [message]
@@ -319,7 +317,6 @@ AssistantController.prototype.getUsageInfo = function () {
 };
 
 /**
- * Destroy the underlying session and release listeners.
  */
 AssistantController.prototype.destroy = function () {
     this._promptClient.destroy();
@@ -327,7 +324,6 @@ AssistantController.prototype.destroy = function () {
 };
 
 /**
- * Load conversation memory for the current URL and emit it.
  * @private
  * @returns {Promise<void>}
  */

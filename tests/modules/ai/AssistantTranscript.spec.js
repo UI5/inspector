@@ -200,12 +200,10 @@ describe('AssistantTranscript', function () {
             var targetId = toggle.getAttribute('data-target');
             var content = document.getElementById(targetId);
 
-            // First click collapses.
             toggle.click();
             content.style.display.should.equal('none');
             toggle.textContent.should.equal('\u25B6');
 
-            // Second click re-expands.
             toggle.click();
             content.style.display.should.equal('block');
             toggle.textContent.should.equal('\u25BC');
