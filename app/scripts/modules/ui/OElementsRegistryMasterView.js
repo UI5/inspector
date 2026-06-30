@@ -137,11 +137,22 @@ function OElementsRegistryMasterView(domId, options) {
         this.onRefreshButtonClicked = options.onRefreshButtonClicked || function () {};
     }
 
-        this.oContainerDOM.appendChild(this._createContent());
-        this.oContainerDOM.appendChild(this._createMessage());
+    /**
+     * Fires when the hovered element in the DataGrid changes.
+     * @param {string} sElementId
+     */
+    this.onHoverChanged = (options && options.onHoverChanged) || function (sElementId) {};
 
-        this._setReferences();
-        this._createHandlers();
+    /**
+     * Fires when hover highlight should be hidden.
+     */
+    this.onHoverHide = (options && options.onHoverHide) || function () {};
+
+    this.oContainerDOM.appendChild(this._createContent());
+    this.oContainerDOM.appendChild(this._createMessage());
+
+    this._setReferences();
+    this._createHandlers();
 }
 
 /**
@@ -229,6 +240,8 @@ OElementsRegistryMasterView.prototype._createHandlers = function () {
     this._oFilterContainer.onsearch = this._onSearchEvent.bind(this);
     this._oFilterCheckBox.onchange = this._onOptionsChange.bind(this);
     this._oRefreshButton.onclick = this._onRefresh.bind(this);
+    this.oDataGrid.element.onmouseover = this._onDataGridMouseOver.bind(this);
+    this.oDataGrid.element.onmouseleave = this._onDataGridMouseLeave.bind(this);
 };
 
 /**
@@ -527,6 +540,33 @@ OElementsRegistryMasterView.prototype.selectHandler = function (oEvent) {
     this.XMLDetailView.update(oEvent.data._data);
     this.ControllerDetailView.update(oEvent.data._data.controllerInfo);
     this._sSelectedItem = oEvent.data._data.id;
+};
+
+/**
+ * Event handler for mouseover on the DataGrid element.
+ * Walks up the DOM to find the nearest row with a _dataGridNode and calls onHoverChanged with its element id.
+ * @param {MouseEvent} event
+ * @private
+ */
+OElementsRegistryMasterView.prototype._onDataGridMouseOver = function (event) {
+    let target = event.target;
+
+    while (target && target !== this.oDataGrid.element && !target._dataGridNode) {
+        target = target.parentElement;
+    }
+
+    if (target && target._dataGridNode && target._dataGridNode._data && target._dataGridNode._data.id) {
+        this.onHoverChanged(target._dataGridNode._data.id);
+    }
+};
+
+/**
+ * Event handler for mouseleave on the DataGrid element.
+ * Hides the page highlight when the mouse exits the table.
+ * @private
+ */
+OElementsRegistryMasterView.prototype._onDataGridMouseLeave = function () {
+    this.onHoverHide();
 };
 
 module.exports = OElementsRegistryMasterView;

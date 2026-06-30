@@ -284,6 +284,26 @@
                 action: 'do-elements-registry-refresh',
                 frameId: framesSelect.getSelectedId()
             });
+        },
+        /**
+         * Send message to highlight the hovered element on the inspected page.
+         * @param {string} sElementId
+         */
+        onHoverChanged: function (sElementId) {
+            port.postMessage({
+                action: 'on-control-tree-hover',
+                target: sElementId,
+                frameId: framesSelect.getSelectedId()
+            });
+        },
+        /**
+         * Send message to hide the highlight when the mouse leaves the table.
+         */
+        onHoverHide: function () {
+            port.postMessage({
+                action: 'on-hide-highlight',
+                frameId: framesSelect.getSelectedId()
+            });
         }
     });
 
