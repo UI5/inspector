@@ -239,6 +239,56 @@ describe('AIChat', function () {
                 var container = document.getElementById('ai-messages-container');
                 container.innerHTML.should.contain('<strong>bold</strong>');
             });
+
+            it('should place copy-response-button after message-content for assistant messages', function () {
+                var messageEl = aiChat._addMessage('assistant', 'Some text response');
+                var content = messageEl.querySelector('.message-content');
+                var copyBtn = messageEl.querySelector('.copy-response-button');
+                copyBtn.should.exist;
+                (content.compareDocumentPosition(copyBtn) & Node.DOCUMENT_POSITION_FOLLOWING).should.be.ok;
+            });
+
+            it('should not place copy-response-button inside message-header', function () {
+                var messageEl = aiChat._addMessage('assistant', 'Some text response');
+                var header = messageEl.querySelector('.message-header');
+                (header.querySelector('.copy-response-button') === null).should.be.true;
+            });
+
+            it('should hide copy-response-button when response is only a single code block', function () {
+                var messageEl = aiChat._addMessage('assistant', '```javascript\nvar x = 1;\n```');
+                var copyBtn = messageEl.querySelector('.copy-response-button');
+                (copyBtn === null).should.be.true;
+            });
+
+            it('should hide copy-response-button when response is only a single JSON block', function () {
+                var messageEl = aiChat._addMessage('assistant', '```json\n{"key": "value"}\n```');
+                var copyBtn = messageEl.querySelector('.copy-response-button');
+                (copyBtn === null).should.be.true;
+            });
+
+            it('should show copy-response-button when response has text mixed with code', function () {
+                var messageEl = aiChat._addMessage('assistant', 'Here is an example:\n```javascript\nvar x = 1;\n```');
+                var copyBtn = messageEl.querySelector('.copy-response-button');
+                copyBtn.should.exist;
+            });
+        });
+    });
+
+    describe('Copy button styling', function () {
+        it('copy-code-button inside code-viewer should not have filled background style in HTML', function () {
+            var result = aiChat._renderCodeBlock('var x = 1;', 'javascript');
+            result.should.contain('copy-code-button');
+            result.should.not.contain('background:');
+            result.should.not.contain('background-color:');
+        });
+
+        it('copy-code-button inside json-viewer wrapper should not have inline filled style', function () {
+            var container = document.createElement('div');
+            container.innerHTML = aiChat._createJsonViewer({a: 1});
+            aiChat._initializeJsonViewers(container);
+            var btn = container.querySelector('.copy-code-button');
+            btn.should.exist;
+            (btn.style.backgroundColor === '' || btn.style.backgroundColor === undefined).should.be.true;
         });
     });
 
