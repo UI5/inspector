@@ -180,6 +180,9 @@ function createController(overrides) {
     controller.on('conversation-cleared', function () {
         events.push({ type: 'conversation-cleared' });
     });
+    controller.on('inspection-context-cleared', function () {
+        events.push({ type: 'inspection-context-cleared' });
+    });
 
     return {
         controller: controller,
@@ -552,7 +555,7 @@ describe('AssistantController', function () {
     });
 
     describe('#updateInspectionContext()', function () {
-        it('should inject the selected-control Inspection Context into the next sendUserMessage prompt only', function () {
+        it('should inject the selected-control Inspection Context into every subsequent sendUserMessage prompt until a clearing trigger fires, so the snapshot stays sticky to the selection across multi-turn conversation', function () {
             const harness = createController();
 
             return initializedReady(harness).then(function () {
@@ -568,7 +571,7 @@ describe('AssistantController', function () {
                 }).then(function () {
                     const second = harness.controller.sendUserMessage('And now?');
                     return awaitStreamController(harness.promptClient).then(function (streamCtrl2) {
-                        streamCtrl2.emitChunk('Generic answer');
+                        streamCtrl2.emitChunk('Still a button');
                         streamCtrl2.emitComplete();
                         return second;
                     });
@@ -576,7 +579,8 @@ describe('AssistantController', function () {
                     harness.promptClient.userPromptsByCall.should.have.length(2);
                     harness.promptClient.userPromptsByCall[0].should.contain('Type: sap.m.Button');
                     harness.promptClient.userPromptsByCall[0].should.contain('User Question: Explain this');
-                    harness.promptClient.userPromptsByCall[1].should.equal('And now?');
+                    harness.promptClient.userPromptsByCall[1].should.contain('Type: sap.m.Button');
+                    harness.promptClient.userPromptsByCall[1].should.contain('User Question: And now?');
                 });
             });
         });
@@ -601,6 +605,194 @@ describe('AssistantController', function () {
                         { role: 'assistant', content: 'It is a button' }
                     ]);
                 });
+            });
+        });
+
+        it('should never carry the selected-control snapshot into the session seed messages handed to the Prompt Client, so the snapshot stays out of persisted Conversation Memory and out of the system-prompt-plus-prior-turns prefix', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                harness.controller.updateInspectionContext({
+                    control: { type: 'sap.m.Button', id: 'okButton', properties: { text: 'Save' } }
+                });
+
+                const sendPromise = harness.controller.sendUserMessage('Explain this');
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    streamCtrl.emitChunk('It is a button');
+                    streamCtrl.emitComplete();
+                    return sendPromise;
+                }).then(function () {
+                    // The only seed at this point is the initial one. Re-seed after clearConversation to make sure the snapshot still does not leak.
+                    return harness.controller.clearConversation();
+                }).then(function () {
+                    harness.promptClient.seedMessagesByCall.forEach(function (seed) {
+                        seed.forEach(function (msg) {
+                            JSON.stringify(msg).should.not.contain('sap.m.Button');
+                            JSON.stringify(msg).should.not.contain('okButton');
+                        });
+                    });
+                });
+            });
+        });
+
+        it('should emit inspection-context-cleared exactly once when updateInspectionContext(null) is called with a snapshot attached', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                harness.controller.updateInspectionContext({
+                    control: { type: 'sap.m.Button', id: 'okButton' }
+                });
+
+                harness.controller.updateInspectionContext(null);
+
+                const clearedEvents = harness.events.filter(function (e) {
+                    return e.type === 'inspection-context-cleared';
+                });
+                clearedEvents.should.have.length(1);
+            });
+        });
+
+        it('should not emit inspection-context-cleared when updateInspectionContext(null) is called and no snapshot was attached', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                harness.controller.updateInspectionContext(null);
+
+                const clearedEvents = harness.events.filter(function (e) {
+                    return e.type === 'inspection-context-cleared';
+                });
+                clearedEvents.should.have.length(0);
+            });
+        });
+
+        it('should not emit inspection-context-cleared when one snapshot replaces another, and the next sendUserMessage carries the new snapshot', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                harness.controller.updateInspectionContext({
+                    control: { type: 'sap.m.Button', id: 'btn1' }
+                });
+                harness.controller.updateInspectionContext({
+                    control: { type: 'sap.m.Input', id: 'in1' }
+                });
+
+                const clearedEvents = harness.events.filter(function (e) {
+                    return e.type === 'inspection-context-cleared';
+                });
+                clearedEvents.should.have.length(0);
+
+                const sendPromise = harness.controller.sendUserMessage('Look');
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    streamCtrl.emitChunk('ok');
+                    streamCtrl.emitComplete();
+                    return sendPromise;
+                }).then(function () {
+                    harness.promptClient.userPromptsByCall[0].should.contain('Type: sap.m.Input');
+                    harness.promptClient.userPromptsByCall[0].should.not.contain('Type: sap.m.Button');
+                });
+            });
+        });
+    });
+
+    describe('#clearConversation() and Inspection Context', function () {
+        it('should not touch the Inspection Context — clearing Conversation Memory is orthogonal — so the next sendUserMessage after a clear still carries the selected-control snapshot. Regression test for the originally reported bug.', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                harness.controller.updateInspectionContext({
+                    control: { type: 'sap.m.Button', id: 'okButton' }
+                });
+
+                return harness.controller.clearConversation();
+            }).then(function () {
+                const clearedEvents = harness.events.filter(function (e) {
+                    return e.type === 'inspection-context-cleared';
+                });
+                clearedEvents.should.have.length(0);
+
+                const sendPromise = harness.controller.sendUserMessage('After clear');
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    streamCtrl.emitChunk('ok');
+                    streamCtrl.emitComplete();
+                    return sendPromise;
+                }).then(function () {
+                    harness.promptClient.userPromptsByCall.should.have.length(1);
+                    harness.promptClient.userPromptsByCall[0].should.contain('Type: sap.m.Button');
+                    harness.promptClient.userPromptsByCall[0].should.contain('User Question: After clear');
+                });
+            });
+        });
+
+        it('should not emit inspection-context-cleared when no snapshot is attached', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                return harness.controller.clearConversation();
+            }).then(function () {
+                const clearedEvents = harness.events.filter(function (e) {
+                    return e.type === 'inspection-context-cleared';
+                });
+                clearedEvents.should.have.length(0);
+            });
+        });
+    });
+
+    describe('#setUrl() and Inspection Context', function () {
+        it('should clear the Inspection Context, emit inspection-context-cleared exactly once, and not carry the snapshot into the next sendUserMessage after switching to a different URL', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                harness.controller.updateInspectionContext({
+                    control: { type: 'sap.m.Button', id: 'okButton' }
+                });
+
+                return harness.controller.setUrl('https://other.example.com');
+            }).then(function () {
+                const clearedEvents = harness.events.filter(function (e) {
+                    return e.type === 'inspection-context-cleared';
+                });
+                clearedEvents.should.have.length(1);
+
+                const sendPromise = harness.controller.sendUserMessage('After url change');
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    streamCtrl.emitChunk('ok');
+                    streamCtrl.emitComplete();
+                    return sendPromise;
+                }).then(function () {
+                    harness.promptClient.userPromptsByCall.should.have.length(1);
+                    harness.promptClient.userPromptsByCall[0].should.not.contain('Type: sap.m.Button');
+                    harness.promptClient.userPromptsByCall[0].should.equal('After url change');
+                });
+            });
+        });
+
+        it('should not emit inspection-context-cleared when setUrl is called with the same URL (the dedupe path)', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                harness.controller.updateInspectionContext({
+                    control: { type: 'sap.m.Button', id: 'okButton' }
+                });
+
+                return harness.controller.setUrl('https://example.com');
+            }).then(function () {
+                const clearedEvents = harness.events.filter(function (e) {
+                    return e.type === 'inspection-context-cleared';
+                });
+                clearedEvents.should.have.length(0);
+            });
+        });
+
+        it('should not emit inspection-context-cleared when setUrl changes the URL but no snapshot was attached', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                return harness.controller.setUrl('https://other.example.com');
+            }).then(function () {
+                const clearedEvents = harness.events.filter(function (e) {
+                    return e.type === 'inspection-context-cleared';
+                });
+                clearedEvents.should.have.length(0);
             });
         });
     });

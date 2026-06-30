@@ -31,7 +31,7 @@ function AssistantController({
     this._listeners = {};
     this._currentUrl = null;
     this._conversationMemory = [];
-    this._pendingInspectionContext = null;
+    this._inspectionContext = null;
     this._isStreaming = false;
     // Promise of the most recent in-flight session reseed (initialize, clearConversation,
     // setUrl, downloadModel). `sendUserMessage` awaits this so a Send pressed during a reseed
@@ -45,7 +45,7 @@ function AssistantController({
  * Register a listener.
  *
  * Events: `capability-state-changed`, `conversation-loaded`, `stream-chunk`, `stream-complete`,
- * `stream-failed`, `conversation-cleared`.
+ * `stream-failed`, `conversation-cleared`, `inspection-context-cleared`.
  *
  * In-process event bus, not `chrome.runtime` message dispatch. The cross-process port protocol
  * lives in PromptClient.
@@ -171,15 +171,15 @@ AssistantController.prototype._seedSession = function () {
  * Send a user message: build the prompt, stream the response, persist both turns, and emit stream
  * events.
  *
- * Inspection context is injected only into this prompt — never persisted.
+ * Inspection Context is sticky: the same snapshot is injected into every send until a clearing
+ * trigger (`updateInspectionContext(null)`, `setUrl(differentUrl)`, or a new selection via
+ * `updateInspectionContext(ctx2)`) replaces or detaches it. The snapshot is never persisted.
  *
  * @param {string} userMessage
  * @returns {Promise<{content: string}>}
  */
 AssistantController.prototype.sendUserMessage = function (userMessage) {
-    const contextForThisTurn = this._pendingInspectionContext;
-    this._pendingInspectionContext = null;
-    const formatted = this._promptBuilder.buildUserPrompt(userMessage, contextForThisTurn);
+    const formatted = this._promptBuilder.buildUserPrompt(userMessage, this._inspectionContext);
 
     this._isStreaming = true;
 
@@ -261,6 +261,10 @@ AssistantController.prototype._consumeStream = function (stream) {
  * capability state so the view can refresh state tied to the live session (e.g. the token counter).
  * Same-URL calls are a no-op.
  *
+ * If an Inspection Context snapshot was attached, switching to a different URL drops it (the
+ * previously selected control belongs to the old page) and emits `inspection-context-cleared`
+ * before the reseed.
+ *
  * @param {string} url
  * @returns {Promise<void>|undefined}
  */
@@ -270,6 +274,11 @@ AssistantController.prototype.setUrl = function (url) {
     }
 
     this._currentUrl = url;
+
+    if (this._inspectionContext) {
+        this._inspectionContext = null;
+        this._emit('inspection-context-cleared');
+    }
 
     if (this._capabilityState.status !== 'ready') {
         return Promise.resolve();
@@ -287,13 +296,27 @@ AssistantController.prototype.setUrl = function (url) {
 };
 
 /**
- * Set the inspection context for the next prompt. Consumed once and never persisted. Pass `null` to
- * clear.
+ * Set the Inspection Context for subsequent prompts. The snapshot is sticky — it is reused on
+ * every `sendUserMessage` until one of three clearing triggers fires:
+ *   1. A different control is selected (`updateInspectionContext(ctx2)` replaces it).
+ *   2. The developer explicitly detaches via `updateInspectionContext(null)`.
+ *   3. The inspected page navigates to a different URL (`setUrl(differentUrl)`).
+ *
+ * `updateInspectionContext(null)` emits `inspection-context-cleared` if a snapshot was attached.
+ * Replacing one snapshot with another does not emit the event. Clearing Conversation Memory is
+ * orthogonal — see `clearConversation`.
+ *
+ * The snapshot is never persisted as Conversation Memory.
  *
  * @param {Object} [context] - Inspection context with optional `control` snapshot.
  */
 AssistantController.prototype.updateInspectionContext = function (context) {
-    this._pendingInspectionContext = context || null;
+    const next = context || null;
+    const wasAttached = this._inspectionContext !== null;
+    this._inspectionContext = next;
+    if (next === null && wasAttached) {
+        this._emit('inspection-context-cleared');
+    }
 };
 
 /**

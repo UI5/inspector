@@ -223,6 +223,10 @@ AIChat.prototype._attachControllerListeners = function () {
         this._hasShownUsageWarning = false;
         this._transcript.appendSystemMessage('Chat history cleared');
     });
+
+    this._controller.on('inspection-context-cleared', () => {
+        this._hideContextPill();
+    });
 };
 
 /**
@@ -448,12 +452,27 @@ AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
     }
 };
 
+/**
+ * Detach the Inspection Context. Asks the controller to clear; the pill hides via the
+ * `inspection-context-cleared` event round-trip, not direct DOM access here.
+ * @private
+ */
 AIChat.prototype._clearContext = function () {
     this._controller.updateInspectionContext(null);
-    const contextInfo = document.getElementById('ai-context-info');
-    contextInfo.style.display = 'none';
-
     this._transcript.appendSystemMessage('❌ Context cleared - no control is currently selected');
+};
+
+/**
+ * Hide the "Context: …" pill in response to `inspection-context-cleared` from the controller.
+ * Single source of truth for the hide path; the show path (`updateContext`) writes the pill
+ * directly because it carries data the controller does not re-emit.
+ * @private
+ */
+AIChat.prototype._hideContextPill = function () {
+    const contextInfo = document.getElementById('ai-context-info');
+    if (contextInfo) {
+        contextInfo.style.display = 'none';
+    }
 };
 
 /**

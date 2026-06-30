@@ -296,6 +296,64 @@ describe('AIChat', function () {
         });
     });
 
+    describe('Inspection Context pill', function () {
+        it('should show the pill with control type and id when updateContext is called with a control snapshot', function () {
+            aiChat.updateContext({
+                control: { type: 'sap.m.Button', id: 'okButton' }
+            });
+
+            const pill = document.getElementById('ai-context-info');
+            pill.style.display.should.not.equal('none');
+            pill.querySelector('.context-text').textContent.should.contain('sap.m.Button');
+            pill.querySelector('.context-text').textContent.should.contain('okButton');
+        });
+
+        it('should hide the pill in response to the inspection-context-cleared event, so the controller is the single source of truth for the hide path', function () {
+            aiChat.updateContext({
+                control: { type: 'sap.m.Button', id: 'okButton' }
+            });
+            const pill = document.getElementById('ai-context-info');
+            pill.style.display.should.not.equal('none');
+
+            fakeController.fire('inspection-context-cleared');
+
+            pill.style.display.should.equal('none');
+        });
+
+        it('should ask the controller to clear Inspection Context when the ✕ button is clicked, without writing to the pill DOM directly — the pill hides via the inspection-context-cleared event round-trip', function () {
+            aiChat.updateContext({
+                control: { type: 'sap.m.Button', id: 'okButton' }
+            });
+            const pill = document.getElementById('ai-context-info');
+
+            let calledWith = 'never-called';
+            fakeController.updateInspectionContext = function (ctx) {
+                calledWith = ctx;
+            };
+
+            const clearButton = document.getElementById('ai-context-clear-button');
+            clearButton.click();
+
+            (calledWith === null).should.be.true;
+            // The handler must not have touched the DOM directly. Since we replaced the
+            // controller's updateInspectionContext stub, no event was emitted, so the pill
+            // should still be visible from the prior updateContext call.
+            pill.style.display.should.not.equal('none');
+        });
+
+        it('should not hide the pill on the conversation-cleared event — clearing Conversation Memory is orthogonal to Inspection Context', function () {
+            aiChat.updateContext({
+                control: { type: 'sap.m.Button', id: 'okButton' }
+            });
+            const pill = document.getElementById('ai-context-info');
+            pill.style.display.should.not.equal('none');
+
+            fakeController.fire('conversation-cleared');
+
+            pill.style.display.should.not.equal('none');
+        });
+    });
+
     describe('Assistant Capability State routing', function () {
         it('should route an unmapped Assistant Capability State to the unavailable banner instead of silently dropping it, so a future canonical state never disappears from the developer\'s view', function () {
             fakeController.fire('capability-state-changed', {
