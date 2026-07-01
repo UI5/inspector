@@ -1695,6 +1695,9 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
   background-color: rgba(98, 98, 98, 0.1);
   border-radius: 4px;
 }
+.token-counter[hidden] {
+  display: none;
+}
 .token-counter.warning {
   color: #FBBF24;
   background-color: rgba(251, 191, 36, 0.1);

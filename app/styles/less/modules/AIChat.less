@@ -508,6 +508,10 @@
     background-color: fade(@gray, 10%);
     border-radius: 4px;
 
+    &[hidden] {
+        display: none;
+    }
+
     &.warning {
         color: @amber;
         background-color: fade(@amber, 10%);

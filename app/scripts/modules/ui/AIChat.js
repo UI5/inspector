@@ -42,6 +42,11 @@ function AIChat(containerId, {
     this._isStreaming = false;
     this._streamingHandle = null;
     this._hasShownUsageWarning = false;
+    // Gate for the token counter and Clear History button. Both are hidden while the conversation
+    // is empty, so the post-clear state matches the pristine fresh-load state. Flipped true on
+    // send, `stream-complete`, and `conversation-loaded` with a non-empty transcript; flipped
+    // false on `conversation-cleared`.
+    this._hasMessages = false;
 
     this.init();
 }
@@ -101,7 +106,7 @@ AIChat.prototype._render = function () {
                     </button>
                 </div>
                 <div class="input-footer">
-                    <span class="token-counter" id="ai-token-counter" role="status" aria-live="polite"></span>
+                    <span class="token-counter" id="ai-token-counter" role="status" aria-live="polite" hidden></span>
                 </div>
             </div>
 
@@ -198,6 +203,7 @@ AIChat.prototype._attachControllerListeners = function () {
     this._controller.on('conversation-loaded', (turns) => {
         this._transcript.reset(turns || []);
         if (turns && turns.length > 0) {
+            this._hasMessages = true;
             const clearButton = document.getElementById('ai-clear-history-button');
             if (clearButton) {
                 clearButton.style.display = 'inline-block';
@@ -217,6 +223,7 @@ AIChat.prototype._attachControllerListeners = function () {
             this._streamingHandle = null;
         }
         this._isStreaming = false;
+        this._hasMessages = true;
         this._updateTokenCounter();
     });
 
@@ -229,6 +236,14 @@ AIChat.prototype._attachControllerListeners = function () {
     this._controller.on('conversation-cleared', () => {
         this._transcript.clear();
         this._hasShownUsageWarning = false;
+        this._hasMessages = false;
+        // Match the fresh-load state: hide the Clear History button, and let _updateTokenCounter()
+        // re-hide the token counter through the new empty-conversation gate.
+        const clearButton = document.getElementById('ai-clear-history-button');
+        if (clearButton) {
+            clearButton.style.display = 'none';
+        }
+        this._updateTokenCounter();
     });
 
     this._controller.on('inspection-context-cleared', () => {
@@ -275,8 +290,12 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
     this._renderCapabilityBanner(status, state);
 
     if (config.showClearButton) {
+        // A `ready` state after a post-clear reseed must not re-reveal the button over an empty
+        // transcript; gate it on the empty-conversation signal. `session-failed` still forces
+        // the button visible for recovery — clearConversation destroys the broken session and
+        // reseeds, so the affordance is useful even without stored turns.
         const clearButton = document.getElementById('ai-clear-history-button');
-        if (clearButton) {
+        if (clearButton && (status !== 'ready' || this._hasMessages)) {
             clearButton.style.display = 'inline-block';
         }
     }
@@ -332,6 +351,14 @@ AIChat.prototype._handleSendMessage = function () {
     document.getElementById('ai-send-button').disabled = true;
 
     this._transcript.appendUserTurn(userMessage);
+    this._hasMessages = true;
+    // Reveal the Clear History button now that the conversation has content. The button is
+    // hidden on `conversation-cleared` and gated out of the `ready` capability state's show
+    // path while `_hasMessages` is false, so this send is the moment it becomes relevant.
+    const clearButton = document.getElementById('ai-clear-history-button');
+    if (clearButton) {
+        clearButton.style.display = 'inline-block';
+    }
 
     this._isStreaming = true;
     this._streamingHandle = this._transcript.beginAssistantTurn();
@@ -419,6 +446,17 @@ AIChat.prototype._updateTokenCounter = function () {
         return;
     }
 
+    // Empty-conversation gate: both the token counter and Clear History button are hidden while
+    // there are no messages, so the post-clear state matches the fresh-load state. The gate is
+    // driven by `_hasMessages`, which flips on send, `stream-complete`, and non-empty
+    // `conversation-loaded`, and flips back on `conversation-cleared`.
+    if (!this._hasMessages) {
+        counter.textContent = '';
+        counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
+        counter.hidden = true;
+        return;
+    }
+
     this._controller.getUsageInfo().then((usageInfo) => {
         if (usageInfo) {
             counter.textContent = 'Tokens: ' + usageInfo.inputUsage + '/' + usageInfo.inputQuota + ' (' + usageInfo.percentUsed + '%)';
@@ -436,12 +474,14 @@ AIChat.prototype._updateTokenCounter = function () {
                 counter.classList.add('warning');
             }
 
+            counter.hidden = false;
             this._checkTokenUsageWarning(usageInfo.percentUsed);
-        } else {
-            counter.textContent = '';
         }
+        // Null usage in a non-empty conversation: no-op. An already-visible pill retains its
+        // last valid text and state class rather than flickering off between messages. If the
+        // pill is still hidden from the empty-conversation gate, a null result leaves it hidden.
     }, () => {
-        counter.textContent = '';
+        // Rejected usage refresh: same no-op policy as null. Do not flicker the pill off.
     });
 };
 

@@ -519,7 +519,14 @@ describe('AIChat', function () {
                 return Promise.resolve({inputUsage: 700, inputQuota: 1000, percentUsed: 75});
             };
 
-            // Two ready transitions to prove the warning appends at most once.
+            // Send a message first — the counter is gated on there being messages in the
+            // transcript. Then fire two ready transitions to prove the warning appends at most once.
+            const input = document.getElementById('ai-input');
+            input.value = 'q';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+            fakeController.fire('stream-complete', {content: 'a'});
+
             fakeController.fire('capability-state-changed', {
                 status: 'ready', message: 'ready', progress: 0
             });
@@ -532,6 +539,188 @@ describe('AIChat', function () {
                     return c.type === 'appendSystemMessage' && c.message.indexOf('token limit') !== -1;
                 });
                 warnings.length.should.equal(1);
+            });
+        });
+    });
+
+    describe('Empty-conversation gating for token counter and Clear History button', function () {
+        it('should render the token counter with the semantic hidden attribute on a fresh load, so the pill is absent from the input footer until there is a message to account for', function () {
+            const counter = document.getElementById('ai-token-counter');
+            counter.hasAttribute('hidden').should.be.true;
+        });
+
+        it('should preserve the token counter\'s role and aria-live attributes so screen-reader announcement behaviour is not regressed by the hide gate', function () {
+            const counter = document.getElementById('ai-token-counter');
+            counter.getAttribute('role').should.equal('status');
+            counter.getAttribute('aria-live').should.equal('polite');
+        });
+
+        it('should keep the token counter hidden after a ready capability state with null usage info in an empty conversation, so a pristine panel does not paint an empty pill', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                const counter = document.getElementById('ai-token-counter');
+                counter.hasAttribute('hidden').should.be.true;
+                counter.textContent.should.equal('');
+            });
+        });
+
+        it('should reveal the Clear History button as soon as the user sends the first message, so it is available alongside the assistant response rather than only after the reseed', function () {
+            const clearButton = document.getElementById('ai-clear-history-button');
+            clearButton.style.display.should.equal('none');
+
+            const input = document.getElementById('ai-input');
+            input.value = 'first';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+
+            clearButton.style.display.should.not.equal('none');
+        });
+
+        it('should reveal the token counter after the assistant stream completes for the first user turn, so the developer sees usage numbers alongside the first response', function () {
+            fakeController.getUsageInfo = function () {
+                return Promise.resolve({inputUsage: 100, inputQuota: 1000, percentUsed: 10});
+            };
+
+            const input = document.getElementById('ai-input');
+            input.value = 'hi';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+
+            fakeController.fire('stream-complete', {content: 'hello'});
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                const counter = document.getElementById('ai-token-counter');
+                counter.hasAttribute('hidden').should.be.false;
+                counter.textContent.should.contain('100');
+            });
+        });
+
+        it('should hide the token counter and the Clear History button on conversation-cleared, so the post-clear state matches the fresh-load state', function () {
+            // Seed a non-empty conversation with visible pill and clear button.
+            fakeController.getUsageInfo = function () {
+                return Promise.resolve({inputUsage: 100, inputQuota: 1000, percentUsed: 10});
+            };
+            fakeController.fire('conversation-loaded', [{role: 'user', content: 'hi'}]);
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                const counter = document.getElementById('ai-token-counter');
+                const clearButton = document.getElementById('ai-clear-history-button');
+                counter.hasAttribute('hidden').should.be.false;
+                clearButton.style.display.should.not.equal('none');
+
+                // Now clear. Post-clear a capability-state ready may still arrive due to reseed;
+                // include one to prove the ready path is a no-op for an empty conversation.
+                fakeController.fire('conversation-cleared');
+                fakeController.fire('capability-state-changed', {
+                    status: 'ready', message: 'ready', progress: 0
+                });
+
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                const counter = document.getElementById('ai-token-counter');
+                const clearButton = document.getElementById('ai-clear-history-button');
+                counter.hasAttribute('hidden').should.be.true;
+                counter.textContent.should.equal('');
+                clearButton.style.display.should.equal('none');
+            });
+        });
+
+        it('should reveal the token counter and Clear History button again when a new message is sent after a clear, so the panel recovers to the active-conversation state', function () {
+            fakeController.getUsageInfo = function () {
+                return Promise.resolve({inputUsage: 50, inputQuota: 1000, percentUsed: 5});
+            };
+
+            fakeController.fire('conversation-cleared');
+
+            const input = document.getElementById('ai-input');
+            input.value = 'again';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+            fakeController.fire('stream-complete', {content: 'ok'});
+            // After clear + reseed, the controller re-broadcasts `ready`; that is the existing
+            // show point for the Clear History button. Firing it here matches the runtime flow.
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                const counter = document.getElementById('ai-token-counter');
+                const clearButton = document.getElementById('ai-clear-history-button');
+                counter.hasAttribute('hidden').should.be.false;
+                clearButton.style.display.should.not.equal('none');
+            });
+        });
+
+        it('should reveal the token counter once usage info resolves for a restored non-empty conversation, so a warm start shows the same widgets as a live session', function () {
+            fakeController.getUsageInfo = function () {
+                return Promise.resolve({inputUsage: 200, inputQuota: 1000, percentUsed: 20});
+            };
+
+            fakeController.fire('conversation-loaded', [
+                {role: 'user', content: 'q'},
+                {role: 'assistant', content: 'a'}
+            ]);
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                const counter = document.getElementById('ai-token-counter');
+                counter.hasAttribute('hidden').should.be.false;
+                counter.textContent.should.contain('200');
+            });
+        });
+
+        it('should leave the token counter and Clear History button hidden when a restored conversation is empty, so warm-starting an empty store looks identical to a fresh load', function () {
+            fakeController.fire('conversation-loaded', []);
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                const counter = document.getElementById('ai-token-counter');
+                const clearButton = document.getElementById('ai-clear-history-button');
+                counter.hasAttribute('hidden').should.be.true;
+                clearButton.style.display.should.equal('none');
+            });
+        });
+
+        it('should not flicker the token counter off mid-stream when a usage-info refresh briefly returns null, so the last valid pill stays visible until the next successful update', function () {
+            let usageQueue = [
+                {inputUsage: 100, inputQuota: 1000, percentUsed: 10},
+                null
+            ];
+            fakeController.getUsageInfo = function () {
+                return Promise.resolve(usageQueue.shift());
+            };
+
+            const input = document.getElementById('ai-input');
+            input.value = 'q';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+            fakeController.fire('stream-complete', {content: 'a'});
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                const counter = document.getElementById('ai-token-counter');
+                counter.hasAttribute('hidden').should.be.false;
+                counter.textContent.should.contain('100');
+
+                // Second refresh: usage briefly null (stale/unavailable). Pill must not flicker off.
+                fakeController.fire('capability-state-changed', {
+                    status: 'ready', message: 'ready', progress: 0
+                });
+
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                const counter = document.getElementById('ai-token-counter');
+                counter.hasAttribute('hidden').should.be.false;
+                counter.textContent.should.contain('100');
             });
         });
     });
