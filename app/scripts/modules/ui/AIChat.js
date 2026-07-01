@@ -17,15 +17,18 @@ const AssistantTranscript = require('../ai/AssistantTranscript.js');
  * @param {Function} [options.getAppInfo] - Returns the UI5 metadata snapshot for PromptBuilder.
  * @param {AssistantController} [options.controller] - Pre-built controller for tests. Defaults to a
  *                                                     fresh AssistantController.
- * @param {Function} [options.transcriptFactory] - Test seam: `(container) => AssistantTranscript`.
- *                                                 Defaults to a real AssistantTranscript.
+ * @param {Function} [options.transcriptFactory] - Test seam: `(container, options) => AssistantTranscript`.
+ *                                                 Defaults to a real AssistantTranscript. The view
+ *                                                 passes `{ onCopyFailed }` so the transcript can
+ *                                                 notify the view of clipboard failures without
+ *                                                 knowing about the input area or error UI.
  * @constructor
  */
 function AIChat(containerId, {
     getAppInfo = null,
     controller = null,
-    transcriptFactory = function (host) {
-        return new AssistantTranscript(host);
+    transcriptFactory = function (host, options) {
+        return new AssistantTranscript(host, options);
     }
 } = {}) {
     this._container = document.getElementById(containerId);
@@ -45,7 +48,9 @@ function AIChat(containerId, {
 
 AIChat.prototype.init = function () {
     this._render();
-    this._transcript = this._transcriptFactory(document.getElementById('ai-messages-container'));
+    this._transcript = this._transcriptFactory(document.getElementById('ai-messages-container'), {
+        onCopyFailed: () => { this._showError('Failed to copy to clipboard'); }
+    });
     this._attachEventListeners();
     this._attachControllerListeners();
     this._checkModelAvailability();
@@ -82,6 +87,7 @@ AIChat.prototype._render = function () {
                     <span class="context-text"></span>
                     <button class="context-clear-button" id="ai-context-clear-button" title="Clear context" aria-label="Clear context">×</button>
                 </div>
+                <div class="ai-error-slot" id="ai-error-slot" role="status" aria-live="polite" hidden></div>
                 <div class="input-wrapper">
                     <input
                         type="text"
@@ -126,6 +132,7 @@ AIChat.prototype._attachEventListeners = function () {
     });
 
     input.addEventListener('keydown', (e) => {
+        this._clearError();
         if (e.key === 'Enter') {
             e.preventDefault();
             this._handleSendMessage();
@@ -133,6 +140,7 @@ AIChat.prototype._attachEventListeners = function () {
     });
 
     input.addEventListener('input', () => {
+        this._clearError();
         const hasText = input.value.trim().length > 0;
         const canSend = hasText && !this._isStreaming;
         sendButton.disabled = !canSend;
@@ -215,13 +223,12 @@ AIChat.prototype._attachControllerListeners = function () {
     this._controller.on('stream-failed', (err) => {
         this._isStreaming = false;
         this._streamingHandle = null;
-        this._transcript.appendSystemMessage('Error: ' + (err && err.message ? err.message : 'streaming failed'));
+        this._showError('Error: ' + (err && err.message ? err.message : 'streaming failed'));
     });
 
     this._controller.on('conversation-cleared', () => {
         this._transcript.clear();
         this._hasShownUsageWarning = false;
-        this._transcript.appendSystemMessage('Chat history cleared');
     });
 
     this._controller.on('inspection-context-cleared', () => {
@@ -319,6 +326,8 @@ AIChat.prototype._handleSendMessage = function () {
         return;
     }
 
+    this._clearError();
+
     input.value = '';
     document.getElementById('ai-send-button').disabled = true;
 
@@ -359,7 +368,7 @@ AIChat.prototype._hideConfirmDialog = function () {
 
 AIChat.prototype._performClearHistory = function () {
     this._controller.clearConversation().catch((error) => {
-        this._transcript.appendSystemMessage('Error clearing history: ' + (error && error.message ? error.message : error));
+        this._showError('Error clearing history: ' + (error && error.message ? error.message : error));
     });
 };
 
@@ -454,12 +463,12 @@ AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
 
 /**
  * Detach the Inspection Context. Asks the controller to clear; the pill hides via the
- * `inspection-context-cleared` event round-trip, not direct DOM access here.
+ * `inspection-context-cleared` event round-trip, not direct DOM access here. No confirmation
+ * message is injected into the transcript — the pill disappearing is the confirmation.
  * @private
  */
 AIChat.prototype._clearContext = function () {
     this._controller.updateInspectionContext(null);
-    this._transcript.appendSystemMessage('❌ Context cleared - no control is currently selected');
 };
 
 /**
@@ -503,6 +512,38 @@ AIChat.prototype.onTabActivated = function () {
  */
 AIChat.prototype.setUrl = function (url) {
     this._controller.setUrl(url);
+};
+
+/**
+ * Show a transient error above the input in the inline error slot. Replaces any currently visible
+ * error — the slot is a single-line status area, not a stack. The slot uses `role="status"` and
+ * `aria-live="polite"` so screen readers announce the change without interrupting.
+ *
+ * Errors auto-clear on the next input activity (typing, keydown, send). No dismiss button, no
+ * timer.
+ * @private
+ * @param {string} message
+ */
+AIChat.prototype._showError = function (message) {
+    const slot = document.getElementById('ai-error-slot');
+    if (!slot) {
+        return;
+    }
+    slot.textContent = message;
+    slot.hidden = false;
+};
+
+/**
+ * Empty and hide the inline error slot. Called on input activity and before starting a new send.
+ * @private
+ */
+AIChat.prototype._clearError = function () {
+    const slot = document.getElementById('ai-error-slot');
+    if (!slot) {
+        return;
+    }
+    slot.textContent = '';
+    slot.hidden = true;
 };
 
 AIChat.prototype.destroy = function () {

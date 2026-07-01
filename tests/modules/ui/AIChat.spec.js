@@ -34,11 +34,13 @@ function createFakeController() {
 }
 
 /**
- * Fake {@link AssistantTranscript}. Records every call from the view.
+ * Fake {@link AssistantTranscript}. Records every call from the view. Captures the
+ * `onCopyFailed` callback the view injects, so tests can simulate a clipboard failure that
+ * originates inside the transcript.
  * @returns {{calls: Array, appendUserTurn: Function,
  *           appendSystemMessage: Function, beginAssistantTurn: Function,
  *           clear: Function, reset: Function, scrollToBottom: Function,
- *           destroy: Function}}
+ *           destroy: Function, onCopyFailed: (Function|null)}}
  */
 function createFakeTranscript() {
     const calls = [];
@@ -48,6 +50,7 @@ function createFakeTranscript() {
     };
     return {
         calls: calls,
+        onCopyFailed: null,
         appendUserTurn: function (c) { calls.push({type: 'appendUserTurn', content: c}); },
         appendSystemMessage: function (m) { calls.push({type: 'appendSystemMessage', message: m}); },
         beginAssistantTurn: function () {
@@ -74,7 +77,12 @@ describe('AIChat', function () {
         aiChat = new AIChat('ai-chat', {
             getAppInfo: function () { return null; },
             controller: fakeController,
-            transcriptFactory: function () { return fakeTranscript; }
+            transcriptFactory: function (host, options) {
+                if (options && typeof options.onCopyFailed === 'function') {
+                    fakeTranscript.onCopyFailed = options.onCopyFailed;
+                }
+                return fakeTranscript;
+            }
         });
     });
 
@@ -183,7 +191,7 @@ describe('AIChat', function () {
             finalizeCalls[0].content.should.equal('full response');
         });
 
-        it('should surface a streaming failure as a transcript system message instead of rendering its own error DOM', function () {
+        it('should surface a streaming failure in the inline error slot above the input, not as a transcript system message, so the developer sees the error near the action that failed', function () {
             const input = document.getElementById('ai-input');
             input.value = 'q';
             input.dispatchEvent(new Event('input'));
@@ -192,8 +200,12 @@ describe('AIChat', function () {
             fakeController.fire('stream-failed', new Error('boom'));
 
             const systemMessages = fakeTranscript.calls.filter(function (c) { return c.type === 'appendSystemMessage'; });
-            systemMessages.length.should.equal(1);
-            systemMessages[0].message.should.contain('boom');
+            systemMessages.length.should.equal(0);
+
+            const slot = document.getElementById('ai-error-slot');
+            slot.should.exist;
+            slot.hasAttribute('hidden').should.be.false;
+            slot.textContent.should.contain('boom');
         });
     });
 
@@ -210,14 +222,13 @@ describe('AIChat', function () {
             resetCalls[0].turns.should.equal(turns);
         });
 
-        it('should clear the transcript and then append a "cleared" system message when the controller emits conversation-cleared, so the developer sees both the empty state and an explanatory note', function () {
+        it('should clear the transcript when the controller emits conversation-cleared, without appending any confirmation system message — the empty transcript is the confirmation', function () {
             fakeController.fire('conversation-cleared');
 
             const clearCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'clear'; });
             const systemCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'appendSystemMessage'; });
             clearCalls.length.should.equal(1);
-            systemCalls.length.should.equal(1);
-            systemCalls[0].message.should.contain('cleared');
+            systemCalls.length.should.equal(0);
         });
 
         it('should scroll the transcript to the bottom when the tab is activated, so the developer sees the most recent turn without scrolling manually', function () {
@@ -320,7 +331,7 @@ describe('AIChat', function () {
             pill.style.display.should.equal('none');
         });
 
-        it('should ask the controller to clear Inspection Context when the ✕ button is clicked, without writing to the pill DOM directly — the pill hides via the inspection-context-cleared event round-trip', function () {
+        it('should ask the controller to clear Inspection Context when the ✕ button is clicked, without writing to the pill DOM directly — the pill hides via the inspection-context-cleared event round-trip — and without appending any confirmation system message', function () {
             aiChat.updateContext({
                 control: { type: 'sap.m.Button', id: 'okButton' }
             });
@@ -339,6 +350,10 @@ describe('AIChat', function () {
             // controller's updateInspectionContext stub, no event was emitted, so the pill
             // should still be visible from the prior updateContext call.
             pill.style.display.should.not.equal('none');
+
+            // No confirmation system message: the pill hiding is itself the confirmation.
+            const systemCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'appendSystemMessage'; });
+            systemCalls.length.should.equal(0);
         });
 
         it('should not hide the pill on the conversation-cleared event — clearing Conversation Memory is orthogonal to Inspection Context', function () {
@@ -518,6 +533,110 @@ describe('AIChat', function () {
                 });
                 warnings.length.should.equal(1);
             });
+        });
+    });
+
+    describe('Inline error slot', function () {
+        it('should render an inline error slot inside the input area, hidden by default with role=status and aria-live=polite, so screen readers announce errors non-interruptively when they appear', function () {
+            const slot = document.getElementById('ai-error-slot');
+            slot.should.exist;
+            slot.getAttribute('role').should.equal('status');
+            slot.getAttribute('aria-live').should.equal('polite');
+            slot.hasAttribute('hidden').should.be.true;
+            slot.textContent.should.equal('');
+        });
+
+        it('should place the inline error slot between the context-info pill and the input row inside the input area, so errors surface directly above the input that produced them', function () {
+            const inputArea = document.querySelector('.ai-input-area');
+            const slot = document.getElementById('ai-error-slot');
+            const inputWrapper = inputArea.querySelector('.input-wrapper');
+            const contextInfo = document.getElementById('ai-context-info');
+
+            slot.parentElement.should.equal(inputArea);
+            // Order: context-info first, then error slot, then input-wrapper. Assert with
+            // DOCUMENT_POSITION_FOLLOWING (0x04): X.compareDocumentPosition(Y) & FOLLOWING is truthy
+            // when Y follows X in document order.
+            /* eslint-disable no-bitwise */
+            (contextInfo.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).should.not.equal(0);
+            (slot.compareDocumentPosition(inputWrapper) & Node.DOCUMENT_POSITION_FOLLOWING).should.not.equal(0);
+            /* eslint-enable no-bitwise */
+        });
+
+        it('should reveal the inline error slot with a rejected clearConversation error message and never route that failure into the transcript', function () {
+            fakeController.clearConversation = function () {
+                return Promise.reject(new Error('store locked'));
+            };
+
+            aiChat._performClearHistory();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                const slot = document.getElementById('ai-error-slot');
+                slot.hasAttribute('hidden').should.be.false;
+                slot.textContent.should.contain('store locked');
+
+                const systemCalls = fakeTranscript.calls.filter(function (c) { return c.type === 'appendSystemMessage'; });
+                systemCalls.length.should.equal(0);
+            });
+        });
+
+        it('should reveal the inline error slot when the transcript reports a clipboard-copy failure via the injected onCopyFailed callback, so the failure surfaces at the input area instead of polluting the transcript', function () {
+            (typeof fakeTranscript.onCopyFailed).should.equal('function');
+
+            fakeTranscript.onCopyFailed();
+
+            const slot = document.getElementById('ai-error-slot');
+            slot.hasAttribute('hidden').should.be.false;
+            slot.textContent.should.contain('Failed to copy');
+        });
+
+        it('should clear a visible inline error when the developer resumes typing into the send input, so a stale error does not linger during the next action', function () {
+            fakeController.fire('stream-failed', new Error('boom'));
+            const slot = document.getElementById('ai-error-slot');
+            slot.hasAttribute('hidden').should.be.false;
+
+            const input = document.getElementById('ai-input');
+            input.value = 'x';
+            input.dispatchEvent(new Event('input'));
+
+            slot.hasAttribute('hidden').should.be.true;
+            slot.textContent.should.equal('');
+        });
+
+        it('should clear a visible inline error on any keydown in the send input, so pressing modifier or navigation keys also dismisses the stale error', function () {
+            fakeController.fire('stream-failed', new Error('boom'));
+            const slot = document.getElementById('ai-error-slot');
+            slot.hasAttribute('hidden').should.be.false;
+
+            const input = document.getElementById('ai-input');
+            const evt = new Event('keydown');
+            evt.key = 'a';
+            input.dispatchEvent(evt);
+
+            slot.hasAttribute('hidden').should.be.true;
+        });
+
+        it('should clear a visible inline error when the developer sends a new message, so retrying via Send starts from a clean state', function () {
+            fakeController.fire('stream-failed', new Error('boom'));
+            const slot = document.getElementById('ai-error-slot');
+            slot.hasAttribute('hidden').should.be.false;
+
+            const input = document.getElementById('ai-input');
+            input.value = 'retry';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+
+            slot.hasAttribute('hidden').should.be.true;
+        });
+
+        it('should replace the currently visible inline error message when a new failure arrives, so only the latest status is shown (single-line, no stacking)', function () {
+            fakeController.fire('stream-failed', new Error('first'));
+            const slot = document.getElementById('ai-error-slot');
+            slot.textContent.should.contain('first');
+
+            fakeController.fire('stream-failed', new Error('second'));
+
+            slot.textContent.should.contain('second');
+            slot.textContent.should.not.contain('first');
         });
     });
 });

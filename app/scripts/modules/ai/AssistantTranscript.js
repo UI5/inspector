@@ -15,6 +15,10 @@
  * @param {number} [options.maxJsonDepth=10] - Max depth before the JSON viewer renders a "max depth
  *                 reached" sentinel.
  * @param {number} [options.streamDebounceMs=50] - Coalescing interval for streaming renders.
+ * @param {Function} [options.onCopyFailed] - Notification callback for clipboard-copy failures. The
+ *                 transcript does not know about the input area or any error UI, so the failure is
+ *                 surfaced upward for the view to display. No payload; the message is fixed and
+ *                 belongs to the presenter.
  * @constructor
  */
 function AssistantTranscript(container, options = {}) {
@@ -24,6 +28,7 @@ function AssistantTranscript(container, options = {}) {
     this._container = container;
     this._maxJsonDepth = typeof options.maxJsonDepth === 'number' ? options.maxJsonDepth : 10;
     this._streamDebounceMs = typeof options.streamDebounceMs === 'number' ? options.streamDebounceMs : 50;
+    this._onCopyFailed = typeof options.onCopyFailed === 'function' ? options.onCopyFailed : null;
     this._renderEmptyState();
 }
 
@@ -456,7 +461,9 @@ AssistantTranscript.prototype._renderCodeBlock = function (code, lang) {
  * Copy text to the clipboard via execCommand. The DevTools panel may not have user-activation
  * context for the async Clipboard API, so the legacy path is used.
  *
- * On failure, appends an inline system message.
+ * On failure, notifies the injected `onCopyFailed` callback so the view can surface an inline
+ * error. The transcript itself does not render any error DOM — clipboard failures are not
+ * conversation turns.
  * @private
  */
 AssistantTranscript.prototype._copyToClipboard = function (text, button) {
@@ -489,8 +496,8 @@ AssistantTranscript.prototype._copyToClipboard = function (text, button) {
             button.textContent = originalText;
             button.disabled = false;
         }, 1500);
-    } else {
-        this.appendSystemMessage('Failed to copy to clipboard');
+    } else if (this._onCopyFailed) {
+        this._onCopyFailed();
     }
 };
 

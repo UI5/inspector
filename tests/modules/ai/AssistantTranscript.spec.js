@@ -211,8 +211,39 @@ describe('AssistantTranscript', function () {
     });
 
     describe('Copy-button failure handling', function () {
-        it('should append a "Failed to copy to clipboard" system message when the underlying copy command reports failure, so a denied or unsupported clipboard environment is not silently swallowed', function () {
-            // Force execCommand to return false to simulate a denied copy. The transcript must surface the failure as a system message.
+        it('should invoke the injected onCopyFailed callback when the underlying copy command reports failure, so the transcript notifies the view without appending a fake system-role turn', function () {
+            // Force execCommand to return false to simulate a denied copy. The transcript must notify the view via callback, not the transcript DOM.
+            const originalExecCommand = document.execCommand;
+            document.execCommand = function () { return false; };
+
+            let callbackInvoked = false;
+            const localContainer = document.createElement('div');
+            fixtures.appendChild(localContainer);
+            const localTranscript = new AssistantTranscript(localContainer, {
+                onCopyFailed: function () { callbackInvoked = true; }
+            });
+
+            try {
+                const handle = localTranscript.beginAssistantTurn();
+                handle.finalize('an answer');
+
+                const copyButton = localContainer.querySelector('.copy-response-button');
+                copyButton.should.exist;
+                copyButton.click();
+
+                callbackInvoked.should.be.true;
+                // Failure must NOT be surfaced as a transcript system message anymore.
+                (localContainer.querySelector('.message-system') === null).should.be.true;
+                localContainer.innerHTML.should.not.contain('Failed to copy to clipboard');
+            } finally {
+                document.execCommand = originalExecCommand;
+                if (typeof localTranscript.destroy === 'function') {
+                    localTranscript.destroy();
+                }
+            }
+        });
+
+        it('should not throw when copy fails and no onCopyFailed callback was supplied, so the transcript keeps working in environments that do not care about surfacing the failure', function () {
             const originalExecCommand = document.execCommand;
             document.execCommand = function () { return false; };
 
@@ -221,11 +252,10 @@ describe('AssistantTranscript', function () {
                 handle.finalize('an answer');
 
                 const copyButton = container.querySelector('.copy-response-button');
-                copyButton.should.exist;
-                copyButton.click();
+                (function () { copyButton.click(); }).should.not.throw();
 
-                container.querySelector('.message-system').should.exist;
-                container.innerHTML.should.contain('Failed to copy to clipboard');
+                // Even without a callback, no system-role message must be appended.
+                (container.querySelector('.message-system') === null).should.be.true;
             } finally {
                 document.execCommand = originalExecCommand;
             }

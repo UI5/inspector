@@ -434,6 +434,20 @@
     align-items: flex-end;
 }
 
+// Inline error slot: muted red single-line status placed above the input row for transient
+// action failures (streaming failure, clear-history failure, clipboard failure). Hidden until an
+// error is set; hides again on the next input activity. Not a banner — no border, no background.
+.ai-error-slot {
+    color: @red-saturated;
+    font-size: 12px;
+    line-height: 1.4;
+    padding: 4px 4px 6px;
+
+    &[hidden] {
+        display: none;
+    }
+}
+
 .ai-input {
     flex: 1;
     padding: 10px 12px;
