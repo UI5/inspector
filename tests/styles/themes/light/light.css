@@ -1633,6 +1633,15 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
   gap: 8px;
   align-items: flex-end;
 }
+.ai-error-slot {
+  color: #C80000;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 4px 4px 6px;
+}
+.ai-error-slot[hidden] {
+  display: none;
+}
 .ai-input {
   flex: 1;
   padding: 10px 12px;
