@@ -15,10 +15,8 @@
  * @param {number} [options.maxJsonDepth=10] - Max depth before the JSON viewer renders a "max depth
  *                 reached" sentinel.
  * @param {number} [options.streamDebounceMs=50] - Coalescing interval for streaming renders.
- * @param {Function} [options.onCopyFailed] - Notification callback for clipboard-copy failures. The
- *                 transcript does not know about the input area or any error UI, so the failure is
- *                 surfaced upward for the view to display. No payload; the message is fixed and
- *                 belongs to the presenter.
+ * @param {Function} [options.onCopyFailed] - Called when a clipboard copy fails. The transcript
+ *                 does not render error UI; the view surfaces the failure.
  * @constructor
  */
 function AssistantTranscript(container, options = {}) {
@@ -458,12 +456,8 @@ AssistantTranscript.prototype._renderCodeBlock = function (code, lang) {
 };
 
 /**
- * Copy text to the clipboard via execCommand. The DevTools panel may not have user-activation
- * context for the async Clipboard API, so the legacy path is used.
- *
- * On failure, notifies the injected `onCopyFailed` callback so the view can surface an inline
- * error. The transcript itself does not render any error DOM — clipboard failures are not
- * conversation turns.
+ * Copy text to the clipboard via execCommand. The DevTools panel may lack user-activation for the
+ * async Clipboard API, so the legacy path is used. On failure, invokes `onCopyFailed`.
  * @private
  */
 AssistantTranscript.prototype._copyToClipboard = function (text, button) {

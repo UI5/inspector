@@ -18,10 +18,8 @@ const AssistantTranscript = require('../ai/AssistantTranscript.js');
  * @param {AssistantController} [options.controller] - Pre-built controller for tests. Defaults to a
  *                                                     fresh AssistantController.
  * @param {Function} [options.transcriptFactory] - Test seam: `(container, options) => AssistantTranscript`.
- *                                                 Defaults to a real AssistantTranscript. The view
- *                                                 passes `{ onCopyFailed }` so the transcript can
- *                                                 notify the view of clipboard failures without
- *                                                 knowing about the input area or error UI.
+ *                                                 Wired with `{ onCopyFailed }` so the transcript
+ *                                                 can report clipboard failures back to the view.
  * @constructor
  */
 function AIChat(containerId, {
@@ -42,10 +40,7 @@ function AIChat(containerId, {
     this._isStreaming = false;
     this._streamingHandle = null;
     this._hasShownUsageWarning = false;
-    // Gate for the token counter and Clear History button. Both are hidden while the conversation
-    // is empty, so the post-clear state matches the pristine fresh-load state. Flipped true on
-    // send, `stream-complete`, and `conversation-loaded` with a non-empty transcript; flipped
-    // false on `conversation-cleared`.
+    // Both the token counter and Clear History button are hidden while no messages exist.
     this._hasMessages = false;
 
     this.init();
@@ -237,8 +232,6 @@ AIChat.prototype._attachControllerListeners = function () {
         this._transcript.clear();
         this._hasShownUsageWarning = false;
         this._hasMessages = false;
-        // Match the fresh-load state: hide the Clear History button, and let _updateTokenCounter()
-        // re-hide the token counter through the new empty-conversation gate.
         const clearButton = document.getElementById('ai-clear-history-button');
         if (clearButton) {
             clearButton.style.display = 'none';
@@ -263,9 +256,9 @@ AIChat._CAPABILITY_CONFIG = {
     'downloadable':     {},
     'downloading':      {},
     'ready':            { showClearButton: true, updateTokens: true },
-    // Clear-history is the recovery: ConversationStore.clear() destroys the broken session and the controller reseeds. Show the button.
+    // Recovery: clearConversation destroys the broken session and reseeds.
     'session-failed':   { showClearButton: true },
-    // streaming-failed keeps the prior banner so recovery shows via the next sendUserMessage(); the error surfaces as a system message via `stream-failed`.
+    // Keep the prior banner; recovery clears on the next successful send. Error surfaces via `_showError`.
     'streaming-failed': { skip: true }
 };
 
@@ -290,10 +283,8 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
     this._renderCapabilityBanner(status, state);
 
     if (config.showClearButton) {
-        // A `ready` state after a post-clear reseed must not re-reveal the button over an empty
-        // transcript; gate it on the empty-conversation signal. `session-failed` still forces
-        // the button visible for recovery — clearConversation destroys the broken session and
-        // reseeds, so the affordance is useful even without stored turns.
+        // `ready` is gated on `_hasMessages` so a post-clear reseed does not re-reveal the button.
+        // `session-failed` still forces it visible — clearing is the recovery path.
         const clearButton = document.getElementById('ai-clear-history-button');
         if (clearButton && (status !== 'ready' || this._hasMessages)) {
             clearButton.style.display = 'inline-block';
@@ -304,11 +295,7 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
     }
 };
 
-/**
- * Drive the initial capability resolution through the controller. The controller emits a canonical
- * state for every error path.
- * @private
- */
+/** @private */
 AIChat.prototype._checkModelAvailability = function () {
     this._controller.initialize();
 };
@@ -352,9 +339,6 @@ AIChat.prototype._handleSendMessage = function () {
 
     this._transcript.appendUserTurn(userMessage);
     this._hasMessages = true;
-    // Reveal the Clear History button now that the conversation has content. The button is
-    // hidden on `conversation-cleared` and gated out of the `ready` capability state's show
-    // path while `_hasMessages` is false, so this send is the moment it becomes relevant.
     const clearButton = document.getElementById('ai-clear-history-button');
     if (clearButton) {
         clearButton.style.display = 'inline-block';
@@ -400,12 +384,8 @@ AIChat.prototype._performClearHistory = function () {
 };
 
 /**
- * Render the status banner from a canonical capability state.
- *
- * CSS class is `status-<status>`. Banner text is `state.message`, with a percent indicator for
- * `downloading` once progress is non-zero. Download-button visibility is bound to the two states
- * that admit it.
- *
+ * Render the status banner. CSS class is `status-<status>`. Download-button visibility is bound
+ * to `downloadable` and `downloading`.
  * @private
  * @param {string} status
  * @param {{message: string, progress: number}} state
@@ -446,10 +426,6 @@ AIChat.prototype._updateTokenCounter = function () {
         return;
     }
 
-    // Empty-conversation gate: both the token counter and Clear History button are hidden while
-    // there are no messages, so the post-clear state matches the fresh-load state. The gate is
-    // driven by `_hasMessages`, which flips on send, `stream-complete`, and non-empty
-    // `conversation-loaded`, and flips back on `conversation-cleared`.
     if (!this._hasMessages) {
         counter.textContent = '';
         counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
@@ -477,11 +453,10 @@ AIChat.prototype._updateTokenCounter = function () {
             counter.hidden = false;
             this._checkTokenUsageWarning(usageInfo.percentUsed);
         }
-        // Null usage in a non-empty conversation: no-op. An already-visible pill retains its
-        // last valid text and state class rather than flickering off between messages. If the
-        // pill is still hidden from the empty-conversation gate, a null result leaves it hidden.
+        // Null usage: leave the pill's last valid text and state class in place so it does not
+        // flicker off between messages.
     }, () => {
-        // Rejected usage refresh: same no-op policy as null. Do not flicker the pill off.
+        // Rejected usage: same no-op as null.
     });
 };
 
@@ -501,20 +476,14 @@ AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
     }
 };
 
-/**
- * Detach the Inspection Context. Asks the controller to clear; the pill hides via the
- * `inspection-context-cleared` event round-trip, not direct DOM access here. No confirmation
- * message is injected into the transcript — the pill disappearing is the confirmation.
- * @private
- */
+/** @private */
 AIChat.prototype._clearContext = function () {
     this._controller.updateInspectionContext(null);
 };
 
 /**
- * Hide the "Context: …" pill in response to `inspection-context-cleared` from the controller.
- * Single source of truth for the hide path; the show path (`updateContext`) writes the pill
- * directly because it carries data the controller does not re-emit.
+ * Hide the Context pill in response to `inspection-context-cleared`. The show path
+ * (`updateContext`) writes the pill directly — the controller does not re-emit its data.
  * @private
  */
 AIChat.prototype._hideContextPill = function () {
@@ -525,7 +494,7 @@ AIChat.prototype._hideContextPill = function () {
 };
 
 /**
- * @param {Object} context - {control, appInfo}
+ * @param {Object} context - `{ control }`. `control.type` and `control.id` are shown in the pill.
  */
 AIChat.prototype.updateContext = function (context) {
     this._controller.updateInspectionContext(context);
@@ -545,22 +514,14 @@ AIChat.prototype.onTabActivated = function () {
     this._transcript.scrollToBottom(true);
 };
 
-/**
- * Set current inspected URL. Delegates to the controller, which dedupes repeated calls, loads
- * conversation memory, destroys the active session, and reseeds.
- * @param {string} url
- */
+/** @param {string} url */
 AIChat.prototype.setUrl = function (url) {
     this._controller.setUrl(url);
 };
 
 /**
- * Show a transient error above the input in the inline error slot. Replaces any currently visible
- * error — the slot is a single-line status area, not a stack. The slot uses `role="status"` and
- * `aria-live="polite"` so screen readers announce the change without interrupting.
- *
- * Errors auto-clear on the next input activity (typing, keydown, send). No dismiss button, no
- * timer.
+ * Show a transient error in the inline slot above the input. Replaces any current message.
+ * Auto-clears on the next input activity.
  * @private
  * @param {string} message
  */
@@ -574,7 +535,7 @@ AIChat.prototype._showError = function (message) {
 };
 
 /**
- * Empty and hide the inline error slot. Called on input activity and before starting a new send.
+ * Empty and hide the inline error slot.
  * @private
  */
 AIChat.prototype._clearError = function () {

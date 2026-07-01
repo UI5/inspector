@@ -33,11 +33,9 @@ function AssistantController({
     this._conversationMemory = [];
     this._inspectionContext = null;
     this._isStreaming = false;
-    // Promise of the most recent in-flight session reseed (initialize, clearConversation,
-    // setUrl, downloadModel). `sendUserMessage` awaits this so a Send pressed during a reseed
-    // window does not race the Prompt Client's "No active session" guard. Resolved to undefined
-    // when no reseed is in flight; rejects if a reseed itself rejects (its rejection is also
-    // caught by `_trackReseed` to surface a `session-failed` capability state).
+    // The in-flight reseed. `sendUserMessage` awaits this so a Send during a reseed window does
+    // not race the Prompt Client's "No active session" guard. A reseed rejection is caught by
+    // `_trackReseed` and surfaced as `session-failed`.
     this._pendingReseed = Promise.resolve();
 }
 
@@ -91,13 +89,8 @@ AssistantController.prototype._setCapabilityState = function (status, message, p
 };
 
 /**
- * Resolve capability state from PromptClient and broadcast it.
- *
- * PromptClient returns canonical capability names. The two controller-managed states
- * (`session-failed`, `streaming-failed`) come from elsewhere in this module.
- *
- * A rejected capability check resolves to `unavailable` so the view always has a canonical state to
- * render. The returned promise never rejects.
+ * Resolve capability state from PromptClient and broadcast it. Rejected capability checks collapse
+ * to `unavailable` — the promise never rejects.
  *
  * @returns {Promise<void>}
  */
@@ -116,13 +109,8 @@ AssistantController.prototype.initialize = function () {
 };
 
 /**
- * Track `rawSeed` (a promise from `_seedSession()`) as the in-flight `_pendingReseed` and
- * translate its failure into a `session-failed` capability state instead of propagating from this
- * method.
- *
- * Stored as the *raw* (rejection-preserving) promise so `sendUserMessage` awaiters observe a
- * reseed failure and reject the send rather than fall through into the Prompt Client's "No active
- * session" guard.
+ * Store `rawSeed` as `_pendingReseed` (raw, so `sendUserMessage` awaiters observe rejection) and
+ * translate a failure into `session-failed`.
  *
  * @private
  * @param {Promise<*>} rawSeed
@@ -136,13 +124,9 @@ AssistantController.prototype._trackReseed = function (rawSeed) {
 };
 
 /**
- * Like `_trackReseed`, and on success re-emit `ready` so view-level state derived from the live
- * session (token counter, quota styling, input enablement) refreshes. Used by destroy-then-reseed
- * paths (`clearConversation`, `setUrl`) where the view needs an explicit signal that the new
- * session is live.
- *
- * On failure, does not emit `ready` — `session-failed` is already surfaced and must not be
- * overwritten.
+ * Like `_trackReseed`, but re-emits `ready` on success so the view can refresh session-tied state
+ * (token counter, quota styling, input enablement). Used by destroy-then-reseed paths. On failure,
+ * does not emit `ready` — `session-failed` is already surfaced.
  *
  * @private
  * @param {Promise<*>} rawSeed
@@ -169,11 +153,8 @@ AssistantController.prototype._seedSession = function () {
 
 /**
  * Send a user message: build the prompt, stream the response, persist both turns, and emit stream
- * events.
- *
- * Inspection Context is sticky: the same snapshot is injected into every send until a clearing
- * trigger (`updateInspectionContext(null)`, `setUrl(differentUrl)`, or a new selection via
- * `updateInspectionContext(ctx2)`) replaces or detaches it. The snapshot is never persisted.
+ * events. The current Inspection Context is injected — see `updateInspectionContext` for its
+ * lifecycle.
  *
  * @param {string} userMessage
  * @returns {Promise<{content: string}>}
@@ -183,13 +164,10 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
 
     this._isStreaming = true;
 
-    // Wait for any in-flight reseed (initialize / clearConversation / setUrl / downloadModel) so
-    // a Send pressed during the destroy-then-reseed window does not race the Prompt Client's
-    // "No active session. Call createSession() first." guard.
-    //
-    // If the reseed itself rejects, reject sendUserMessage with that error and leave the existing
-    // `session-failed` capability state in place — flipping it to `streaming-failed` would
-    // overwrite the more accurate banner with the wrong cause.
+    // Wait for any in-flight reseed so a Send during the destroy-then-reseed window does not race
+    // the Prompt Client's "No active session" guard. If the reseed rejects, reject the send with
+    // the same error and leave `session-failed` in place — do not overwrite it with
+    // `streaming-failed`.
     return this._pendingReseed.then(() => {
         return this._promptClient.promptStreaming(formatted).then((stream) => {
             return this._consumeStream(stream);
@@ -221,8 +199,7 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
             throw err;
         });
     }, (seedErr) => {
-        // Reseed failed. `_trackReseed` has already surfaced `session-failed`
-        // for the view; do not overwrite it with `streaming-failed`.
+        // `_trackReseed` already surfaced `session-failed`; do not overwrite with `streaming-failed`.
         this._isStreaming = false;
         this._emit('stream-failed', seedErr);
         throw seedErr;
@@ -257,13 +234,11 @@ AssistantController.prototype._consumeStream = function (stream) {
  * Set the inspected URL whose conversation memory the controller owns.
  *
  * Before initialization, records the URL. After initialization with a different URL, loads the new
- * URL's memory, destroys the active session, and reseeds. On successful reseed, re-emits a `ready`
- * capability state so the view can refresh state tied to the live session (e.g. the token counter).
- * Same-URL calls are a no-op.
+ * URL's memory, destroys the active session, and reseeds. On successful reseed, re-emits `ready`
+ * so the view can refresh session-tied state (e.g. the token counter). Same-URL calls are a no-op.
  *
- * If an Inspection Context snapshot was attached, switching to a different URL drops it (the
- * previously selected control belongs to the old page) and emits `inspection-context-cleared`
- * before the reseed.
+ * A URL change also drops any attached Inspection Context and emits `inspection-context-cleared`
+ * before the reseed — the previously selected control belongs to the old page.
  *
  * @param {string} url
  * @returns {Promise<void>|undefined}
@@ -284,10 +259,6 @@ AssistantController.prototype.setUrl = function (url) {
         return Promise.resolve();
     }
 
-    // Set up `_pendingReseed` synchronously via `_trackReseedAndAnnounceReady` so a
-    // `sendUserMessage` called during the URL-change reseed window awaits the new session and
-    // observes any reseed failure rather than racing the Prompt Client's "No active session"
-    // guard.
     const rawSeed = this._loadConversationMemory().then(() => {
         this._promptClient.destroy();
         return this._seedSession();
@@ -296,17 +267,15 @@ AssistantController.prototype.setUrl = function (url) {
 };
 
 /**
- * Set the Inspection Context for subsequent prompts. The snapshot is sticky — it is reused on
- * every `sendUserMessage` until one of three clearing triggers fires:
- *   1. A different control is selected (`updateInspectionContext(ctx2)` replaces it).
- *   2. The developer explicitly detaches via `updateInspectionContext(null)`.
- *   3. The inspected page navigates to a different URL (`setUrl(differentUrl)`).
+ * Set the Inspection Context for subsequent prompts. It is sticky — reused on every
+ * `sendUserMessage` until:
+ *   1. A different snapshot replaces it (`updateInspectionContext(ctx2)`).
+ *   2. The developer detaches it (`updateInspectionContext(null)`).
+ *   3. The inspected page navigates (`setUrl(differentUrl)`).
  *
- * `updateInspectionContext(null)` emits `inspection-context-cleared` if a snapshot was attached.
- * Replacing one snapshot with another does not emit the event. Clearing Conversation Memory is
- * orthogonal — see `clearConversation`.
- *
- * The snapshot is never persisted as Conversation Memory.
+ * `updateInspectionContext(null)` emits `inspection-context-cleared` if a snapshot was attached;
+ * replacement does not. Never persisted. Clearing Conversation Memory is orthogonal —
+ * see `clearConversation`.
  *
  * @param {Object} [context] - Inspection context with optional `control` snapshot.
  */
@@ -320,22 +289,12 @@ AssistantController.prototype.updateInspectionContext = function (context) {
 };
 
 /**
- * Clear conversation memory for the current URL, destroy the active session, and reseed without
- * prior turns.
- *
- * On successful reseed, re-emits a `ready` capability state so the view can refresh state tied to
- * the live session — most importantly the token counter, which otherwise keeps showing the
- * pre-clear `inputUsage` (and any `quota-exhausted` styling / disabled input) even though the
- * underlying session is fresh.
+ * Clear conversation memory, destroy the session, and reseed. Re-emits `ready` so the view can
+ * refresh the token counter — otherwise it keeps the pre-clear usage over a fresh session.
  *
  * @returns {Promise<void>}
  */
 AssistantController.prototype.clearConversation = function () {
-    // Set up `_pendingReseed` synchronously via `_trackReseedAndAnnounceReady` so that any
-    // `sendUserMessage` called during the destroy-then-reseed window (notably from AIChat's
-    // fire-and-forget Clear History flow) awaits the new session rather than racing the Prompt
-    // Client's "No active session" guard. The pending reseed mirrors the underlying
-    // `_seedSession` rejection so a reseed failure here rejects the awaiting send.
     const rawSeed = this._conversationStore.clear(this._currentUrl).then(() => {
         this._conversationMemory = [];
         this._promptClient.destroy();
