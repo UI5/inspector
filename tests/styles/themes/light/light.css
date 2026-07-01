@@ -1689,16 +1689,23 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
 }
 .token-counter {
   font-size: 12px;
-  color: #a3a3a3;
+  color: #222;
   font-weight: 500;
   padding: 4px 8px;
   background-color: rgba(187, 187, 187, 0.1);
   border-radius: 4px;
 }
 .token-counter.warning {
+  color: #B45309;
+  background-color: rgba(180, 83, 9, 0.1);
+}
+.token-counter.warning-critical {
   color: #C80000;
   background-color: rgba(200, 0, 0, 0.1);
-  font-weight: 600;
+}
+.token-counter.quota-exhausted {
+  color: #7F1D1D;
+  background-color: rgba(127, 29, 29, 0.1);
 }
 .ai-messages-container::-webkit-scrollbar {
   width: 8px;

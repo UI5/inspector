@@ -502,16 +502,25 @@
 
 .token-counter {
     font-size: 12px;
-    color: @gray-dark;
+    color: @gray-darkest;
     font-weight: 500;
     padding: 4px 8px;
     background-color: fade(@gray, 10%);
     border-radius: 4px;
 
     &.warning {
+        color: @amber;
+        background-color: fade(@amber, 10%);
+    }
+
+    &.warning-critical {
         color: @red-saturated;
         background-color: fade(@red-saturated, 10%);
-        font-weight: 600;
+    }
+
+    &.quota-exhausted {
+        color: @red-dark;
+        background-color: fade(@red-dark, 10%);
     }
 }
 
