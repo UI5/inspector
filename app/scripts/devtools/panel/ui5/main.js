@@ -467,8 +467,7 @@
             if (frameData[currentFrameId]) {
                 frameData[currentFrameId].consoleErrors = [];
             }
-            // Also tell the injected script to clear its live buffer so the panel's cache and
-            // the page-side buffer stay in lock-step.
+            // Keep panel cache and page-side buffer in lock-step.
             port.postMessage({
                 action: 'do-clear-console-errors',
                 frameId: currentFrameId
@@ -735,9 +734,7 @@
         },
 
         /**
-         * Store the recent-console-errors snapshot the injected script pushes on every error
-         * event. The AI Assistant reads this cache via its `getConsoleErrors` seam on each
-         * `sendUserMessage`.
+         * Cache the recent-console-errors snapshot pushed from the injected script.
          * @param {Object} message
          */
         'on-console-errors-updated': function (message, messageSender) {
