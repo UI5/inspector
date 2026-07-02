@@ -1,9 +1,8 @@
 'use strict';
 
 /**
- * Bounded FIFO of the N most-recent deduplicated console errors/warnings from the inspected
- * page. Duplicates (same dedup key) increment `count` on the existing entry and do NOT
- * re-promote. Pure state machine — no browser deps.
+ * Bounded FIFO of the N most-recent deduplicated console errors and warnings. Duplicates
+ * increment `count` on the existing entry and do not re-promote. No browser deps.
  */
 
 const CAPACITY = 3;
@@ -36,8 +35,8 @@ function _isFrameworkFrame(frame) {
 }
 
 /**
- * Select the top non-framework frame from a stack string. Skips up to `MAX_FRAME_SKIPS`
- * framework frames, then falls back to whatever frame we landed on.
+ * Pick the top non-framework frame. Skips up to `MAX_FRAME_SKIPS` framework frames, then
+ * falls back to whichever frame we're on.
  * @private
  */
 function _selectTopFrame(stack) {

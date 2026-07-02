@@ -1,6 +1,6 @@
 'use strict';
 
-// Safety-net caps against adversarial inputs. Truncation appends `... [truncated]`.
+// Per-section size caps. Truncation appends `... [truncated]`.
 const PROPERTIES_CAP = 800;
 const BINDINGS_CAP = 800;
 const AGGREGATIONS_CAP = 400;
@@ -65,7 +65,7 @@ function _renderAggregationLine(name, children) {
         return '- ' + name + ': ' + count + ' children — ' + ids.join(', ');
     }
 
-    // Preserve insertion order so the model sees the dominant type first.
+    // Preserve insertion order.
     const histogram = Object.create(null);
     const order = [];
     for (let i = 0; i < children.length; i++) {
@@ -84,18 +84,18 @@ function _renderAggregationLine(name, children) {
 }
 
 /**
- * Builds assistant prompts. Free of Chrome APIs.
+ * Builds assistant prompts.
  * @constructor
  */
 function PromptBuilder() {
 }
 
 /**
- * Build the system prompt. Optionally stitches a Current Application Context section between
- * the Role and Rules zones when `appInfo` yields recognized fields.
+ * Build the system prompt. Adds a Current Application Context section between Role and Rules
+ * when `appInfo` has usable fields.
  *
- * @param {Object} [appInfo] App metadata snapshot: `common.data`, `configurationComputed.data`,
- *     `urlParameters.data`, `loadedLibraries.data`.
+ * @param {Object} [appInfo] - `common.data`, `configurationComputed.data`, `urlParameters.data`,
+ *     `loadedLibraries.data`.
  * @returns {string}
  */
 PromptBuilder.prototype.buildSystemPrompt = function (appInfo) {
@@ -158,7 +158,7 @@ PromptBuilder.prototype._buildAppContext = function (appInfo) {
         lines.push('- UI locale: ' + locale);
     }
 
-    // Presence check, not truthiness: an explicit empty or "false" value is still information.
+    // Presence check, not truthiness — `sap-ui-debug=` (empty) is still information.
     if (urlData && Object.prototype.hasOwnProperty.call(urlData, 'sap-ui-debug')) {
         lines.push('- sap-ui-debug: ' + urlData['sap-ui-debug']);
     }
@@ -182,9 +182,9 @@ PromptBuilder.prototype._buildAppContext = function (appInfo) {
 };
 
 /**
- * Assemble the per-turn user prompt. When Inspection Context or Recent Console Errors are
- * present, wraps the user's message in a sandwich (`User asked: ... Now answer: ...`) with a
- * middle block of curated one-line sections. Otherwise returns `userMessage` unchanged.
+ * Build the per-turn user prompt. If Inspection Context or Recent Console Errors are present,
+ * wrap the message with `User asked: ...` / `Now answer: ...` around a middle block. Otherwise
+ * return `userMessage` as-is.
  *
  * @param {string} userMessage
  * @param {Object} [inspectionContext]
@@ -250,7 +250,7 @@ PromptBuilder.prototype._buildControlContextBlock = function (control) {
  * @returns {string}
  */
 PromptBuilder.prototype._buildConsoleErrorsBlock = function (consoleErrors) {
-    // Buffer stores oldest-first; the newest error is more useful at the top.
+    // Buffer is oldest-first; show newest at top.
     const reversed = consoleErrors.slice().reverse();
 
     const lines = reversed.map(function (entry) {
@@ -266,7 +266,7 @@ PromptBuilder.prototype._buildConsoleErrorsBlock = function (consoleErrors) {
 };
 
 /**
- * Truncate a rendered section body to `maxLength`, keeping the header intact.
+ * Truncate `body` to `maxLength`, keeping `header` intact.
  * @private
  */
 PromptBuilder.prototype._capSection = function (header, body, maxLength) {
@@ -299,8 +299,8 @@ PromptBuilder.prototype._renderPropertiesSection = function (properties) {
 };
 
 /**
- * Render bindings as one line each. Composite bindings (with a `parts` array) collapse to a
- * degenerate `<prop> ← <composite>` line. Circular graphs fall back to the placeholder.
+ * Render each binding as one line. Composite bindings (with a `parts` array) collapse to
+ * `<prop> ← <composite>`. Circular graphs fall back to the placeholder.
  * @private
  * @param {Object} bindings
  * @returns {string}
@@ -313,7 +313,7 @@ PromptBuilder.prototype._renderBindingsSection = function (bindings) {
     const self = this;
     let body;
     try {
-        // Cheap circularity probe: JSON.stringify throws on cycles.
+        // JSON.stringify throws on cycles — use it as a probe.
         JSON.stringify(bindings);
 
         const lines = Object.keys(bindings).map(function (propertyName) {
@@ -337,14 +337,14 @@ PromptBuilder.prototype._renderBindingLine = function (propertyName, binding) {
         return '- ' + propertyName + ' ← <invalid>';
     }
 
-    // Composite bindings are not curated yet — emit a degenerate line.
+    // Composite bindings not handled yet.
     if (Array.isArray(binding.parts)) {
         return '- ' + propertyName + ' ← <composite>';
     }
 
     let line = '- ' + propertyName + ' ← "' + (binding.path || '') + '"';
 
-    // `null` and `undefined` print literally so the model can distinguish them from strings.
+    // Print `null` and `undefined` literally so they're distinguishable from strings.
     if (Object.prototype.hasOwnProperty.call(binding, 'value')) {
         line += ' = ' + _stringifyBindingValue(binding.value);
     }
@@ -385,8 +385,8 @@ PromptBuilder.prototype._renderAggregationsSection = function (aggregations) {
 };
 
 /**
- * Build the seed message array for a new session: a system message followed by prior
- * user/assistant turns from conversation memory.
+ * Build the seed messages for a new session: a system message followed by prior
+ * user/assistant turns.
  *
  * @param {Object} [appInfo]
  * @param {Array} [conversationMemory]

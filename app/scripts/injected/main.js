@@ -17,8 +17,8 @@ sap.ui.require(['ToolsAPI'], function (ToolsAPI) {
     // Create global reference for the extension.
     ui5inspector.createReferences();
 
-    // Install the recent-console-errors capture. `onRecord` pushes a fresh snapshot to the
-    // panel so its cache stays in sync with the page-side buffer.
+    // Capture console errors. `onRecord` pushes a snapshot to the panel on every event so its
+    // cache stays in sync with the page-side buffer.
     var consoleErrorHandle = consoleErrorCapture.install(window, {
         onRecord: function () {
             message.send({
@@ -380,7 +380,7 @@ sap.ui.require(['ToolsAPI'], function (ToolsAPI) {
         },
 
         /**
-         * Clear the recent-console-errors buffer. Invoked by the panel's Clear Conversation flow.
+         * Clear the console-errors buffer. Called from the panel's Clear Conversation flow.
          */
         'do-clear-console-errors': function () {
             consoleErrorHandle.buffer.clear();
