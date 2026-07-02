@@ -3,18 +3,13 @@
 const consoleErrorBuffer = require('./consoleErrorBuffer.js');
 
 /**
- * Browser-side glue around {@link consoleErrorBuffer}. Monkey-patches `console.error` and
- * `console.warn` and subscribes to `window.onerror` and `unhandledrejection`, funneling every
- * error-like event into the buffer's state machine.
+ * Browser-side glue around {@link consoleErrorBuffer}. Wraps `console.error`/`console.warn`
+ * and subscribes to `window.onerror` / `unhandledrejection`, funneling every event into the
+ * buffer. Idempotent — repeated calls return the same handle.
  *
- * The original `console.error` / `console.warn` continue to run, so the developer's own console
- * output is not silenced by the capture. Wrap once — repeated calls to {@link install} are a
- * no-op.
- *
- * @param {Window} win - Injection target (the inspected page's window). Injected in tests.
+ * @param {Window} win - Injection target (the inspected page's window).
  * @param {Object} [options]
- * @param {Function} [options.onRecord] - Called after every recorded event. Used by the injected
- *     glue to push a fresh snapshot to the panel.
+ * @param {Function} [options.onRecord] - Called after every recorded event.
  * @returns {{buffer: Object, uninstall: Function}}
  */
 function install(win, options) {
@@ -28,15 +23,12 @@ function install(win, options) {
             try {
                 onRecord();
             } catch (e) {
-                // Never let a subscriber failure disrupt the capture.
+                // Subscriber failure must not break capture.
             }
         }
     }
 
-    // Install-once guard. Stashed on the inspected page's `window` — a foreign object we do not
-    // own — because the injected script may be re-injected after `do-script-injection` and we
-    // must not stack patches on top of patches. Namespaced with `__ui5Inspector` to signal that
-    // this key belongs to this extension and is not intended for the page's own code.
+    // Install-once guard: the injected script may re-run after `do-script-injection`.
     if (win.__ui5InspectorConsoleErrorCaptureInstalled) {
         return win.__ui5InspectorConsoleErrorCaptureInstalled;
     }
@@ -46,9 +38,6 @@ function install(win, options) {
     const originalOnError = win.onerror;
     const originalOnUnhandled = win.onunhandledrejection;
 
-    // Stringify console.error / console.warn arguments the way Node/Chrome would when you
-    // paste them into console: values separated by spaces, objects JSON-stringified. Kept
-    // deliberately simple — the model just needs the message text, not perfect fidelity.
     function _joinArgs(args) {
         return Array.prototype.map.call(args, function (arg) {
             if (arg === null) { return 'null'; }
@@ -82,7 +71,7 @@ function install(win, options) {
                 stack: _extractStack(arguments)
             });
         } catch (e) {
-            // Never let capture failure disrupt the developer's own console.error output.
+            // Capture failure must not break the developer's own console output.
         }
         if (typeof originalError === 'function') {
             return originalError.apply(win.console, arguments);
@@ -105,8 +94,8 @@ function install(win, options) {
     };
 
     win.onerror = function () {
-        // Signature: (message, source, lineno, colno, error) — five params exceed the repo's
-        // JSHint `maxparams` cap, so we read them off `arguments` instead.
+        // Read positional args off `arguments`: (message, source, lineno, colno, error)
+        // exceeds JSHint's `maxparams` cap.
         const message = arguments[0];
         const source = arguments[1];
         const lineno = arguments[2];

@@ -13,12 +13,10 @@ const ConversationStore = require('./ConversationStore.js');
  * @param {PromptClient} [options.promptClient]
  * @param {ConversationStore} [options.conversationStore]
  * @param {Function} [options.getAppInfo] - Returns the app metadata snapshot for session seeding.
- * @param {Function} [options.getConsoleErrors] - Returns the current recent-console-errors snapshot.
- *     Called once per {@link #sendUserMessage}; its result is forwarded to
- *     {@link PromptBuilder#buildUserPrompt} as the third argument.
- * @param {Function} [options.clearConsoleErrors] - Clears the recent-console-errors buffer for the
- *     current URL. Invoked from {@link #clearConversation} and {@link #setUrl} so a "start fresh"
- *     trigger resets both signals in lock-step.
+ * @param {Function} [options.getConsoleErrors] - Returns the recent-console-errors snapshot;
+ *     forwarded to {@link PromptBuilder#buildUserPrompt} on each send.
+ * @param {Function} [options.clearConsoleErrors] - Clears the recent-console-errors buffer.
+ *     Invoked from {@link #clearConversation} and {@link #setUrl} so both signals reset in lock-step.
  * @constructor
  */
 function AssistantController({
@@ -162,9 +160,8 @@ AssistantController.prototype._seedSession = function () {
 };
 
 /**
- * Invoke the injected `getConsoleErrors` accessor and coerce the result into an array. A missing
- * or throwing accessor collapses to an empty array so a broken panel-side wiring never breaks the
- * send flow — the Prompt Builder simply omits the section.
+ * Invoke the injected `getConsoleErrors` accessor. Missing/throwing accessor collapses to
+ * an empty array so a broken wiring never breaks the send flow.
  * @private
  * @returns {Array}
  */
@@ -282,8 +279,7 @@ AssistantController.prototype.setUrl = function (url) {
         this._emit('inspection-context-cleared');
     }
 
-    // The buffered errors belong to the previously inspected page. Reset alongside Inspection
-    // Context and Conversation Memory so a new debugging session starts truly fresh.
+    // The buffered errors belong to the previously inspected page.
     this._safeClearConsoleErrors();
 
     if (this._capabilityState.status !== 'ready') {
@@ -339,15 +335,13 @@ AssistantController.prototype.clearConversation = function () {
 };
 
 /**
- * Invoke the injected `clearConsoleErrors` callback. Swallows exceptions so a broken panel-side
- * wiring never blocks the clear flow.
  * @private
  */
 AssistantController.prototype._safeClearConsoleErrors = function () {
     try {
         this._clearConsoleErrors();
     } catch (e) {
-        // Intentionally swallowed. See _safeGetConsoleErrors for the same rationale.
+        // See _safeGetConsoleErrors.
     }
 };
 
