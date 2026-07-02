@@ -2,6 +2,42 @@
 
 const PromptBuilder = require('../../../app/scripts/modules/ai/PromptBuilder.js');
 
+// ---- helpers for section-extraction assertions -----------------------------
+// The buildUserPrompt tests below use small extractors so per-section cap assertions do not
+// accidentally count characters from *other* sections. They locate the labeled header and read
+// until the next blank line or the sandwich's closing `Now answer:` line.
+
+function _extractSection(prompt, header) {
+    const start = prompt.indexOf(header);
+    if (start < 0) {
+        return '';
+    }
+    const rest = prompt.substring(start);
+    // A section ends at the next blank line (which precedes "Now answer:") or at the
+    // sandwich's closing line.
+    const stopMarkers = ['\n\n', '\nNow answer:'];
+    let stop = rest.length;
+    for (let i = 0; i < stopMarkers.length; i++) {
+        const idx = rest.indexOf(stopMarkers[i]);
+        if (idx >= 0 && idx < stop) {
+            stop = idx;
+        }
+    }
+    return rest.substring(0, stop);
+}
+
+function _extractPropertiesSection(prompt) {
+    return _extractSection(prompt, 'Properties:');
+}
+
+function _extractBindingsSection(prompt) {
+    return _extractSection(prompt, 'Bindings:');
+}
+
+function _extractAggregationsSection(prompt) {
+    return _extractSection(prompt, 'Aggregations:');
+}
+
 describe('PromptBuilder', function () {
     let promptBuilder;
 
@@ -395,108 +431,558 @@ describe('PromptBuilder', function () {
     });
 
     describe('#buildUserPrompt()', function () {
-        it('should return the user message unchanged when no inspection context is provided', function () {
-            const result = promptBuilder.buildUserPrompt('Test prompt', null);
 
-            result.should.equal('Test prompt');
+        describe('no-context behavior', function () {
+            it('should return the user message unchanged when no inspection context is provided', function () {
+                const result = promptBuilder.buildUserPrompt('Test prompt', null);
+
+                result.should.equal('Test prompt');
+            });
+
+            it('should return the user message unchanged when inspection context has no selected control', function () {
+                const result = promptBuilder.buildUserPrompt('Test prompt', {});
+
+                result.should.equal('Test prompt');
+            });
         });
 
-        it('should return the user message unchanged when inspection context has no selected control', function () {
-            const result = promptBuilder.buildUserPrompt('Test prompt', {});
+        describe('sandwich structure', function () {
+            it('should start with "User asked: <message>" and end with "Now answer: <message>" when a control is attached', function () {
+                const inspectionContext = {
+                    control: { type: 'sap.m.Button', id: 'btn' }
+                };
 
-            result.should.equal('Test prompt');
+                const result = promptBuilder.buildUserPrompt('Why is this broken?', inspectionContext);
+
+                result.indexOf('User asked: Why is this broken?').should.equal(0);
+                const idx = result.lastIndexOf('Now answer: Why is this broken?');
+                idx.should.be.greaterThan(-1);
+                idx.should.equal(result.length - 'Now answer: Why is this broken?'.length);
+            });
+
+            it('should place the Current UI5 Control Context block between the top and bottom question restatements', function () {
+                const inspectionContext = {
+                    control: { type: 'sap.m.Button', id: 'btn' }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Test', inspectionContext);
+
+                const userAskedIdx = result.indexOf('User asked:');
+                const ctxIdx = result.indexOf('Current UI5 Control Context:');
+                const nowAnswerIdx = result.indexOf('Now answer:');
+
+                userAskedIdx.should.equal(0);
+                ctxIdx.should.be.greaterThan(userAskedIdx);
+                nowAnswerIdx.should.be.greaterThan(ctxIdx);
+            });
         });
 
-        it('should prefix the user message with the selected control type, id, and a User Question label', function () {
-            const inspectionContext = {
-                control: {
-                    type: 'sap.m.Button',
-                    id: 'myButton'
-                }
-            };
+        describe('control identity', function () {
+            it('should include Type and ID lines when both are provided', function () {
+                const inspectionContext = {
+                    control: { type: 'sap.m.Button', id: 'myButton' }
+                };
 
-            const result = promptBuilder.buildUserPrompt('Test prompt', inspectionContext);
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
 
-            result.should.contain('Type: sap.m.Button');
-            result.should.contain('ID: myButton');
-            result.should.contain('User Question: Test prompt');
+                result.should.contain('- Type: sap.m.Button');
+                result.should.contain('- ID: myButton');
+            });
         });
 
-        it('should truncate large selected-control properties so the prompt stays bounded', function () {
-            const largeData = {};
-            for (let i = 0; i < 200; i++) {
-                largeData['property' + i] = 'value'.repeat(20);
-            }
-
-            const inspectionContext = {
-                control: {
-                    type: 'sap.m.Button',
-                    properties: {
-                        own: {
-                            data: largeData
-                        }
-                    }
-                }
-            };
-
-            const result = promptBuilder.buildUserPrompt('Test', inspectionContext);
-
-            result.should.contain('[truncated]');
-        });
-
-        it('should include a bindings section summarizing the selected control bindings', function () {
-            const inspectionContext = {
-                control: {
-                    type: 'sap.m.Text',
-                    bindings: {
-                        text: {
-                            path: '/Name'
-                        }
-                    }
-                }
-            };
-
-            const result = promptBuilder.buildUserPrompt('Test', inspectionContext);
-
-            result.should.contain('Bindings (1):');
-            result.should.contain('"/Name"');
-        });
-
-        it('should include an aggregations section summarizing the selected control aggregations', function () {
-            const inspectionContext = {
-                control: {
-                    type: 'sap.m.Page',
-                    aggregations: {
-                        own: {
-                            data: {
-                                content: ['child1', 'child2']
+        describe('properties rendering', function () {
+            it('should render properties as key: value lines with no JSON braces on the happy path', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: {
+                            own: {
+                                data: {
+                                    text: 'Save',
+                                    enabled: true,
+                                    width: '100px'
+                                }
                             }
                         }
                     }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+                const propsSection = _extractPropertiesSection(result);
+
+                propsSection.should.contain('text: Save');
+                propsSection.should.contain('enabled: true');
+                propsSection.should.contain('width: 100px');
+                propsSection.should.not.contain('{');
+                propsSection.should.not.contain('}');
+            });
+
+            it('should omit the Properties section entirely when own properties are empty', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: { own: { data: {} } }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.not.contain('Properties:');
+            });
+
+            it('should truncate the properties section to its cap with a [truncated] marker on adversarial input', function () {
+                const largeData = {};
+                for (let i = 0; i < 500; i++) {
+                    largeData['property' + i] = 'value'.repeat(20);
                 }
-            };
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: { own: { data: largeData } }
+                    }
+                };
 
-            const result = promptBuilder.buildUserPrompt('Test', inspectionContext);
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+                const propsSection = _extractPropertiesSection(result);
 
-            result.should.contain('Aggregations (1):');
-            result.should.contain('child1');
+                propsSection.should.contain('[truncated]');
+                // 800-char cap plus the "... [truncated]" tail, plus the "Properties:\n" header line.
+                propsSection.length.should.be.lessThan(1000);
+            });
         });
 
-        it('should handle a selected control with circular property data without throwing', function () {
-            const circular = {};
-            circular.self = circular;
-            const inspectionContext = {
-                control: {
-                    type: 'sap.m.Button',
-                    bindings: circular
+        describe('bindings rendering', function () {
+            it('should render a single binding on one line with path, model, and resolved value', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        bindings: {
+                            text: {
+                                path: '/Name',
+                                value: 'Alice',
+                                model: 'default'
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('- text ← "/Name" = Alice (model: default)');
+            });
+
+            it('should omit the "= <value>" segment when the snapshot carries no resolved value', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        bindings: {
+                            text: { path: '/Name', model: 'default' }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('- text ← "/Name" (model: default)');
+                result.should.not.contain('=');
+            });
+
+            it('should print null literally when the resolved value is null', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        bindings: {
+                            text: { path: '/Name', value: null, model: 'default' }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('= null');
+            });
+
+            it('should print undefined literally when the resolved value is undefined and the field is present', function () {
+                // The snapshot must explicitly carry the key as undefined for it to render.
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        bindings: {
+                            text: Object.assign({ path: '/Name', model: 'default' }, { value: undefined })
+                        }
+                    }
+                };
+
+                // The rule per the AC is: "= <value>" appears only when the snapshot carries a
+                // resolved value. `undefined` printed literally is required *only* when the
+                // snapshot explicitly carries an undefined value — but `Object.assign` drops
+                // undefined properties in some engines, so we test the intent using an explicit
+                // hasOwn check via a getter-style object.
+                const explicitUndefined = {
+                    control: {
+                        type: 'sap.m.Text',
+                        bindings: {
+                            text: (function () {
+                                const b = { path: '/Name', model: 'default' };
+                                Object.defineProperty(b, 'value', { value: undefined, enumerable: true });
+                                return b;
+                            }())
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', explicitUndefined);
+                result.should.contain('= undefined');
+            });
+
+            it('should default the model annotation to "default" when the binding has a path but no explicit model', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        bindings: {
+                            text: { path: '/Name' }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('(model: default)');
+            });
+
+            it('should include type when present', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Input',
+                        bindings: {
+                            value: {
+                                path: '/Age',
+                                value: 42,
+                                model: 'default',
+                                type: 'sap.ui.model.type.Integer'
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('type: sap.ui.model.type.Integer');
+            });
+
+            it('should include "formatter: yes" when a formatter is present', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        bindings: {
+                            text: {
+                                path: '/Name',
+                                value: 'Alice',
+                                model: 'default',
+                                formatter: function () {}
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('formatter: yes');
+            });
+
+            it('should truncate a very long resolved value at approximately 100 characters', function () {
+                const longValue = 'x'.repeat(500);
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        bindings: {
+                            text: { path: '/Name', value: longValue, model: 'default' }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                // The rendered value must be shorter than the raw length + a truncation marker.
+                result.should.not.contain(longValue);
+                result.should.contain('...');
+            });
+
+            it('should render composite bindings (parts) as a degenerate one-line entry without throwing', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        bindings: {
+                            text: {
+                                parts: [
+                                    { path: '/First' },
+                                    { path: '/Last' }
+                                ]
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('- text ← <composite>');
+            });
+
+            it('should truncate the bindings section to its cap on adversarial input', function () {
+                const many = {};
+                for (let i = 0; i < 500; i++) {
+                    many['prop' + i] = { path: '/very/long/path/' + i, value: 'value' + i };
                 }
-            };
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        bindings: many
+                    }
+                };
 
-            const result = promptBuilder.buildUserPrompt('Test', inspectionContext);
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+                const bindingsSection = _extractBindingsSection(result);
 
-            result.should.contain('cannot serialize');
+                bindingsSection.should.contain('[truncated]');
+                bindingsSection.length.should.be.lessThan(1000);
+            });
+
+            it('should handle a selected control with circular binding data without throwing', function () {
+                const circular = {};
+                circular.self = circular;
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        bindings: circular
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('cannot serialize');
+            });
+        });
+
+        describe('aggregations rendering', function () {
+            it('should render an empty aggregation as "<name>: empty"', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Page',
+                        aggregations: {
+                            own: {
+                                data: {
+                                    content: []
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('- content: empty');
+            });
+
+            it('should append child IDs when the child count is <= 3', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Page',
+                        aggregations: {
+                            own: {
+                                data: {
+                                    content: [
+                                        { id: 'btn1', type: 'sap.m.Button' },
+                                        { id: 'btn2', type: 'sap.m.Button' }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('- content: 2 children — btn1, btn2');
+            });
+
+            it('should render a type histogram when the child count is > 3', function () {
+                const children = [];
+                for (let i = 0; i < 20; i++) {
+                    children.push({ id: 't' + i, type: 'sap.m.Text' });
+                }
+                for (let i = 0; i < 4; i++) {
+                    children.push({ id: 'b' + i, type: 'sap.m.Button' });
+                }
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Page',
+                        aggregations: {
+                            own: {
+                                data: { content: children }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('- content: 24 children (sap.m.Text × 20, sap.m.Button × 4)');
+            });
+
+            it('should omit the Aggregations section entirely when own aggregations are empty', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        aggregations: { own: { data: {} } }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.not.contain('Aggregations:');
+            });
+
+            it('should truncate the aggregations section to its cap on adversarial input', function () {
+                const data = {};
+                for (let i = 0; i < 100; i++) {
+                    const children = [];
+                    for (let j = 0; j < 200; j++) {
+                        children.push({ id: 'child' + i + '_' + j, type: 'sap.m.SomeReallyLongTypeName' });
+                    }
+                    data['aggr' + i] = children;
+                }
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Page',
+                        aggregations: { own: { data: data } }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+                const aggregationsSection = _extractAggregationsSection(result);
+
+                aggregationsSection.should.contain('[truncated]');
+                aggregationsSection.length.should.be.lessThan(600);
+            });
+        });
+
+        describe('golden output', function () {
+            it('golden: control identity only', function () {
+                const inspectionContext = {
+                    control: { type: 'sap.m.Button', id: 'myBtn' }
+                };
+
+                const expected =
+                    'User asked: Hi\n\n' +
+                    'Current UI5 Control Context:\n' +
+                    '- Type: sap.m.Button\n' +
+                    '- ID: myBtn\n\n' +
+                    'Now answer: Hi';
+
+                promptBuilder.buildUserPrompt('Hi', inspectionContext).should.equal(expected);
+            });
+
+            it('golden: control + properties only', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        id: 'saveBtn',
+                        properties: {
+                            own: {
+                                data: {
+                                    text: 'Save',
+                                    enabled: true
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const expected =
+                    'User asked: Hi\n\n' +
+                    'Current UI5 Control Context:\n' +
+                    '- Type: sap.m.Button\n' +
+                    '- ID: saveBtn\n' +
+                    'Properties:\n' +
+                    '- text: Save\n' +
+                    '- enabled: true\n\n' +
+                    'Now answer: Hi';
+
+                promptBuilder.buildUserPrompt('Hi', inspectionContext).should.equal(expected);
+            });
+
+            it('golden: control + bindings (single, with value)', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        id: 'nameLabel',
+                        bindings: {
+                            text: {
+                                path: '/Name',
+                                value: 'Alice',
+                                model: 'default'
+                            }
+                        }
+                    }
+                };
+
+                const expected =
+                    'User asked: Q\n\n' +
+                    'Current UI5 Control Context:\n' +
+                    '- Type: sap.m.Text\n' +
+                    '- ID: nameLabel\n' +
+                    'Bindings:\n' +
+                    '- text ← "/Name" = Alice (model: default)\n\n' +
+                    'Now answer: Q';
+
+                promptBuilder.buildUserPrompt('Q', inspectionContext).should.equal(expected);
+            });
+
+            it('golden: control + aggregations (empty, small, and large mixed)', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Page',
+                        id: 'page1',
+                        aggregations: {
+                            own: {
+                                data: {
+                                    customHeader: [],
+                                    content: [
+                                        { id: 'btn1', type: 'sap.m.Button' },
+                                        { id: 'btn2', type: 'sap.m.Button' }
+                                    ],
+                                    footer: (function () {
+                                        const arr = [];
+                                        for (let i = 0; i < 5; i++) {
+                                            arr.push({ id: 't' + i, type: 'sap.m.Text' });
+                                        }
+                                        arr.push({ id: 'b1', type: 'sap.m.Button' });
+                                        return arr;
+                                    }())
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const expected =
+                    'User asked: Q\n\n' +
+                    'Current UI5 Control Context:\n' +
+                    '- Type: sap.m.Page\n' +
+                    '- ID: page1\n' +
+                    'Aggregations:\n' +
+                    '- customHeader: empty\n' +
+                    '- content: 2 children — btn1, btn2\n' +
+                    '- footer: 6 children (sap.m.Text × 5, sap.m.Button × 1)\n\n' +
+                    'Now answer: Q';
+
+                promptBuilder.buildUserPrompt('Q', inspectionContext).should.equal(expected);
+            });
         });
     });
+
+    // ---- helpers for section-extraction assertions -----------------------------
+    // See the top of the file for the extractor helpers used by buildUserPrompt tests above.
 
     describe('#buildSeedMessages()', function () {
         it('should produce a single system message when there is no Conversation Memory to replay', function () {

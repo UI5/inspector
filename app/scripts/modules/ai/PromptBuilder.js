@@ -1,5 +1,105 @@
 'use strict';
 
+// Per-section safety-net caps. The shape-driven curation below is the primary volume control;
+// these caps only trigger on adversarial inputs (a control with 500 properties, a runaway
+// aggregation, etc.). Truncation appends `... [truncated]` so the model sees the boundary.
+var PROPERTIES_CAP = 800;
+var BINDINGS_CAP = 800;
+var AGGREGATIONS_CAP = 400;
+
+// Bindings render their resolved values inline, so a single overlarge value cannot burn the
+// whole bindings-section budget on its own.
+var BINDING_VALUE_CAP = 100;
+
+// Placeholder for adversarial input that cannot be JSON-serialized (e.g. a circular graph).
+// Kept identical to the string the previous JSON-dump implementation emitted, so log-grep
+// muscle memory keeps working.
+var UNSERIALIZABLE_PLACEHOLDER = '(Data available but cannot serialize)';
+
+/**
+ * Stringify an arbitrary value for a prompt line. Objects go through JSON.stringify so we
+ * do not accidentally emit `[object Object]`; primitives print literally. `null` and
+ * `undefined` render as those exact words so the model can tell them apart from the strings.
+ * @private
+ * @param {*} value
+ * @returns {string}
+ */
+function _stringifyValue(value) {
+    if (value === null) {
+        return 'null';
+    }
+    if (typeof value === 'undefined') {
+        return 'undefined';
+    }
+    if (typeof value === 'object') {
+        try {
+            return JSON.stringify(value);
+        } catch (e) {
+            return UNSERIALIZABLE_PLACEHOLDER;
+        }
+    }
+    return String(value);
+}
+
+/**
+ * Stringify a resolved binding value for the `= <value>` segment. Truncates at ~100 chars
+ * so a single overlarge value cannot burn the whole bindings-section budget on its own.
+ * @private
+ * @param {*} value
+ * @returns {string}
+ */
+function _stringifyBindingValue(value) {
+    var rendered = _stringifyValue(value);
+    if (rendered.length > BINDING_VALUE_CAP) {
+        return rendered.substring(0, BINDING_VALUE_CAP) + '...';
+    }
+    return rendered;
+}
+
+/**
+ * Render one aggregation entry.
+ *   - empty aggregation → `- <name>: empty`
+ *   - ≤ 3 children       → `- <name>: N children — id1, id2, id3`
+ *   - > 3 children       → `- <name>: N children (<Type> × N, ...)`
+ * @private
+ * @param {string} name
+ * @param {Array} children
+ * @returns {string}
+ */
+function _renderAggregationLine(name, children) {
+    if (!Array.isArray(children) || children.length === 0) {
+        return '- ' + name + ': empty';
+    }
+
+    var count = children.length;
+
+    if (count <= 3) {
+        var ids = children.map(function (child) {
+            return (child && child.id) || '?';
+        });
+        return '- ' + name + ': ' + count + ' children — ' + ids.join(', ');
+    }
+
+    // Type histogram, insertion order preserved so the model sees the "dominant" type first
+    // if children were listed in that order (they typically are — a Page's `content` is a
+    // Text-heavy list, then a Button tail).
+    var histogram = Object.create(null);
+    var order = [];
+    for (var i = 0; i < children.length; i++) {
+        var type = (children[i] && children[i].type) || '?';
+        if (!Object.prototype.hasOwnProperty.call(histogram, type)) {
+            histogram[type] = 0;
+            order.push(type);
+        }
+        histogram[type] += 1;
+    }
+    var parts = order.map(function (type) {
+        return type + ' × ' + histogram[type];
+    });
+
+    return '- ' + name + ': ' + count + ' children (' + parts.join(', ') + ')';
+}
+
 /**
  * Builds assistant prompts. Owns the system prompt, app metadata formatting, selected-control
  * formatting, truncation rules, and session seed construction. Free of Chrome APIs.
@@ -115,8 +215,26 @@ PromptBuilder.prototype._buildAppContext = function (appInfo) {
 };
 
 /**
- * Prefix a user prompt with a single-turn inspection context section (selected control type, id,
- * properties, bindings, aggregations). Returns the message unchanged when no context is provided.
+ * Assemble the per-turn user prompt.
+ *
+ * When Inspection Context is present, wraps the user's message in a sandwich:
+ *
+ *   User asked: <msg>
+ *
+ *   Current UI5 Control Context:
+ *   - Type: ...
+ *   - ID: ...
+ *   Properties:
+ *   - key: value
+ *   Bindings:
+ *   - prop ← "path" = value (model: ..., type: ..., formatter: yes)
+ *   Aggregations:
+ *   - name: N children (Type × N, Other × M)
+ *
+ *   Now answer: <msg>
+ *
+ * Each of the three sub-sections is emitted only when its underlying data is non-empty.
+ * When no Inspection Context is present, returns the raw user message unchanged.
  *
  * Inspection context is injected per prompt and never stored as conversation memory.
  *
@@ -129,93 +247,178 @@ PromptBuilder.prototype.buildUserPrompt = function (userMessage, inspectionConte
         return userMessage;
     }
 
-    const MAX_SECTION_LENGTH = 2000;
     const control = inspectionContext.control;
-    let contextString = 'Current UI5 Control Context:\n';
-    contextString += '- Type: ' + (control.type || 'Unknown') + '\n';
-    contextString += '- ID: ' + (control.id || 'None') + '\n';
-    contextString += this._addPropertiesContext(control, MAX_SECTION_LENGTH);
-    contextString += this._addBindingsContext(control.bindings, MAX_SECTION_LENGTH);
-    contextString += this._addAggregationsContext(control.aggregations, MAX_SECTION_LENGTH);
 
-    return contextString + '\nUser Question: ' + userMessage;
-};
+    const identityLines = [
+        '- Type: ' + (control.type || 'Unknown'),
+        '- ID: ' + (control.id || 'None')
+    ];
 
-/**
- * Truncate JSON serialization to a maximum length. Returns a placeholder for circular or
- * non-serializable input.
- * @private
- * @param {*} data
- * @param {number} maxLength
- * @returns {string}
- */
-PromptBuilder.prototype._truncateJson = function (data, maxLength) {
-    try {
-        const json = JSON.stringify(data, null, 2);
-        if (json.length > maxLength) {
-            return json.substring(0, maxLength) + '... [truncated]';
-        }
-        return json;
-    } catch (e) {
-        return '(Data available but cannot serialize)';
+    // Each renderer returns a full section body (header + lines) or an empty string. Empty
+    // sections are dropped so we never emit an orphan "Properties:" header.
+    const sections = [];
+    const propertiesSection = this._renderPropertiesSection(control.properties);
+    if (propertiesSection) {
+        sections.push(propertiesSection);
     }
+    const bindingsSection = this._renderBindingsSection(control.bindings);
+    if (bindingsSection) {
+        sections.push(bindingsSection);
+    }
+    const aggregationsSection = this._renderAggregationsSection(control.aggregations);
+    if (aggregationsSection) {
+        sections.push(aggregationsSection);
+    }
+
+    const contextBody = identityLines.concat(sections).join('\n');
+    const contextBlock = 'Current UI5 Control Context:\n' + contextBody;
+
+    return 'User asked: ' + userMessage + '\n\n' +
+        contextBlock + '\n\n' +
+        'Now answer: ' + userMessage;
 };
 
 /**
- * Format control "own" properties as a truncated JSON line. Empty when there are no own properties.
+ * Truncate a rendered section body to a per-section cap. Appends `... [truncated]` past the
+ * cap so the model sees the boundary. The cap is applied to the *body* (lines after the
+ * header) so the header stays intact.
  * @private
- * @param {Object} control
+ * @param {string} header
+ * @param {string} body
  * @param {number} maxLength
  * @returns {string}
  */
-PromptBuilder.prototype._addPropertiesContext = function (control, maxLength) {
-    const props = control.properties;
-    if (!props || !props.own || !props.own.data) {
+PromptBuilder.prototype._capSection = function (header, body, maxLength) {
+    if (body.length > maxLength) {
+        return header + '\n' + body.substring(0, maxLength) + '... [truncated]';
+    }
+    return header + '\n' + body;
+};
+
+/**
+ * Render own properties as `- key: value` lines. Returns an empty string when the property set
+ * is empty or absent, so the caller drops the section header.
+ * @private
+ * @param {Object} properties
+ * @returns {string}
+ */
+PromptBuilder.prototype._renderPropertiesSection = function (properties) {
+    if (!properties || !properties.own || !properties.own.data) {
         return '';
     }
-    const keys = Object.keys(props.own.data);
+    const data = properties.own.data;
+    const keys = Object.keys(data);
     if (keys.length === 0) {
         return '';
     }
-    let propsJson = JSON.stringify(props.own.data);
-    if (propsJson.length > maxLength) {
-        propsJson = propsJson.substring(0, maxLength) + '... [truncated]';
-    }
-    return '- Properties: ' + propsJson + '\n';
+
+    const lines = keys.map(function (key) {
+        return '- ' + key + ': ' + _stringifyValue(data[key]);
+    });
+
+    return this._capSection('Properties:', lines.join('\n'), PROPERTIES_CAP);
 };
 
 /**
+ * Render bindings as one line each. Composite bindings (with a `parts` array) collapse to a
+ * degenerate `<prop> ← <composite>` line — a follow-up will replace this with a real
+ * multi-part rendering. Circular binding graphs bail out to the `cannot serialize` placeholder
+ * that the previous JSON-dump implementation emitted, keeping the invariant that adversarial
+ * input never throws.
  * @private
  * @param {Object} bindings
- * @param {number} maxLength
  * @returns {string}
  */
-PromptBuilder.prototype._addBindingsContext = function (bindings, maxLength) {
-    if (!bindings || Object.keys(bindings).length === 0) {
+PromptBuilder.prototype._renderBindingsSection = function (bindings) {
+    if (!bindings || typeof bindings !== 'object' || Object.keys(bindings).length === 0) {
         return '';
     }
-    let result = '- Bindings (' + Object.keys(bindings).length + '):\n';
-    result += this._truncateJson(bindings, maxLength) + '\n';
-    return result;
+
+    const self = this;
+    let body;
+    try {
+        // Cheap circularity probe: JSON.stringify throws on cycles. We do not use the JSON
+        // itself; we only need the throw signal so the placeholder path stays in one place.
+        JSON.stringify(bindings);
+
+        const lines = Object.keys(bindings).map(function (propertyName) {
+            return self._renderBindingLine(propertyName, bindings[propertyName]);
+        });
+        body = lines.join('\n');
+    } catch (e) {
+        body = UNSERIALIZABLE_PLACEHOLDER;
+    }
+
+    return this._capSection('Bindings:', body, BINDINGS_CAP);
 };
 
 /**
+ * Render one binding entry.
+ *   `- <prop> ← "<path>"[ = <value>] (model: <model>[, type: <type>][, formatter: yes])`
  * @private
- * @param {Object} aggregations
- * @param {number} maxLength
+ * @param {string} propertyName
+ * @param {Object} binding
  * @returns {string}
  */
-PromptBuilder.prototype._addAggregationsContext = function (aggregations, maxLength) {
+PromptBuilder.prototype._renderBindingLine = function (propertyName, binding) {
+    if (!binding || typeof binding !== 'object') {
+        return '- ' + propertyName + ' ← <invalid>';
+    }
+
+    // Composite bindings are represented by a `parts` array. This issue does not curate them —
+    // see the follow-up filed in the PRD. Emit a degenerate line so the sandwich stays intact.
+    if (Array.isArray(binding.parts)) {
+        return '- ' + propertyName + ' ← <composite>';
+    }
+
+    let line = '- ' + propertyName + ' ← "' + (binding.path || '') + '"';
+
+    // `= <value>` appears only when the snapshot explicitly carries a `value` key. `null` and
+    // `undefined` print literally so the model can tell "no value" from "null value" from "the
+    // string 'undefined'".
+    if (Object.prototype.hasOwnProperty.call(binding, 'value')) {
+        line += ' = ' + _stringifyBindingValue(binding.value);
+    }
+
+    // Annotations. `model` falls back to `default` per the AC — a binding with a path but no
+    // explicit model is bound to the default model.
+    const annotations = [];
+    annotations.push('model: ' + (binding.model || 'default'));
+    if (binding.type) {
+        annotations.push('type: ' + binding.type);
+    }
+    if (binding.formatter) {
+        annotations.push('formatter: yes');
+    }
+    line += ' (' + annotations.join(', ') + ')';
+
+    return line;
+};
+
+/**
+ * Render own aggregations as one line each. Rules from the PRD:
+ *   - empty aggregation → `- <name>: empty`
+ *   - ≤ 3 children       → `- <name>: N children — id1, id2, id3`
+ *   - > 3 children       → `- <name>: N children (<Type> × N, ...)`
+ * @private
+ * @param {Object} aggregations
+ * @returns {string}
+ */
+PromptBuilder.prototype._renderAggregationsSection = function (aggregations) {
     if (!aggregations || !aggregations.own || !aggregations.own.data) {
         return '';
     }
-    const keys = Object.keys(aggregations.own.data);
+    const data = aggregations.own.data;
+    const keys = Object.keys(data);
     if (keys.length === 0) {
         return '';
     }
-    let result = '- Aggregations (' + keys.length + '):\n';
-    result += this._truncateJson(aggregations.own.data, maxLength) + '\n';
-    return result;
+
+    const lines = keys.map(function (name) {
+        return _renderAggregationLine(name, data[name]);
+    });
+
+    return this._capSection('Aggregations:', lines.join('\n'), AGGREGATIONS_CAP);
 };
 
 /**

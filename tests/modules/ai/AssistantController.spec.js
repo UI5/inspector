@@ -578,9 +578,9 @@ describe('AssistantController', function () {
                 }).then(function () {
                     harness.promptClient.userPromptsByCall.should.have.length(2);
                     harness.promptClient.userPromptsByCall[0].should.contain('Type: sap.m.Button');
-                    harness.promptClient.userPromptsByCall[0].should.contain('User Question: Explain this');
+                    harness.promptClient.userPromptsByCall[0].should.contain('Now answer: Explain this');
                     harness.promptClient.userPromptsByCall[1].should.contain('Type: sap.m.Button');
-                    harness.promptClient.userPromptsByCall[1].should.contain('User Question: And now?');
+                    harness.promptClient.userPromptsByCall[1].should.contain('Now answer: And now?');
                 });
             });
         });
@@ -718,7 +718,7 @@ describe('AssistantController', function () {
                 }).then(function () {
                     harness.promptClient.userPromptsByCall.should.have.length(1);
                     harness.promptClient.userPromptsByCall[0].should.contain('Type: sap.m.Button');
-                    harness.promptClient.userPromptsByCall[0].should.contain('User Question: After clear');
+                    harness.promptClient.userPromptsByCall[0].should.contain('Now answer: After clear');
                 });
             });
         });
