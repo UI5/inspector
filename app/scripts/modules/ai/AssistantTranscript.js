@@ -71,7 +71,6 @@ AssistantTranscript.prototype.appendSystemMessage = function (message) {
 AssistantTranscript.prototype.beginAssistantTurn = function () {
     const messageElement = this._appendMessage('assistant', '', false);
     const contentElement = messageElement.querySelector('.message-content');
-    const headerElement = messageElement.querySelector('.message-header');
 
     const loadingIndicator = document.createElement('span');
     loadingIndicator.className = 'loading-indicator';
@@ -114,15 +113,18 @@ AssistantTranscript.prototype.beginAssistantTurn = function () {
             contentElement.innerHTML = this._parseMarkdown(fullContent);
             this._initializeJsonViewers(contentElement);
 
-            const copyButton = document.createElement('button');
-            copyButton.className = 'copy-response-button';
-            copyButton.title = 'Copy response';
-            copyButton.setAttribute('aria-label', 'Copy response');
-            copyButton.textContent = 'Copy';
-            copyButton.addEventListener('click', (e) => {
-                this._copyToClipboard(fullContent, e.currentTarget);
-            });
-            headerElement.appendChild(copyButton);
+            // Skip the copy button when the response is a single code/JSON block — those blocks already carry their own copy affordance.
+            if (!this._isOnlyCodeOrJsonBlock(contentElement)) {
+                const copyButton = document.createElement('button');
+                copyButton.className = 'copy-response-button';
+                copyButton.title = 'Copy response';
+                copyButton.setAttribute('aria-label', 'Copy response');
+                copyButton.textContent = 'Copy';
+                copyButton.addEventListener('click', (e) => {
+                    this._copyToClipboard(fullContent, e.currentTarget);
+                });
+                messageElement.appendChild(copyButton);
+            }
 
             // Do not scroll on finalize. The debounced chunk render already scrolled. Skipping here means a developer who scrolled up to read an earlier turn is not yanked to the bottom on stream completion.
         }
@@ -203,7 +205,6 @@ AssistantTranscript.prototype._appendMessage = function (role, content, showCopy
     messageElement.innerHTML = '' +
         '<div class="message-header">' +
             '<span class="message-role">' + roleLabel + '</span>' +
-            (shouldShowCopyButton ? '<button class="copy-response-button" title="Copy response" aria-label="Copy response">Copy</button>' : '') +
         '</div>' +
         '<div class="message-content">' + formattedContent + '</div>';
 
@@ -213,16 +214,40 @@ AssistantTranscript.prototype._appendMessage = function (role, content, showCopy
         const contentElement = messageElement.querySelector('.message-content');
         this._initializeJsonViewers(contentElement);
 
-        const copyButton = messageElement.querySelector('.copy-response-button');
-        if (copyButton) {
+        // Skip the copy button when the response is a single code/JSON block — those blocks already carry their own copy affordance.
+        if (shouldShowCopyButton && !this._isOnlyCodeOrJsonBlock(contentElement)) {
+            const copyButton = document.createElement('button');
+            copyButton.className = 'copy-response-button';
+            copyButton.title = 'Copy response';
+            copyButton.setAttribute('aria-label', 'Copy response');
+            copyButton.textContent = 'Copy';
             copyButton.addEventListener('click', (e) => {
                 this._copyToClipboard(content, e.currentTarget);
             });
+            messageElement.appendChild(copyButton);
         }
     }
 
     this.scrollToBottom(true);
     return messageElement;
+};
+
+/**
+ * Whether a rendered assistant message consists of a single code or JSON block and nothing else.
+ * Used to suppress the message-level copy button when the built-in copy affordance on the block
+ * would be redundant.
+ * @private
+ * @param {HTMLElement} contentElement
+ * @returns {boolean}
+ */
+AssistantTranscript.prototype._isOnlyCodeOrJsonBlock = function (contentElement) {
+    const clone = contentElement.cloneNode(true);
+    const blocks = clone.querySelectorAll('.code-viewer, .json-viewer');
+    if (blocks.length !== 1) {
+        return false;
+    }
+    blocks[0].remove();
+    return clone.textContent.replace(/\s/g, '') === '';
 };
 
 AssistantTranscript.prototype._escapeHtml = function (text) {
