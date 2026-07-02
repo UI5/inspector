@@ -447,7 +447,7 @@
             if (frameData[currentFrameId]) {
                 frameData[currentFrameId].consoleErrors = [];
             }
-            // Keep panel cache and page-side buffer in lock-step.
+            // Keep the panel cache and page-side buffer in sync.
             port.postMessage({
                 action: 'do-clear-console-errors',
                 frameId: currentFrameId
@@ -714,7 +714,7 @@
         },
 
         /**
-         * Cache the recent-console-errors snapshot pushed from the injected script.
+         * Cache the console-errors snapshot pushed from the injected script.
          * @param {Object} message
          */
         'on-console-errors-updated': function (message, messageSender) {

@@ -3,11 +3,11 @@
 const consoleErrorBuffer = require('./consoleErrorBuffer.js');
 
 /**
- * Browser-side glue around {@link consoleErrorBuffer}. Wraps `console.error`/`console.warn`
- * and subscribes to `window.onerror` / `unhandledrejection`, funneling every event into the
- * buffer. Idempotent — repeated calls return the same handle.
+ * Wraps `console.error`/`console.warn` and hooks `window.onerror` and `unhandledrejection`,
+ * feeding every event into a {@link consoleErrorBuffer}. Idempotent — repeated calls return
+ * the same handle.
  *
- * @param {Window} win - Injection target (the inspected page's window).
+ * @param {Window} win - The inspected page's window.
  * @param {Object} [options]
  * @param {Function} [options.onRecord] - Called after every recorded event.
  * @returns {{buffer: Object, uninstall: Function}}
@@ -23,12 +23,12 @@ function install(win, options) {
             try {
                 onRecord();
             } catch (e) {
-                // Subscriber failure must not break capture.
+                // Don't let a subscriber break capture.
             }
         }
     }
 
-    // Install-once guard: the injected script may re-run after `do-script-injection`.
+    // Install once — the injected script can re-run after `do-script-injection`.
     if (win.__ui5InspectorConsoleErrorCaptureInstalled) {
         return win.__ui5InspectorConsoleErrorCaptureInstalled;
     }
@@ -71,7 +71,7 @@ function install(win, options) {
                 stack: _extractStack(arguments)
             });
         } catch (e) {
-            // Capture failure must not break the developer's own console output.
+            // Don't break the page's own console.error.
         }
         if (typeof originalError === 'function') {
             return originalError.apply(win.console, arguments);
@@ -94,8 +94,8 @@ function install(win, options) {
     };
 
     win.onerror = function () {
-        // Read positional args off `arguments`: (message, source, lineno, colno, error)
-        // exceeds JSHint's `maxparams` cap.
+        // Signature (message, source, lineno, colno, error) — 5 params > JSHint maxparams,
+        // so read from `arguments`.
         const message = arguments[0];
         const source = arguments[1];
         const lineno = arguments[2];
