@@ -13,18 +13,28 @@ const ConversationStore = require('./ConversationStore.js');
  * @param {PromptClient} [options.promptClient]
  * @param {ConversationStore} [options.conversationStore]
  * @param {Function} [options.getAppInfo] - Returns the app metadata snapshot for session seeding.
+ * @param {Function} [options.getConsoleErrors] - Returns the current recent-console-errors snapshot.
+ *     Called once per {@link #sendUserMessage}; its result is forwarded to
+ *     {@link PromptBuilder#buildUserPrompt} as the third argument.
+ * @param {Function} [options.clearConsoleErrors] - Clears the recent-console-errors buffer for the
+ *     current URL. Invoked from {@link #clearConversation} and {@link #setUrl} so a "start fresh"
+ *     trigger resets both signals in lock-step.
  * @constructor
  */
 function AssistantController({
     promptBuilder = new PromptBuilder(),
     promptClient = new PromptClient(),
     conversationStore = new ConversationStore(),
-    getAppInfo = () => null
+    getAppInfo = () => null,
+    getConsoleErrors = () => [],
+    clearConsoleErrors = () => {}
 } = {}) {
     this._promptBuilder = promptBuilder;
     this._promptClient = promptClient;
     this._conversationStore = conversationStore;
     this._getAppInfo = getAppInfo;
+    this._getConsoleErrors = getConsoleErrors;
+    this._clearConsoleErrors = clearConsoleErrors;
 
     // Seeded as `unavailable` until `initialize()` resolves the real status.
     this._capabilityState = { status: 'unavailable', message: 'Checking model status...', progress: 0 };
@@ -152,6 +162,22 @@ AssistantController.prototype._seedSession = function () {
 };
 
 /**
+ * Invoke the injected `getConsoleErrors` accessor and coerce the result into an array. A missing
+ * or throwing accessor collapses to an empty array so a broken panel-side wiring never breaks the
+ * send flow — the Prompt Builder simply omits the section.
+ * @private
+ * @returns {Array}
+ */
+AssistantController.prototype._safeGetConsoleErrors = function () {
+    try {
+        const snapshot = this._getConsoleErrors();
+        return Array.isArray(snapshot) ? snapshot : [];
+    } catch (e) {
+        return [];
+    }
+};
+
+/**
  * Send a user message: build the prompt, stream the response, persist both turns, and emit stream
  * events. The current Inspection Context is injected — see `updateInspectionContext` for its
  * lifecycle.
@@ -160,7 +186,8 @@ AssistantController.prototype._seedSession = function () {
  * @returns {Promise<{content: string}>}
  */
 AssistantController.prototype.sendUserMessage = function (userMessage) {
-    const formatted = this._promptBuilder.buildUserPrompt(userMessage, this._inspectionContext);
+    const consoleErrors = this._safeGetConsoleErrors();
+    const formatted = this._promptBuilder.buildUserPrompt(userMessage, this._inspectionContext, consoleErrors);
 
     this._isStreaming = true;
 
@@ -255,6 +282,10 @@ AssistantController.prototype.setUrl = function (url) {
         this._emit('inspection-context-cleared');
     }
 
+    // The buffered errors belong to the previously inspected page. Reset alongside Inspection
+    // Context and Conversation Memory so a new debugging session starts truly fresh.
+    this._safeClearConsoleErrors();
+
     if (this._capabilityState.status !== 'ready') {
         return Promise.resolve();
     }
@@ -289,19 +320,35 @@ AssistantController.prototype.updateInspectionContext = function (context) {
 };
 
 /**
- * Clear conversation memory, destroy the session, and reseed. Re-emits `ready` so the view can
- * refresh the token counter — otherwise it keeps the pre-clear usage over a fresh session.
+ * Clear conversation memory, destroy the session, and reseed. Also clears the recent-console-errors
+ * buffer for the current URL so "start fresh" resets both signals in lock-step. Re-emits `ready` so
+ * the view can refresh the token counter — otherwise it keeps the pre-clear usage over a fresh
+ * session.
  *
  * @returns {Promise<void>}
  */
 AssistantController.prototype.clearConversation = function () {
     const rawSeed = this._conversationStore.clear(this._currentUrl).then(() => {
         this._conversationMemory = [];
+        this._safeClearConsoleErrors();
         this._promptClient.destroy();
         this._emit('conversation-cleared');
         return this._seedSession();
     });
     return this._trackReseedAndAnnounceReady(rawSeed);
+};
+
+/**
+ * Invoke the injected `clearConsoleErrors` callback. Swallows exceptions so a broken panel-side
+ * wiring never blocks the clear flow.
+ * @private
+ */
+AssistantController.prototype._safeClearConsoleErrors = function () {
+    try {
+        this._clearConsoleErrors();
+    } catch (e) {
+        // Intentionally swallowed. See _safeGetConsoleErrors for the same rationale.
+    }
 };
 
 /**
