@@ -3,18 +3,18 @@
 // Per-section safety-net caps. The shape-driven curation below is the primary volume control;
 // these caps only trigger on adversarial inputs (a control with 500 properties, a runaway
 // aggregation, etc.). Truncation appends `... [truncated]` so the model sees the boundary.
-var PROPERTIES_CAP = 800;
-var BINDINGS_CAP = 800;
-var AGGREGATIONS_CAP = 400;
+const PROPERTIES_CAP = 800;
+const BINDINGS_CAP = 800;
+const AGGREGATIONS_CAP = 400;
 
 // Bindings render their resolved values inline, so a single overlarge value cannot burn the
 // whole bindings-section budget on its own.
-var BINDING_VALUE_CAP = 100;
+const BINDING_VALUE_CAP = 100;
 
 // Placeholder for adversarial input that cannot be JSON-serialized (e.g. a circular graph).
 // Kept identical to the string the previous JSON-dump implementation emitted, so log-grep
 // muscle memory keeps working.
-var UNSERIALIZABLE_PLACEHOLDER = '(Data available but cannot serialize)';
+const UNSERIALIZABLE_PLACEHOLDER = '(Data available but cannot serialize)';
 
 /**
  * Stringify an arbitrary value for a prompt line. Objects go through JSON.stringify so we
@@ -49,7 +49,7 @@ function _stringifyValue(value) {
  * @returns {string}
  */
 function _stringifyBindingValue(value) {
-    var rendered = _stringifyValue(value);
+    const rendered = _stringifyValue(value);
     if (rendered.length > BINDING_VALUE_CAP) {
         return rendered.substring(0, BINDING_VALUE_CAP) + '...';
     }
@@ -71,10 +71,10 @@ function _renderAggregationLine(name, children) {
         return '- ' + name + ': empty';
     }
 
-    var count = children.length;
+    const count = children.length;
 
     if (count <= 3) {
-        var ids = children.map(function (child) {
+        const ids = children.map(function (child) {
             return (child && child.id) || '?';
         });
         return '- ' + name + ': ' + count + ' children — ' + ids.join(', ');
@@ -83,17 +83,17 @@ function _renderAggregationLine(name, children) {
     // Type histogram, insertion order preserved so the model sees the "dominant" type first
     // if children were listed in that order (they typically are — a Page's `content` is a
     // Text-heavy list, then a Button tail).
-    var histogram = Object.create(null);
-    var order = [];
-    for (var i = 0; i < children.length; i++) {
-        var type = (children[i] && children[i].type) || '?';
+    const histogram = Object.create(null);
+    const order = [];
+    for (let i = 0; i < children.length; i++) {
+        const type = (children[i] && children[i].type) || '?';
         if (!Object.prototype.hasOwnProperty.call(histogram, type)) {
             histogram[type] = 0;
             order.push(type);
         }
         histogram[type] += 1;
     }
-    var parts = order.map(function (type) {
+    const parts = order.map(function (type) {
         return type + ' × ' + histogram[type];
     });
 
