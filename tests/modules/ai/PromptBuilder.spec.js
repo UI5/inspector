@@ -979,6 +979,232 @@ describe('PromptBuilder', function () {
                 promptBuilder.buildUserPrompt('Q', inspectionContext).should.equal(expected);
             });
         });
+
+        describe('Recent Console Errors section', function () {
+            it('should omit the section entirely when the console-errors array is empty', function () {
+                const inspectionContext = {
+                    control: { type: 'sap.m.Button', id: 'btn' }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext, []);
+
+                result.should.not.contain('Recent Console Errors');
+            });
+
+            it('should omit the section entirely when the console-errors argument is missing', function () {
+                const inspectionContext = {
+                    control: { type: 'sap.m.Button', id: 'btn' }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.not.contain('Recent Console Errors');
+            });
+
+            it('should still wrap the user message in the sandwich when only console errors are present (no inspection context)', function () {
+                const consoleErrors = [
+                    { type: 'error', message: 'boom', frame: 'app.js:1', count: 1 }
+                ];
+
+                const result = promptBuilder.buildUserPrompt('Q', null, consoleErrors);
+
+                result.indexOf('User asked: Q').should.equal(0);
+                result.should.contain('Recent Console Errors:');
+                result.should.not.contain('Current UI5 Control Context');
+                result.lastIndexOf('Now answer: Q').should.be.greaterThan(-1);
+            });
+
+            it('should return the raw user message when neither inspection context nor console errors are present', function () {
+                promptBuilder.buildUserPrompt('Q', null, []).should.equal('Q');
+                promptBuilder.buildUserPrompt('Q', null, null).should.equal('Q');
+                promptBuilder.buildUserPrompt('Q', null, undefined).should.equal('Q');
+            });
+
+            it('should render entries newest-first (reverse of arrival order)', function () {
+                // Buffer records `first` then `second` then `third` — snapshot arrival-first.
+                const consoleErrors = [
+                    { type: 'error', message: 'first', count: 1 },
+                    { type: 'error', message: 'second', count: 1 },
+                    { type: 'error', message: 'third', count: 1 }
+                ];
+
+                const result = promptBuilder.buildUserPrompt('Q', null, consoleErrors);
+
+                const idxFirst = result.indexOf('first');
+                const idxSecond = result.indexOf('second');
+                const idxThird = result.indexOf('third');
+
+                idxThird.should.be.lessThan(idxSecond);
+                idxSecond.should.be.lessThan(idxFirst);
+            });
+
+            it('should annotate `(×N)` only when count > 1', function () {
+                const consoleErrors = [
+                    { type: 'error', message: 'once', count: 1 },
+                    { type: 'error', message: 'many', count: 20 }
+                ];
+
+                const result = promptBuilder.buildUserPrompt('Q', null, consoleErrors);
+
+                result.should.contain('- many (×20)');
+                result.should.contain('- once');
+                result.should.not.contain('once (×1)');
+            });
+
+            it('should render an indented `at <frame>` line beneath the message when a frame is present', function () {
+                const consoleErrors = [
+                    { type: 'error', message: 'boom', frame: 'app.js:42', count: 1 }
+                ];
+
+                const result = promptBuilder.buildUserPrompt('Q', null, consoleErrors);
+
+                result.should.contain('- boom\n  at app.js:42');
+            });
+
+            it('should omit the frame line entirely when the frame is empty', function () {
+                const consoleErrors = [
+                    { type: 'error', message: 'no stack here', frame: '', count: 1 }
+                ];
+
+                const result = promptBuilder.buildUserPrompt('Q', null, consoleErrors);
+
+                result.should.contain('- no stack here');
+                result.should.not.contain('\n  at ');
+            });
+
+            it('should place the Recent Console Errors block after the Current UI5 Control Context block', function () {
+                const inspectionContext = {
+                    control: { type: 'sap.m.Button', id: 'btn' }
+                };
+                const consoleErrors = [
+                    { type: 'error', message: 'boom', frame: 'app.js:1', count: 1 }
+                ];
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext, consoleErrors);
+
+                const controlIdx = result.indexOf('Current UI5 Control Context:');
+                const errorsIdx = result.indexOf('Recent Console Errors:');
+                controlIdx.should.be.greaterThan(-1);
+                errorsIdx.should.be.greaterThan(controlIdx);
+            });
+
+            it('should cap the section at ~400 characters and append the [truncated] marker on adversarial input', function () {
+                const consoleErrors = [];
+                for (let i = 0; i < 50; i++) {
+                    consoleErrors.push({
+                        type: 'error',
+                        message: 'a really long error message number ' + i + ' with more filler text to burn budget',
+                        frame: 'file' + i + '.js:' + i,
+                        count: 1
+                    });
+                }
+
+                const result = promptBuilder.buildUserPrompt('Q', null, consoleErrors);
+
+                result.should.contain('[truncated]');
+                // The section body is capped — check the whole errors block stays under ~450 chars
+                // (400 body cap + header + [truncated] tail).
+                const start = result.indexOf('Recent Console Errors:');
+                const end = result.indexOf('\n\nNow answer:');
+                const section = result.substring(start, end);
+                section.length.should.be.lessThan(500);
+            });
+
+            it('golden: errors only (no inspection context)', function () {
+                const consoleErrors = [
+                    { type: 'error', message: 'boom', frame: 'app.js:1', count: 1 }
+                ];
+
+                const expected =
+                    'User asked: Q\n\n' +
+                    'Recent Console Errors:\n' +
+                    '- boom\n' +
+                    '  at app.js:1\n\n' +
+                    'Now answer: Q';
+
+                promptBuilder.buildUserPrompt('Q', null, consoleErrors).should.equal(expected);
+            });
+
+            it('golden: errors + control', function () {
+                const inspectionContext = {
+                    control: { type: 'sap.m.Button', id: 'saveBtn' }
+                };
+                const consoleErrors = [
+                    { type: 'error', message: 'boom', frame: 'app.js:1', count: 1 }
+                ];
+
+                const expected =
+                    'User asked: Q\n\n' +
+                    'Current UI5 Control Context:\n' +
+                    '- Type: sap.m.Button\n' +
+                    '- ID: saveBtn\n\n' +
+                    'Recent Console Errors:\n' +
+                    '- boom\n' +
+                    '  at app.js:1\n\n' +
+                    'Now answer: Q';
+
+                promptBuilder.buildUserPrompt('Q', inspectionContext, consoleErrors).should.equal(expected);
+            });
+
+            it('golden: errors with a duplicate count', function () {
+                const consoleErrors = [
+                    { type: 'error', message: 'boom', frame: 'app.js:42', count: 20 }
+                ];
+
+                const expected =
+                    'User asked: Q\n\n' +
+                    'Recent Console Errors:\n' +
+                    '- boom (×20)\n' +
+                    '  at app.js:42\n\n' +
+                    'Now answer: Q';
+
+                promptBuilder.buildUserPrompt('Q', null, consoleErrors).should.equal(expected);
+            });
+
+            it('golden: errors with no stack', function () {
+                const consoleErrors = [
+                    { type: 'error', message: 'plain console.error output', frame: '', count: 1 }
+                ];
+
+                const expected =
+                    'User asked: Q\n\n' +
+                    'Recent Console Errors:\n' +
+                    '- plain console.error output\n\n' +
+                    'Now answer: Q';
+
+                promptBuilder.buildUserPrompt('Q', null, consoleErrors).should.equal(expected);
+            });
+
+            it('golden: adversarial (50 different errors triggering the section cap)', function () {
+                const consoleErrors = [];
+                for (let i = 0; i < 50; i++) {
+                    consoleErrors.push({
+                        type: 'error',
+                        message: 'error number ' + i + ' with plenty of filler text to burn budget quickly',
+                        frame: 'file' + i + '.js:' + (i * 10),
+                        count: 1
+                    });
+                }
+
+                const result = promptBuilder.buildUserPrompt('Q', null, consoleErrors);
+
+                // The section body is capped at 400 chars. Newest-first means index 49 comes
+                // first. Build the exact expected body by joining lines until we exceed 400 chars,
+                // then truncating at 400 + '... [truncated]'.
+                const reversedLines = consoleErrors.slice().reverse().map(function (entry) {
+                    return '- ' + entry.message + '\n  at ' + entry.frame;
+                });
+                const fullBody = reversedLines.join('\n');
+                const cappedBody = fullBody.substring(0, 400) + '... [truncated]';
+                const expected =
+                    'User asked: Q\n\n' +
+                    'Recent Console Errors:\n' +
+                    cappedBody + '\n\n' +
+                    'Now answer: Q';
+
+                result.should.equal(expected);
+            });
+        });
     });
 
     // ---- helpers for section-extraction assertions -----------------------------

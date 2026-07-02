@@ -6,6 +6,7 @@
 const PROPERTIES_CAP = 800;
 const BINDINGS_CAP = 800;
 const AGGREGATIONS_CAP = 400;
+const CONSOLE_ERRORS_CAP = 400;
 
 // Bindings render their resolved values inline, so a single overlarge value cannot burn the
 // whole bindings-section budget on its own.
@@ -217,7 +218,8 @@ PromptBuilder.prototype._buildAppContext = function (appInfo) {
 /**
  * Assemble the per-turn user prompt.
  *
- * When Inspection Context is present, wraps the user's message in a sandwich:
+ * When Inspection Context or Recent Console Errors are present, wraps the user's message in a
+ * sandwich:
  *
  *   User asked: <msg>
  *
@@ -231,24 +233,54 @@ PromptBuilder.prototype._buildAppContext = function (appInfo) {
  *   Aggregations:
  *   - name: N children (Type × N, Other × M)
  *
+ *   Recent Console Errors:
+ *   - <message> (×N)
+ *     at <frame>
+ *
  *   Now answer: <msg>
  *
- * Each of the three sub-sections is emitted only when its underlying data is non-empty.
- * When no Inspection Context is present, returns the raw user message unchanged.
+ * Each sub-section is emitted only when its underlying data is non-empty. When both Inspection
+ * Context and Recent Console Errors are absent, returns the raw user message unchanged.
  *
- * Inspection context is injected per prompt and never stored as conversation memory.
+ * Inspection Context is injected per prompt and never stored as Conversation Memory. Recent
+ * Console Errors are likewise per-turn — the ring buffer that produces them lives in the injected
+ * script layer, not in Conversation Memory.
  *
  * @param {string} userMessage
  * @param {Object} [inspectionContext]
+ * @param {Array<{type: string, message: string, frame: string, count: number}>} [consoleErrors]
  * @returns {string}
  */
-PromptBuilder.prototype.buildUserPrompt = function (userMessage, inspectionContext) {
-    if (!inspectionContext || !inspectionContext.control) {
+PromptBuilder.prototype.buildUserPrompt = function (userMessage, inspectionContext, consoleErrors) {
+    const hasControl = inspectionContext && inspectionContext.control;
+    const hasErrors = Array.isArray(consoleErrors) && consoleErrors.length > 0;
+
+    if (!hasControl && !hasErrors) {
         return userMessage;
     }
 
-    const control = inspectionContext.control;
+    const middleSections = [];
 
+    if (hasControl) {
+        middleSections.push(this._buildControlContextBlock(inspectionContext.control));
+    }
+
+    if (hasErrors) {
+        middleSections.push(this._buildConsoleErrorsBlock(consoleErrors));
+    }
+
+    return 'User asked: ' + userMessage + '\n\n' +
+        middleSections.join('\n\n') + '\n\n' +
+        'Now answer: ' + userMessage;
+};
+
+/**
+ * Render the Current UI5 Control Context block for a single control snapshot.
+ * @private
+ * @param {Object} control
+ * @returns {string}
+ */
+PromptBuilder.prototype._buildControlContextBlock = function (control) {
     const identityLines = [
         '- Type: ' + (control.type || 'Unknown'),
         '- ID: ' + (control.id || 'None')
@@ -271,11 +303,33 @@ PromptBuilder.prototype.buildUserPrompt = function (userMessage, inspectionConte
     }
 
     const contextBody = identityLines.concat(sections).join('\n');
-    const contextBlock = 'Current UI5 Control Context:\n' + contextBody;
+    return 'Current UI5 Control Context:\n' + contextBody;
+};
 
-    return 'User asked: ' + userMessage + '\n\n' +
-        contextBlock + '\n\n' +
-        'Now answer: ' + userMessage;
+/**
+ * Render the Recent Console Errors block. Errors are rendered newest-first, with each entry
+ * annotated `(×N)` when count > 1 and followed by an indented `at <frame>` line when a frame
+ * is present. The whole section is capped at `CONSOLE_ERRORS_CAP` — a runaway page firing
+ * hundreds of distinct errors will still hit the section cap before it can dilute the prompt.
+ * @private
+ * @param {Array<{type: string, message: string, frame: string, count: number}>} consoleErrors
+ * @returns {string}
+ */
+PromptBuilder.prototype._buildConsoleErrorsBlock = function (consoleErrors) {
+    // The buffer stores oldest-first (natural FIFO). The model gets more value from the most
+    // recent error at the top, so we render in reverse.
+    const reversed = consoleErrors.slice().reverse();
+
+    const lines = reversed.map(function (entry) {
+        const count = entry.count > 1 ? ' (×' + entry.count + ')' : '';
+        let line = '- ' + entry.message + count;
+        if (entry.frame) {
+            line += '\n  at ' + entry.frame;
+        }
+        return line;
+    });
+
+    return this._capSection('Recent Console Errors:', lines.join('\n'), CONSOLE_ERRORS_CAP);
 };
 
 /**
