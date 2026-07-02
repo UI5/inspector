@@ -1482,7 +1482,9 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
 .message-header .message-role {
   font-weight: 600;
 }
-.message-header .copy-response-button {
+.copy-response-button {
+  display: block;
+  margin: 6px auto 4px 0px;
   padding: 4px 8px;
   border: 1px solid #d4d4d4;
   background-color: #fff;
@@ -1492,12 +1494,12 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
   font-size: 11px;
   transition: all 0.2s;
 }
-.message-header .copy-response-button:hover {
+.copy-response-button:hover {
   background-color: #3879D9;
   color: #fff;
   border-color: #3879D9;
 }
-.message-header .copy-response-button:active {
+.copy-response-button:active {
   transform: scale(0.95);
 }
 .message-content {
@@ -1722,21 +1724,21 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
 .json-viewer .copy-code-button {
   position: absolute;
   top: 6px;
-  right: 6px;
-  background: #3879D9;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  padding: 4px 10px;
+  right: 13px;
+  background: transparent;
+  color: #a3a3a3;
+  border: 1px solid #d4d4d4;
+  border-radius: 3px;
+  padding: 2px 7px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 10px;
   z-index: 10;
   transition: all 0.2s;
-  opacity: 0.9;
 }
 .json-viewer .copy-code-button:hover {
-  background: #2460ba;
-  opacity: 1;
+  background: #3879D9;
+  color: #fff;
+  border-color: #3879D9;
 }
 .json-viewer .copy-code-button:active {
   transform: scale(0.95);
@@ -1813,21 +1815,21 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
 .code-viewer .copy-code-button {
   position: absolute;
   top: 6px;
-  right: 6px;
-  background: #3879D9;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  padding: 4px 10px;
+  right: 13px;
+  background: transparent;
+  color: #a3a3a3;
+  border: 1px solid #d4d4d4;
+  border-radius: 3px;
+  padding: 2px 7px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 10px;
   z-index: 10;
   transition: all 0.2s;
-  opacity: 0.9;
 }
 .code-viewer .copy-code-button:hover {
-  background: #2460ba;
-  opacity: 1;
+  background: #3879D9;
+  color: #fff;
+  border-color: #3879D9;
 }
 .code-viewer .copy-code-button:active {
   transform: scale(0.95);

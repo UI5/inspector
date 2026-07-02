@@ -323,7 +323,7 @@ AIChat.prototype._handleSendMessage = async function () {
         // Create placeholder for AI response without copy button (will add after completion)
         const messageElement = this._addMessage('assistant', '', false);
         this._streamingMessageElement = messageElement.querySelector('.message-content');
-        this._streamingMessageHeader = messageElement.querySelector('.message-header');
+        this._streamingMessageHeader = messageElement;
 
         // Add loading indicator as DOM elements (not HTML string to avoid escaping)
         const loadingIndicator = document.createElement('span');
@@ -372,16 +372,19 @@ AIChat.prototype._handleSendMessage = async function () {
         this._streamingMessageElement.innerHTML = this._parseMarkdown(fullResponse);
         this._initializeJsonViewers(this._streamingMessageElement);
 
-        // Add copy button now that response is complete
-        const copyButton = document.createElement('button');
-        copyButton.className = 'copy-response-button';
-        copyButton.title = 'Copy response';
-        copyButton.setAttribute('aria-label', 'Copy response');
-        copyButton.textContent = 'Copy';
-        copyButton.addEventListener('click', (e) => {
-            this._copyToClipboard(fullResponse, e.currentTarget);
-        });
-        this._streamingMessageHeader.appendChild(copyButton);
+        // Add copy button now that response is complete, unless it's only a code/JSON block
+        const isOnlyBlock = this._isOnlyCodeOrJsonBlock(this._streamingMessageElement);
+        if (!isOnlyBlock) {
+            const copyButton = document.createElement('button');
+            copyButton.className = 'copy-response-button';
+            copyButton.title = 'Copy response';
+            copyButton.setAttribute('aria-label', 'Copy response');
+            copyButton.textContent = 'Copy';
+            copyButton.addEventListener('click', (e) => {
+                this._copyToClipboard(fullResponse, e.currentTarget);
+            });
+            this._streamingMessageHeader.appendChild(copyButton);
+        }
 
         // Save AI response to storage
         await this._storageManager.saveMessage(this._currentUrl, {
@@ -504,6 +507,22 @@ AIChat.prototype._renderModelStatus = function (status, progress, message) {
 };
 
 /**
+ * Check if a message content element contains only a single code or JSON block with no other text.
+ * @private
+ * @param {HTMLElement} contentElement
+ * @returns {boolean}
+ */
+AIChat.prototype._isOnlyCodeOrJsonBlock = function (contentElement) {
+    var clone = contentElement.cloneNode(true);
+    var blocks = clone.querySelectorAll('.code-viewer, .json-viewer');
+    if (blocks.length !== 1) {
+        return false;
+    }
+    blocks[0].remove();
+    return clone.textContent.replace(/\s/g, '') === '';
+};
+
+/**
  * Add a message to the chat UI.
  * @param {string} role - 'user', 'assistant', or 'system'
  * @param {string} content - Message content
@@ -531,7 +550,6 @@ AIChat.prototype._addMessage = function (role, content, showCopyButton) {
     messageElement.innerHTML = `
         <div class="message-header">
             <span class="message-role">${role === 'user' ? 'You' : role === 'assistant' ? 'AI' : 'System'}</span>
-            ${shouldShowCopyButton ? '<button class="copy-response-button" title="Copy response" aria-label="Copy response">Copy</button>' : ''}
         </div>
         <div class="message-content">${formattedContent}</div>
     `;
@@ -543,12 +561,19 @@ AIChat.prototype._addMessage = function (role, content, showCopyButton) {
         const contentElement = messageElement.querySelector('.message-content');
         this._initializeJsonViewers(contentElement);
 
-        // Add copy button event listener if button exists
-        const copyButton = messageElement.querySelector('.copy-response-button');
-        if (copyButton) {
-            copyButton.addEventListener('click', (e) => {
-                this._copyToClipboard(content, e.currentTarget);
-            });
+        if (shouldShowCopyButton) {
+            const isOnlyBlock = this._isOnlyCodeOrJsonBlock(contentElement);
+            if (!isOnlyBlock) {
+                const copyButton = document.createElement('button');
+                copyButton.className = 'copy-response-button';
+                copyButton.title = 'Copy response';
+                copyButton.setAttribute('aria-label', 'Copy response');
+                copyButton.textContent = 'Copy';
+                copyButton.addEventListener('click', (e) => {
+                    this._copyToClipboard(content, e.currentTarget);
+                });
+                messageElement.appendChild(copyButton);
+            }
         }
     }
 

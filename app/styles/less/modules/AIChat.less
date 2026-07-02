@@ -250,26 +250,28 @@
     .message-role {
         font-weight: 600;
     }
+}
 
-    .copy-response-button {
-        padding: 4px 8px;
-        border: 1px solid @border-gray-lighter;
-        background-color: @bg-white;
-        color: @text-color;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 11px;
-        transition: all 0.2s;
+.copy-response-button {
+    display: block;
+    margin: 6px auto 4px 0px;
+    padding: 4px 8px;
+    border: 1px solid @border-gray-lighter;
+    background-color: @bg-white;
+    color: @text-color;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.2s;
 
-        &:hover {
-            background-color: @lighter-blue;
-            color: @white;
-            border-color: @lighter-blue;
-        }
+    &:hover {
+        background-color: @lighter-blue;
+        color: @white;
+        border-color: @lighter-blue;
+    }
 
-        &:active {
-            transform: scale(0.95);
-        }
+    &:active {
+        transform: scale(0.95);
     }
 }
 
@@ -538,21 +540,21 @@
     .copy-code-button {
         position: absolute;
         top: 6px;
-        right: 6px;
-        background: @lighter-blue;
-        color: @white;
-        border: none;
-        border-radius: 4px;
-        padding: 4px 10px;
+        right: 13px;
+        background: transparent;
+        color: @gray-dark;
+        border: 1px solid @border-gray-lighter;
+        border-radius: 3px;
+        padding: 2px 7px;
         cursor: pointer;
-        font-size: 11px;
+        font-size: 10px;
         z-index: 10;
         transition: all 0.2s;
-        opacity: 0.9;
 
         &:hover {
-            background: darken(@lighter-blue, 10%);
-            opacity: 1;
+            background: @lighter-blue;
+            color: @white;
+            border-color: @lighter-blue;
         }
 
         &:active {
@@ -649,21 +651,21 @@
     .copy-code-button {
         position: absolute;
         top: 6px;
-        right: 6px;
-        background: @lighter-blue;
-        color: @white;
-        border: none;
-        border-radius: 4px;
-        padding: 4px 10px;
+        right: 13px;
+        background: transparent;
+        color: @gray-dark;
+        border: 1px solid @border-gray-lighter;
+        border-radius: 3px;
+        padding: 2px 7px;
         cursor: pointer;
-        font-size: 11px;
+        font-size: 10px;
         z-index: 10;
         transition: all 0.2s;
-        opacity: 0.9;
 
         &:hover {
-            background: darken(@lighter-blue, 10%);
-            opacity: 1;
+            background: @lighter-blue;
+            color: @white;
+            border-color: @lighter-blue;
         }
 
         &:active {
