@@ -10,41 +10,108 @@ function PromptBuilder() {
 }
 
 /**
- * Adds a Current Application Context section when app metadata is provided.
+ * Build the system prompt.
  *
- * @param {Object} [appInfo]
+ * Assembles four static zones — Role, Rules, Style, and a copy-me Example demonstrating the
+ * prescribed uncertainty phrase — with an optional Current Application Context section stitched
+ * between Role and Rules so rule 4 ("prefer runtime data … shown above") reads truthfully.
+ *
+ * The Current Application Context section is omitted entirely when `appInfo` yields no recognized
+ * fields.
+ *
+ * @param {Object} [appInfo] App metadata snapshot: `common.data`, `configurationComputed.data`,
+ *     `urlParameters.data`, `loadedLibraries.data`. Missing fields are silently skipped.
  * @returns {string}
  */
 PromptBuilder.prototype.buildSystemPrompt = function (appInfo) {
-    let prompt = 'You are an AI assistant embedded in the UI5 Inspector, specialized in SAP UI5, OpenUI5, and UI5 Web Components. Your role is to help developers understand, debug, and build UI5-based applications.\n' +
-        'Provide clear, accurate, and practical guidance on components, APIs, accessibility, theming, layout, performance, and best practices. Prefer concise answers, but explain reasoning when needed. Use code snippets where helpful and format code clearly.\n' +
-        'Assume familiarity with JavaScript, HTML, and modern frameworks. When information is uncertain or version-dependent, say so clearly. Do not invent APIs or unsupported features.\n' +
-        'You cannot browse the web or open links. If external content is required, ask the user to paste it.\n' +
-        'Be neutral, direct, and developer-focused. Avoid marketing language, unnecessary filler, and generic disclaimers. Respond in the user\'s language and adapt tone to the context.';
+    const role = 'Role:\n' +
+        'You are an assistant embedded in the UI5 Inspector, specialized in SAP UI5, OpenUI5, and UI5 Web Components — helping developers understand, debug, and build UI5-based applications.';
 
-    if (appInfo) {
-        prompt += '\n\nCurrent Application Context:\n';
+    const rules = 'Rules:\n' +
+        '1. Always reply in English, regardless of the language of the user\'s message.\n' +
+        '2. When a Current UI5 Control Context section is present in the user prompt, only reference property, aggregation, event, and binding names that appear in it. If asked about a name not listed there, say so plainly.\n' +
+        '3. When naming a specific property, event, method, or enum value on a UI5 control, only state it if confident it exists. Otherwise use this exact phrase and add no further disclaimers:\n' +
+        'I\'m not certain <name> exists on <control> — verify in the API reference.\n' +
+        '4. Prefer runtime data (resolved binding values, console errors, application metadata shown above) over general assumptions when answering.';
 
-        if (appInfo.common && appInfo.common.data) {
-            const frameworkInfo = appInfo.common.data.OpenUI5 || appInfo.common.data.SAPUI5;
-            if (frameworkInfo) {
-                prompt += '- Framework: ' + frameworkInfo + '\n';
-            }
-        }
+    const style = 'Style:\n' +
+        'Neutral, direct, and developer-focused. Use code snippets for code. No marketing filler, no generic disclaimers.';
 
-        if (appInfo.configurationComputed && appInfo.configurationComputed.data && appInfo.configurationComputed.data.theme) {
-            prompt += '- Theme: ' + appInfo.configurationComputed.data.theme + '\n';
-        }
+    const example = 'Example — uncertainty phrase in use:\n' +
+        'Bad: "Yes, sap.m.Slider has a `flashOnClick` property that lights it up."\n' +
+        'Good: "I\'m not certain flashOnClick exists on sap.m.Slider — verify in the API reference."';
 
-        if (appInfo.loadedLibraries && appInfo.loadedLibraries.data) {
-            const libraries = Object.keys(appInfo.loadedLibraries.data);
-            if (libraries.length > 0) {
-                prompt += '- Loaded Libraries: ' + libraries.join(', ') + '\n';
-            }
+    const zones = [role];
+    const appContext = this._buildAppContext(appInfo);
+    if (appContext) {
+        zones.push(appContext);
+    }
+    zones.push(rules, style, example);
+
+    return zones.join('\n\n');
+};
+
+/**
+ * Build the Current Application Context section from app metadata. Returns an empty string when
+ * no recognized fields are present, so the caller can drop the section entirely rather than emit
+ * an orphan header.
+ * @private
+ * @param {Object} [appInfo]
+ * @returns {string}
+ */
+PromptBuilder.prototype._buildAppContext = function (appInfo) {
+    if (!appInfo) {
+        return '';
+    }
+
+    const lines = [];
+    const commonData = appInfo.common && appInfo.common.data;
+    const configData = appInfo.configurationComputed && appInfo.configurationComputed.data;
+    const urlData = appInfo.urlParameters && appInfo.urlParameters.data;
+    const libsData = appInfo.loadedLibraries && appInfo.loadedLibraries.data;
+
+    if (commonData) {
+        const frameworkInfo = commonData.OpenUI5 || commonData.SAPUI5;
+        if (frameworkInfo) {
+            lines.push('- Framework: ' + frameworkInfo);
         }
     }
 
-    return prompt;
+    if (configData && configData.theme) {
+        lines.push('- Theme: ' + configData.theme);
+    }
+
+    // The snapshot's field name for the UI locale is not fully pinned (see issue 01 —
+    // "language/locale field"), so accept either. Fixtures in the injected-script layer use
+    // `language`.
+    const locale = configData && (configData.language || configData.locale);
+    if (locale) {
+        lines.push('- UI locale: ' + locale);
+    }
+
+    // `sap-ui-debug` uses a presence check (not truthiness) because the spec says "only when the
+    // parameter is present" — an explicitly-empty or "false" value is still information about how
+    // the app was launched.
+    if (urlData && Object.prototype.hasOwnProperty.call(urlData, 'sap-ui-debug')) {
+        lines.push('- sap-ui-debug: ' + urlData['sap-ui-debug']);
+    }
+
+    if (commonData && commonData.Application) {
+        lines.push('- Application entry point: ' + commonData.Application);
+    }
+
+    if (libsData) {
+        const libraries = Object.keys(libsData);
+        if (libraries.length > 0) {
+            lines.push('- Loaded Libraries: ' + libraries.join(', '));
+        }
+    }
+
+    if (lines.length === 0) {
+        return '';
+    }
+
+    return 'Current Application Context:\n' + lines.join('\n');
 };
 
 /**
