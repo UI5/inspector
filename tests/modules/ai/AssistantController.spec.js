@@ -151,12 +151,16 @@ function createController(overrides) {
     const conversationStore = overrides.conversationStore || createFakeConversationStore();
     const promptBuilder = overrides.promptBuilder || new PromptBuilder();
     const getAppInfo = overrides.getAppInfo || function () { return null; };
+    const getConsoleErrors = overrides.getConsoleErrors || function () { return []; };
+    const clearConsoleErrors = overrides.clearConsoleErrors || function () {};
 
     const controller = new AssistantController({
         promptBuilder: promptBuilder,
         promptClient: promptClient,
         conversationStore: conversationStore,
-        getAppInfo: getAppInfo
+        getAppInfo: getAppInfo,
+        getConsoleErrors: getConsoleErrors,
+        clearConsoleErrors: clearConsoleErrors
     });
 
     const events = [];
@@ -690,6 +694,169 @@ describe('AssistantController', function () {
                     harness.promptClient.userPromptsByCall[0].should.contain('Type: sap.m.Input');
                     harness.promptClient.userPromptsByCall[0].should.not.contain('Type: sap.m.Button');
                 });
+            });
+        });
+    });
+
+    describe('#sendUserMessage() — Recent Console Errors seam', function () {
+        it('should invoke getConsoleErrors once per send and forward the snapshot to Prompt Builder as the third argument', function () {
+            const calls = [];
+            const snapshot = [
+                { type: 'error', message: 'boom', frame: 'app.js:1', count: 1 }
+            ];
+            const harness = createController({
+                getConsoleErrors: function () {
+                    calls.push('called');
+                    return snapshot;
+                }
+            });
+
+            return initializedReady(harness).then(function () {
+                const sendPromise = harness.controller.sendUserMessage('Explain');
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    streamCtrl.emitChunk('ok');
+                    streamCtrl.emitComplete();
+                    return sendPromise;
+                });
+            }).then(function () {
+                calls.should.have.length(1);
+                harness.promptClient.userPromptsByCall[0].should.contain('Recent Console Errors:');
+                harness.promptClient.userPromptsByCall[0].should.contain('- boom');
+            });
+        });
+
+        it('should not include the Recent Console Errors section when getConsoleErrors returns an empty array', function () {
+            const harness = createController({
+                getConsoleErrors: function () { return []; }
+            });
+
+            return initializedReady(harness).then(function () {
+                const sendPromise = harness.controller.sendUserMessage('Q');
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    streamCtrl.emitChunk('ok');
+                    streamCtrl.emitComplete();
+                    return sendPromise;
+                });
+            }).then(function () {
+                harness.promptClient.userPromptsByCall[0].should.not.contain('Recent Console Errors');
+            });
+        });
+
+        it('should fall back to no-errors when getConsoleErrors returns undefined instead of an array', function () {
+            const harness = createController({
+                getConsoleErrors: function () { return undefined; }
+            });
+
+            return initializedReady(harness).then(function () {
+                const sendPromise = harness.controller.sendUserMessage('Q');
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    streamCtrl.emitChunk('ok');
+                    streamCtrl.emitComplete();
+                    return sendPromise;
+                });
+            }).then(function () {
+                harness.promptClient.userPromptsByCall[0].should.equal('Q');
+            });
+        });
+
+        it('should fall back to no-errors when getConsoleErrors throws, so a broken panel wiring does not break the send flow', function () {
+            const harness = createController({
+                getConsoleErrors: function () { throw new Error('panel wiring broken'); }
+            });
+
+            return initializedReady(harness).then(function () {
+                const sendPromise = harness.controller.sendUserMessage('Q');
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    streamCtrl.emitChunk('ok');
+                    streamCtrl.emitComplete();
+                    return sendPromise;
+                });
+            }).then(function () {
+                harness.promptClient.userPromptsByCall[0].should.equal('Q');
+            });
+        });
+
+        it('should treat a missing getConsoleErrors option as an empty snapshot (backwards-compat with existing constructor callers)', function () {
+            const controller = new AssistantController({
+                promptBuilder: new PromptBuilder(),
+                promptClient: createFakePromptClient(),
+                conversationStore: createFakeConversationStore()
+                // no getConsoleErrors — the default should be safe.
+            });
+            controller._capabilityState = { status: 'ready', message: '', progress: 0 };
+            controller._currentUrl = 'https://example.com';
+
+            // The critical invariant: reading _safeGetConsoleErrors should not throw.
+            controller._safeGetConsoleErrors().should.deep.equal([]);
+        });
+    });
+
+    describe('#clearConversation() — Recent Console Errors buffer', function () {
+        it('should invoke clearConsoleErrors alongside conversation-store clear so the buffer resets in lock-step with Conversation Memory', function () {
+            let clearCalls = 0;
+            const harness = createController({
+                clearConsoleErrors: function () { clearCalls += 1; }
+            });
+
+            return initializedReady(harness).then(function () {
+                clearCalls = 0; // ignore any clears fired during initialize()/setUrl()
+                return harness.controller.clearConversation();
+            }).then(function () {
+                clearCalls.should.equal(1);
+            });
+        });
+
+        it('should not throw when clearConsoleErrors itself throws — a broken panel wiring must not block Clear Conversation', function () {
+            const harness = createController({
+                clearConsoleErrors: function () { throw new Error('panel wiring broken'); }
+            });
+
+            return initializedReady(harness).then(function () {
+                return harness.controller.clearConversation();
+            }).then(function () {
+                harness.controller._capabilityState.status.should.equal('ready');
+            });
+        });
+    });
+
+    describe('#setUrl() — Recent Console Errors buffer', function () {
+        it('should invoke clearConsoleErrors when the URL changes so buffered errors from the previous page do not leak into the new debugging session', function () {
+            let clearCalls = 0;
+            const harness = createController({
+                clearConsoleErrors: function () { clearCalls += 1; }
+            });
+
+            return initializedReady(harness).then(function () {
+                clearCalls = 0; // ignore any clears during initialize()
+                return harness.controller.setUrl('https://other.example.com');
+            }).then(function () {
+                clearCalls.should.equal(1);
+            });
+        });
+
+        it('should not invoke clearConsoleErrors when setUrl is called with the same URL (the dedupe path)', function () {
+            let clearCalls = 0;
+            const harness = createController({
+                clearConsoleErrors: function () { clearCalls += 1; }
+            });
+
+            return initializedReady(harness).then(function () {
+                clearCalls = 0;
+                return harness.controller.setUrl('https://example.com');
+            }).then(function () {
+                clearCalls.should.equal(0);
+            });
+        });
+
+        it('should not throw when clearConsoleErrors itself throws — a broken panel wiring must not block a URL change', function () {
+            const harness = createController({
+                clearConsoleErrors: function () { throw new Error('panel wiring broken'); }
+            });
+
+            return initializedReady(harness).then(function () {
+                return harness.controller.setUrl('https://other.example.com');
+            }).then(function () {
+                harness.controller._currentUrl.should.equal('https://other.example.com');
             });
         });
     });
