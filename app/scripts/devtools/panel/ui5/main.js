@@ -453,6 +453,26 @@
         getAppInfo: function () {
             var currentFrameId = framesSelect.getSelectedId();
             return frameData[currentFrameId] ? frameData[currentFrameId].applicationInformation : null;
+        },
+        getConsoleErrors: function () {
+            var currentFrameId = framesSelect.getSelectedId();
+            return frameData[currentFrameId] && frameData[currentFrameId].consoleErrors ?
+                frameData[currentFrameId].consoleErrors : [];
+        },
+        clearConsoleErrors: function () {
+            var currentFrameId = framesSelect.getSelectedId();
+            if (currentFrameId === undefined || currentFrameId === null) {
+                return;
+            }
+            if (frameData[currentFrameId]) {
+                frameData[currentFrameId].consoleErrors = [];
+            }
+            // Also tell the injected script to clear its live buffer so the panel's cache and
+            // the page-side buffer stay in lock-step.
+            port.postMessage({
+                action: 'do-clear-console-errors',
+                frameId: currentFrameId
+            });
         }
     });
 
@@ -712,6 +732,20 @@
             if (bFrameUpdate) {
                 framesSelect.setData(frameData);
             }
+        },
+
+        /**
+         * Store the recent-console-errors snapshot the injected script pushes on every error
+         * event. The AI Assistant reads this cache via its `getConsoleErrors` seam on each
+         * `sendUserMessage`.
+         * @param {Object} message
+         */
+        'on-console-errors-updated': function (message, messageSender) {
+            var frameId = messageSender.frameId;
+            if (!frameData[frameId]) {
+                return;
+            }
+            frameData[frameId].consoleErrors = message.consoleErrors || [];
         }
     };
 
