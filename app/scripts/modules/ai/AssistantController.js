@@ -114,34 +114,23 @@ AssistantController.prototype.initialize = function () {
 };
 
 /**
- * Store `rawSeed` as `_pendingReseed` (raw, so `sendUserMessage` awaiters observe rejection) and
- * translate a failure into `session-failed`.
+ * Store `rawSeed` as `_pendingReseed` (so `sendUserMessage` awaiters observe rejection) and
+ * translate a failure into `session-failed`. With `announceReady`, re-emit `ready` on success so
+ * the view can refresh session-tied state (token counter, quota styling, input enablement).
  *
  * @private
  * @param {Promise<*>} rawSeed
+ * @param {{announceReady?: boolean}} [options]
  * @returns {Promise<void>}
  */
-AssistantController.prototype._trackReseed = function (rawSeed) {
+AssistantController.prototype._trackReseed = function (rawSeed, { announceReady = false } = {}) {
     this._pendingReseed = rawSeed;
-    return rawSeed.then(undefined, (err) => {
-        this._setCapabilityState('session-failed', err && err.message ? err.message : 'Session creation failed', 0);
-    });
-};
-
-/**
- * Like `_trackReseed`, but re-emits `ready` on success so the view can refresh session-tied state
- * (token counter, quota styling, input enablement). Used by destroy-then-reseed paths. On failure,
- * does not emit `ready` — `session-failed` is already surfaced.
- *
- * @private
- * @param {Promise<*>} rawSeed
- * @returns {Promise<void>}
- */
-AssistantController.prototype._trackReseedAndAnnounceReady = function (rawSeed) {
-    return this._trackReseed(rawSeed).then(() => {
-        if (this._capabilityState.status === 'ready') {
+    return rawSeed.then(() => {
+        if (announceReady && this._capabilityState.status === 'ready') {
             this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
         }
+    }, (err) => {
+        this._setCapabilityState('session-failed', err && err.message ? err.message : 'Session creation failed', 0);
     });
 };
 
@@ -285,7 +274,7 @@ AssistantController.prototype.setUrl = function (url) {
         this._promptClient.destroy();
         return this._seedSession();
     });
-    return this._trackReseedAndAnnounceReady(rawSeed);
+    return this._trackReseed(rawSeed, { announceReady: true });
 };
 
 /**
@@ -318,7 +307,7 @@ AssistantController.prototype.clearConversation = function () {
         this._emit('conversation-cleared');
         return this._seedSession();
     });
-    return this._trackReseedAndAnnounceReady(rawSeed);
+    return this._trackReseed(rawSeed, { announceReady: true });
 };
 
 /**
