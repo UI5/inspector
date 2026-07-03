@@ -17,6 +17,10 @@ function createFakePromptClient() {
         usageInfo: null,
         downloadShouldFail: false,
         downloadProgressValues: [],
+        // Test-controllable return value for hasActiveSession(). Defaults to true — the
+        // Prompt Client normally has a live session while the panel is open. Tests flip this
+        // to false to simulate Chrome having killed the idle background service worker.
+        hasActiveSessionResult: true,
 
         seedMessagesByCall: [],
         userPromptsByCall: [],
@@ -28,6 +32,10 @@ function createFakePromptClient() {
 
         checkAvailability: function () {
             return Promise.resolve(fake.availabilityResult);
+        },
+
+        hasActiveSession: function () {
+            return fake.hasActiveSessionResult;
         },
 
         downloadModel: function (onProgress) {
@@ -1279,6 +1287,171 @@ describe('AssistantController', function () {
                     });
                 }).then(function () {
                     harness.promptClient.userPromptsByCall.should.deep.equal(['after url change']);
+                });
+            });
+        });
+    });
+
+    describe('#sendUserMessage() — idle-killed session recovery', function () {
+        it('should reseed the session before streaming when the Prompt Client reports no active session, so the Send after Chrome kills the idle background service worker does not surface as a streaming-failed banner', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                // Arrange: simulate Chrome having torn down the idle background service worker.
+                // The Prompt Client's `onDisconnect` handler already flipped `_hasActiveSession`
+                // to false on the real client; the fake exposes the same signal.
+                harness.promptClient.hasActiveSessionResult = false;
+                const seedCallsBeforeSend = harness.promptClient.seedMessagesByCall.length;
+
+                const sendPromise = harness.controller.sendUserMessage('after idle');
+
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    // A recovery reseed must have fired before promptStreaming.
+                    harness.promptClient.seedMessagesByCall.length.should.equal(seedCallsBeforeSend + 1);
+                    streamCtrl.emitChunk('ok');
+                    streamCtrl.emitComplete();
+                    return sendPromise;
+                }).then(function () {
+                    harness.promptClient.userPromptsByCall.should.deep.equal(['after idle']);
+                    const completeEvents = harness.events.filter(function (e) {
+                        return e.type === 'stream-complete';
+                    });
+                    completeEvents.should.have.length(1);
+                });
+            });
+        });
+
+        it('should carry the current Conversation Memory into the idle-recovery reseed so follow-up questions after Chrome kills the idle session still reference earlier turns', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                // Establish prior turns with a normal Send.
+                const firstSend = harness.controller.sendUserMessage('first question');
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    streamCtrl.emitChunk('first answer');
+                    streamCtrl.emitComplete();
+                    return firstSend;
+                });
+            }).then(function () {
+                // Idle window: session dies.
+                harness.promptClient.hasActiveSessionResult = false;
+                const seedCallsBeforeSend = harness.promptClient.seedMessagesByCall.length;
+
+                const followUp = harness.controller.sendUserMessage('follow-up');
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    const reseedSeed = harness.promptClient.seedMessagesByCall[seedCallsBeforeSend];
+                    // The recovery reseed's seed messages must contain the earlier user + assistant turns.
+                    const roles = reseedSeed.map(function (m) { return m.role; });
+                    roles.should.deep.equal(['system', 'user', 'assistant']);
+                    reseedSeed[1].should.deep.equal({ role: 'user', content: 'first question' });
+                    reseedSeed[2].should.deep.equal({ role: 'assistant', content: 'first answer' });
+
+                    streamCtrl.emitChunk('follow-up answer');
+                    streamCtrl.emitComplete();
+                    return followUp;
+                });
+            });
+        });
+
+        it('should not trigger a second reseed when a clearConversation reseed is already in flight and Send arrives with no active session, so exactly one createSession fires and the two paths do not race', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                // Defer the reseed createSession so the reseed window from clearConversation stays open.
+                harness.promptClient.deferredCreateSession = createDeferred();
+                const seedCallsBeforeClear = harness.promptClient.seedMessagesByCall.length;
+
+                harness.controller.clearConversation();
+                // Simulate the background session being dead at this moment too — Send must
+                // NOT kick off a second reseed on top of the in-flight one.
+                harness.promptClient.hasActiveSessionResult = false;
+                const sendPromise = harness.controller.sendUserMessage('during clear');
+
+                return new Promise(function (resolve) { setTimeout(resolve, 0); }).then(function () {
+                    // Exactly one createSession call fired between clearConversation and Send.
+                    harness.promptClient.seedMessagesByCall.length.should.equal(seedCallsBeforeClear + 1);
+                    harness.promptClient.userPromptsByCall.should.have.length(0);
+
+                    // Resolve the deferred reseed — Send should now proceed on that same session.
+                    harness.promptClient.deferredCreateSession.resolve(true);
+                    // The reseed just succeeded; from here on the fake reports an active session again.
+                    harness.promptClient.hasActiveSessionResult = true;
+
+                    return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                        // Still exactly one createSession call across the whole scenario.
+                        harness.promptClient.seedMessagesByCall.length.should.equal(seedCallsBeforeClear + 1);
+                        streamCtrl.emitChunk('ok');
+                        streamCtrl.emitComplete();
+                        return sendPromise;
+                    });
+                }).then(function () {
+                    harness.promptClient.userPromptsByCall.should.deep.equal(['during clear']);
+                });
+            });
+        });
+
+        it('should reject sendUserMessage with the seed error and leave the Assistant Capability State at session-failed when the idle-recovery reseed itself fails, instead of overwriting it with streaming-failed', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                harness.promptClient.hasActiveSessionResult = false;
+                harness.promptClient.createSessionError = new Error('idle recovery reseed failed');
+
+                return harness.controller.sendUserMessage('after idle').then(function () {
+                    throw new Error('Expected sendUserMessage to reject when the idle-recovery reseed failed');
+                }, function (err) {
+                    err.message.should.contain('idle recovery reseed failed');
+                }).then(function () {
+                    harness.controller._capabilityState.status.should.equal('session-failed');
+                    const streamingFailedStates = harness.capabilityStates.filter(function (s) {
+                        return s.status === 'streaming-failed';
+                    });
+                    streamingFailedStates.should.have.length(0);
+                    harness.promptClient.userPromptsByCall.should.have.length(0);
+                });
+            });
+        });
+
+        it('should not trigger any extra createSession on Send when the Prompt Client reports an active session, so the alive path stays byte-identical to today', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                // Default is hasActiveSessionResult === true. The initialize() reseed already ran.
+                const seedCallsAfterInit = harness.promptClient.seedMessagesByCall.length;
+                seedCallsAfterInit.should.equal(1);
+
+                const sendPromise = harness.controller.sendUserMessage('normal send');
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    // No idle-recovery reseed fired: seed count unchanged since init.
+                    harness.promptClient.seedMessagesByCall.length.should.equal(seedCallsAfterInit);
+                    streamCtrl.emitChunk('ok');
+                    streamCtrl.emitComplete();
+                    return sendPromise;
+                }).then(function () {
+                    harness.promptClient.seedMessagesByCall.length.should.equal(seedCallsAfterInit);
+                    harness.promptClient.userPromptsByCall.should.deep.equal(['normal send']);
+                });
+            });
+        });
+
+        it('should still inject the attached Inspection Context into the formatted user prompt after an idle-recovery reseed, so pressing Send after coming back does not silently drop the selected control', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                harness.controller.updateInspectionContext({
+                    control: { id: '__button0', type: 'sap.m.Button', properties: { text: 'Save' } }
+                });
+                harness.promptClient.hasActiveSessionResult = false;
+
+                const sendPromise = harness.controller.sendUserMessage('what does it do?');
+                return awaitStreamController(harness.promptClient).then(function (streamCtrl) {
+                    streamCtrl.emitChunk('ok');
+                    streamCtrl.emitComplete();
+                    return sendPromise;
+                }).then(function () {
+                    harness.promptClient.userPromptsByCall.should.have.length(1);
+                    const formatted = harness.promptClient.userPromptsByCall[0];
+                    formatted.should.contain('sap.m.Button');
                 });
             });
         });

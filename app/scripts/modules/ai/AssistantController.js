@@ -41,10 +41,10 @@ function AssistantController({
     this._conversationMemory = [];
     this._inspectionContext = null;
     this._isStreaming = false;
-    // The in-flight reseed. `sendUserMessage` awaits this so a Send during a reseed window does
-    // not race the Prompt Client's "No active session" guard. A reseed rejection is caught by
-    // `_trackReseed` and surfaced as `session-failed`.
-    this._pendingReseed = Promise.resolve();
+    // The in-flight reseed, or `null` when no reseed is running. `sendUserMessage` awaits this
+    // so a Send during a reseed window does not race the Prompt Client's "No active session"
+    // guard. A reseed rejection is caught by `_trackReseed` and surfaced as `session-failed`.
+    this._pendingReseed = null;
 }
 
 /**
@@ -118,6 +118,9 @@ AssistantController.prototype.initialize = function () {
  * translate a failure into `session-failed`. With `announceReady`, re-emit `ready` on success so
  * the view can refresh session-tied state (token counter, quota styling, input enablement).
  *
+ * `_pendingReseed` is cleared back to `null` when the reseed settles so the idle-recovery check
+ * in `sendUserMessage` has a single source of truth for "no reseed in flight".
+ *
  * @private
  * @param {Promise<*>} rawSeed
  * @param {{announceReady?: boolean}} [options]
@@ -126,10 +129,12 @@ AssistantController.prototype.initialize = function () {
 AssistantController.prototype._trackReseed = function (rawSeed, { announceReady = false } = {}) {
     this._pendingReseed = rawSeed;
     return rawSeed.then(() => {
+        this._pendingReseed = null;
         if (announceReady && this._capabilityState.status === 'ready') {
             this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
         }
     }, (err) => {
+        this._pendingReseed = null;
         this._setCapabilityState('session-failed', err && err.message ? err.message : 'Session creation failed', 0);
     });
 };
@@ -174,9 +179,21 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
 
     this._isStreaming = true;
 
-    // Wait for any in-flight reseed so a Send during the destroy-then-reseed window does not
-    // race the Prompt Client's "No active session" guard.
-    return this._pendingReseed.then(() => {
+    // Idle recovery: Chrome may have killed the extension's background service worker while
+    // the panel was idle, tearing down the Prompt API session without the controller knowing.
+    // If no reseed is already in flight, kick one off so the Send transparently reseeds
+    // instead of tripping the Prompt Client's "No active session" guard. If another reseed
+    // origin (setUrl/clearConversation/downloadModel) is already running, `_pendingReseed`
+    // is non-null and the Send simply awaits the existing reseed — same invariant as before.
+    if (!this._promptClient.hasActiveSession() && this._pendingReseed === null) {
+        this._trackReseed(this._seedSession());
+    }
+
+    // Await any in-flight reseed (idle-recovery just above, or an earlier
+    // setUrl/clearConversation/downloadModel) so a Send during a reseed window does not race
+    // the Prompt Client's "No active session" guard. Falls through to a resolved sentinel
+    // when nothing is pending.
+    return (this._pendingReseed || Promise.resolve()).then(() => {
         return this._promptClient.promptStreaming(formatted).then((stream) => {
             return this._consumeStream(stream);
         }).then((fullText) => {

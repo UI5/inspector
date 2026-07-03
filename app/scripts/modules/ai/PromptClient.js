@@ -289,6 +289,18 @@ PromptClient.prototype.promptStreaming = function (formattedUserMessage) {
 };
 
 /**
+ * Whether the transport currently has an active local AI session. Flips to `false` when the
+ * background port disconnects (e.g. Chrome killed the idle service worker) so the Assistant
+ * Controller can reseed lazily on the next Send instead of surfacing the "No active session"
+ * guard as a `streaming-failed` banner.
+ *
+ * @returns {boolean}
+ */
+PromptClient.prototype.hasActiveSession = function () {
+    return this._hasActiveSession;
+};
+
+/**
  * @returns {Promise<Object|null>} {inputUsage, inputQuota, percentUsed} or null.
  */
 PromptClient.prototype.getUsageInfo = function () {
