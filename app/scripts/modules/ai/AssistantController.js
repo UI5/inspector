@@ -53,9 +53,6 @@ function AssistantController({
  * Events: `capability-state-changed`, `conversation-loaded`, `stream-chunk`, `stream-complete`,
  * `stream-failed`, `conversation-cleared`, `inspection-context-cleared`.
  *
- * In-process event bus, not `chrome.runtime` message dispatch. The cross-process port protocol
- * lives in PromptClient.
- *
  * @param {string} event
  * @param {Function} handler
  */
@@ -188,10 +185,8 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
 
     this._isStreaming = true;
 
-    // Wait for any in-flight reseed so a Send during the destroy-then-reseed window does not race
-    // the Prompt Client's "No active session" guard. If the reseed rejects, reject the send with
-    // the same error and leave `session-failed` in place — do not overwrite it with
-    // `streaming-failed`.
+    // Wait for any in-flight reseed so a Send during the destroy-then-reseed window does not
+    // race the Prompt Client's "No active session" guard.
     return this._pendingReseed.then(() => {
         return this._promptClient.promptStreaming(formatted).then((stream) => {
             return this._consumeStream(stream);
@@ -294,15 +289,9 @@ AssistantController.prototype.setUrl = function (url) {
 };
 
 /**
- * Set the Inspection Context for subsequent prompts. It is sticky — reused on every
- * `sendUserMessage` until:
- *   1. A different snapshot replaces it (`updateInspectionContext(ctx2)`).
- *   2. The developer detaches it (`updateInspectionContext(null)`).
- *   3. The inspected page navigates (`setUrl(differentUrl)`).
- *
- * `updateInspectionContext(null)` emits `inspection-context-cleared` if a snapshot was attached;
- * replacement does not. Never persisted. Clearing Conversation Memory is orthogonal —
- * see `clearConversation`.
+ * Set the Inspection Context for subsequent prompts. Sticky — reused on every `sendUserMessage`
+ * until replaced, cleared with `null`, or dropped by `setUrl`. Clearing with `null` emits
+ * `inspection-context-cleared`; replacement does not. Never persisted.
  *
  * @param {Object} [context] - Inspection context with optional `control` snapshot.
  */

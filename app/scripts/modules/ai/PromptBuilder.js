@@ -45,10 +45,6 @@ function _stringifyBindingValue(value) {
 }
 
 /**
- * Render one aggregation entry.
- *   - empty          → `- <name>: empty`
- *   - <= 3 children  → `- <name>: N children — id1, id2, id3`
- *   - > 3 children   → `- <name>: N children (<Type> × N, ...)`
  * @private
  */
 function _renderAggregationLine(name, children) {
@@ -328,8 +324,6 @@ PromptBuilder.prototype._renderBindingsSection = function (bindings) {
 };
 
 /**
- * Render one binding entry.
- *   `- <prop> ← "<path>"[ = <value>] (model: <model>[, type: <type>][, formatter: yes])`
  * @private
  */
 PromptBuilder.prototype._renderBindingLine = function (propertyName, binding) {
