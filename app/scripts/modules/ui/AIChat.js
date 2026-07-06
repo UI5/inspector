@@ -42,6 +42,8 @@ function AIChat(containerId, {
     this._getConsoleErrors = getConsoleErrors;
     this._clearConsoleErrors = clearConsoleErrors;
     this._controller = controller || new AssistantController({
+        providerName: 'gemini-nano',
+        providerConfig: {},
         getAppInfo: this._getAppInfo || function () { return null; },
         getConsoleErrors: this._getConsoleErrors || function () { return []; },
         clearConsoleErrors: this._clearConsoleErrors || function () {}

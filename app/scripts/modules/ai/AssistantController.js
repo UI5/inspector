@@ -1,20 +1,22 @@
 'use strict';
 
 const PromptBuilder = require('./PromptBuilder.js');
-const GeminiNanoProvider = require('./GeminiNanoProvider.js');
+const providersRegistry = require('./providers/index.js');
 const ConversationStore = require('./ConversationStore.js');
 
 /**
  * Coordinates the AI Assistant: capability state, per-URL conversation memory, inspection context,
  * streaming, and persistence. Delegates all provider-specific concerns (session lifecycle, prefix
- * caching, download progress) to the injected Provider. No direct Chrome, DOM, or storage
- * dependencies.
+ * caching, download progress) to the Provider constructed via the registry. No direct Chrome, DOM,
+ * or storage dependencies.
  *
  * @param {Object} [options]
  * @param {PromptBuilder} [options.promptBuilder]
- * @param {Object} [options.provider] - Any object implementing the Provider interface:
- *     `checkAvailability`, `sendMessage`, `destroy`, and optionally `downloadModel`,
- *     `getUsageInfo`.
+ * @param {string} [options.providerName] - Registry key of the provider to construct. Defaults to
+ *     `'gemini-nano'`.
+ * @param {Object} [options.providerConfig] - Config object passed to the provider constructor.
+ * @param {Function} [options.createProvider] - Test seam: `(name, config) => Provider`. Defaults to
+ *     the registry factory.
  * @param {ConversationStore} [options.conversationStore]
  * @param {Function} [options.getAppInfo] - Returns the app metadata snapshot for prompt building.
  * @param {Function} [options.getConsoleErrors] - Returns the recent-console-errors snapshot.
@@ -23,14 +25,16 @@ const ConversationStore = require('./ConversationStore.js');
  */
 function AssistantController({
     promptBuilder = new PromptBuilder(),
-    provider = new GeminiNanoProvider(),
+    providerName = 'gemini-nano',
+    providerConfig = {},
+    createProvider = providersRegistry.createProvider,
     conversationStore = new ConversationStore(),
     getAppInfo = () => null,
     getConsoleErrors = () => [],
     clearConsoleErrors = () => {}
 } = {}) {
     this._promptBuilder = promptBuilder;
-    this._provider = provider;
+    this._provider = createProvider(providerName, providerConfig);
     this._conversationStore = conversationStore;
     this._getAppInfo = getAppInfo;
     this._getConsoleErrors = getConsoleErrors;
