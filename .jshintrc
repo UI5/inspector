@@ -166,6 +166,7 @@
         "Event": true,
 		"ace": true,
 		"self": true,
-		"AbortController": true
+		"AbortController": true,
+		"AbortSignal": true
     }
 }

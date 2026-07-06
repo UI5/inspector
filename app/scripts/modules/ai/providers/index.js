@@ -1,6 +1,7 @@
 'use strict';
 
 const GeminiNanoProvider = require('../GeminiNanoProvider.js');
+const OpenAIProvider = require('../OpenAIProvider.js');
 
 /**
  * Static registry of AI providers available to the assistant. Keys are provider names persisted in
@@ -16,6 +17,15 @@ const PROVIDERS = {
         displayName: 'Gemini Nano (on-device)',
         ProviderClass: GeminiNanoProvider,
         configSchema: []
+    },
+    'openai': {
+        displayName: 'OpenAI-compatible',
+        ProviderClass: OpenAIProvider,
+        configSchema: [
+            { key: 'baseUrl', label: 'Base URL', type: 'text', required: true },
+            { key: 'apiKey', label: 'API Key', type: 'password', required: true },
+            { key: 'model', label: 'Model', type: 'text', required: true }
+        ]
     }
 };
 
