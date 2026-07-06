@@ -1042,6 +1042,170 @@ describe('AssistantController', function () {
         });
     });
 
+    describe('#setProvider() — hot-swap', function () {
+        function createControllerWithFactory() {
+            const initialProvider = createFakeProvider();
+            const conversationStore = createFakeConversationStore();
+            const constructed = [initialProvider];
+            const configs = [];
+            const controller = new AssistantController({
+                createProvider: function (name, config) {
+                    if (constructed.length === 1 && configs.length === 0) {
+                        configs.push({ name: name, config: config });
+                        return initialProvider;
+                    }
+                    const next = createFakeProvider();
+                    constructed.push(next);
+                    configs.push({ name: name, config: config });
+                    return next;
+                },
+                conversationStore: conversationStore
+            });
+            return {
+                controller: controller,
+                constructed: constructed,
+                configs: configs,
+                conversationStore: conversationStore
+            };
+        }
+
+        it('should destroy the old provider when swapping', function () {
+            const h = createControllerWithFactory();
+            h.controller.setUrl('https://example.com');
+            return h.controller.initialize().then(function () {
+                return h.controller.setProvider('openai', { baseUrl: 'x', apiKey: 'y', model: 'z' });
+            }).then(function () {
+                h.constructed[0].destroyed.should.equal(1);
+            });
+        });
+
+        it('should construct the new provider through the registry factory with the given name and config', function () {
+            const h = createControllerWithFactory();
+            h.controller.setUrl('https://example.com');
+            return h.controller.initialize().then(function () {
+                return h.controller.setProvider('openai', { baseUrl: 'http://x', apiKey: 'k', model: 'm' });
+            }).then(function () {
+                const last = h.configs[h.configs.length - 1];
+                last.name.should.equal('openai');
+                last.config.should.deep.equal({ baseUrl: 'http://x', apiKey: 'k', model: 'm' });
+            });
+        });
+
+        it('should preserve conversation memory across the swap so subsequent sends still carry history', function () {
+            const h = createControllerWithFactory();
+            h.controller.setUrl('https://example.com');
+            return h.controller.initialize().then(function () {
+                const firstSend = h.controller.sendUserMessage('Q1');
+                return awaitStreamController(h.constructed[0]).then(function (sc) {
+                    sc.emitChunk('A1');
+                    sc.emitComplete();
+                    return firstSend;
+                });
+            }).then(function () {
+                return h.controller.setProvider('openai', {});
+            }).then(function () {
+                const nextProvider = h.constructed[1];
+                const secondSend = h.controller.sendUserMessage('Q2');
+                return awaitStreamController(nextProvider).then(function (sc) {
+                    const messages = nextProvider.messagesByCall[0];
+                    const roles = messages.map(function (m) { return m.role; });
+                    roles.should.deep.equal(['system', 'user', 'assistant', 'user']);
+                    messages[1].content.should.equal('Q1');
+                    messages[2].content.should.equal('A1');
+                    messages[3].content.should.equal('Q2');
+                    sc.emitChunk('A2');
+                    sc.emitComplete();
+                    return secondSend;
+                });
+            });
+        });
+
+        it('should abort the in-flight stream by firing its AbortSignal', function () {
+            const h = createControllerWithFactory();
+            const signals = [];
+            h.constructed[0].sendMessage = function (messages, options) {
+                signals.push(options.signal);
+                return new Promise(function () { /* never resolves */ });
+            };
+            h.controller.setUrl('https://example.com');
+            return h.controller.initialize().then(function () {
+                h.controller.sendUserMessage('Q').catch(function () {});
+                return new Promise(function (r) { setTimeout(r, 10); });
+            }).then(function () {
+                signals.should.have.length(1);
+                signals[0].aborted.should.equal(false);
+                return h.controller.setProvider('openai', {});
+            }).then(function () {
+                signals[0].aborted.should.equal(true);
+            });
+        });
+
+        it('should emit capability-state-changed after checking availability on the new provider', function () {
+            const h = createControllerWithFactory();
+            h.controller.setUrl('https://example.com');
+            return h.controller.initialize().then(function () {
+                const beforeSwap = h.controller._capabilityState;
+                beforeSwap.status.should.equal('ready');
+                const stateCountBeforeSwap = (function () {
+                    let n = 0;
+                    h.controller._listeners['capability-state-changed'] = h.controller._listeners['capability-state-changed'] || [];
+                    return n;
+                })();
+                const events = [];
+                h.controller.on('capability-state-changed', function (s) { events.push(s); });
+                return h.controller.setProvider('openai', {}).then(function () {
+                    void stateCountBeforeSwap;
+                    events.length.should.be.at.least(1);
+                    events[events.length - 1].status.should.equal('ready');
+                });
+            });
+        });
+
+        it('should call checkAvailability on the new provider (not the old one) after swap', function () {
+            const h = createControllerWithFactory();
+            let firstChecks = 0;
+            const originalCheck = h.constructed[0].checkAvailability;
+            h.constructed[0].checkAvailability = function () {
+                firstChecks += 1;
+                return originalCheck.call(this);
+            };
+            h.controller.setUrl('https://example.com');
+            return h.controller.initialize().then(function () {
+                const initialFirstChecks = firstChecks;
+                return h.controller.setProvider('openai', {}).then(function () {
+                    firstChecks.should.equal(initialFirstChecks);
+                });
+            });
+        });
+        it('should not emit stream-failed nor flip capability to streaming-failed when the in-flight send is aborted by the swap', function () {
+            const h = createControllerWithFactory();
+            h.constructed[0].sendMessage = function (messages, options) {
+                return new Promise(function (resolve, reject) {
+                    options.signal.addEventListener('abort', function () {
+                        const err = new Error('Aborted');
+                        err.name = 'AbortError';
+                        reject(err);
+                    });
+                });
+            };
+            let streamFailedEvents = 0;
+            h.controller.on('stream-failed', function () { streamFailedEvents += 1; });
+            h.controller.setUrl('https://example.com');
+            return h.controller.initialize().then(function () {
+                const sendPromise = h.controller.sendUserMessage('Q').catch(function () {});
+                return new Promise(function (r) { setTimeout(r, 5); }).then(function () {
+                    return h.controller.setProvider('openai', {});
+                }).then(function () {
+                    return sendPromise;
+                }).then(function () {
+                    streamFailedEvents.should.equal(0);
+                    h.controller._capabilityState.status.should.equal('ready');
+                });
+            });
+        });
+
+    });
+
     describe('idle-killed session recovery (provider-internal)', function () {
         it('should carry the current Conversation Memory into the messages array on every send, so a send after Chrome kills the idle background service worker still references earlier turns via the provider\'s own re-seeding', function () {
             const harness = createController();
