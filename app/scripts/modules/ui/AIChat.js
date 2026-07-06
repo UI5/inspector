@@ -330,8 +330,8 @@ AIChat.prototype._attachControllerListeners = function () {
 /**
  * Canonical capability state config. The banner CSS class is `status-<key>` for every key.
  * `skip: true` means no banner update. `showClearButton: true` makes the clear-history button
- * visible. `updateTokens: true` refreshes the token counter. `disableInput: true` disables the
- * send input and button while the state is active. Unknown statuses route to `unavailable`.
+ * visible. `disableInput: true` disables the send input and button while the state is active.
+ * Unknown statuses route to `unavailable`.
  * @private
  */
 AIChat._CAPABILITY_CONFIG = {
@@ -339,7 +339,7 @@ AIChat._CAPABILITY_CONFIG = {
     'unavailable':      { disableInput: true },
     'downloadable':     {},
     'downloading':      {},
-    'ready':            { showClearButton: true, updateTokens: true },
+    'ready':            { showClearButton: true },
     // Recovery: clearConversation destroys the broken session and reseeds.
     'session-failed':   { showClearButton: true },
     // Keep the prior banner; recovery clears on the next successful send. Error surfaces via `_showError`.
@@ -367,6 +367,7 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
     this._renderCapabilityBanner(status, state);
     this._renderBannerAction(state);
     this._applyInputDisabledState(!!config.disableInput);
+    this._updateTokenCounter();
 
     if (config.showClearButton) {
         // `ready` is gated on `_hasMessages` so a post-clear reseed does not re-reveal the button.
@@ -375,9 +376,6 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
         if (clearButton && (status !== 'ready' || this._hasMessages)) {
             clearButton.style.display = 'inline-block';
         }
-    }
-    if (config.updateTokens) {
-        this._updateTokenCounter();
     }
 };
 
