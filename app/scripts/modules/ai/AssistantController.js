@@ -291,6 +291,9 @@ AssistantController.prototype.downloadModel = function () {
  * @returns {Promise<Object|null>}
  */
 AssistantController.prototype.getUsageInfo = function () {
+    if (typeof this._provider.getUsageInfo !== 'function') {
+        return Promise.resolve(null);
+    }
     return this._provider.getUsageInfo();
 };
 

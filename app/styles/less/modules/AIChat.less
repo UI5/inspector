@@ -47,7 +47,6 @@
         border-radius: 4px;
         cursor: pointer;
         font-size: 12px;
-        margin-left: 8px;
 
         &:hover:not(:disabled) {
             background-color: darken(@lighter-blue, 10%);
@@ -56,6 +55,15 @@
         &:disabled {
             opacity: 0.5;
             cursor: not-allowed;
+        }
+    }
+
+    .banner-actions {
+        display: flex;
+        align-items: center;
+
+        > button + button {
+            margin-left: 8px;
         }
     }
 
@@ -69,7 +77,6 @@
     }
 
     .settings-button {
-        margin-left: 8px;
         padding: 4px 8px;
         border: 1px solid @border-gray-lighter;
         background-color: transparent;

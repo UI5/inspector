@@ -1206,6 +1206,24 @@ describe('AssistantController', function () {
 
     });
 
+    describe('#getUsageInfo() — optional Provider method', function () {
+        it('should resolve to null when the current provider does not implement getUsageInfo, so a post-swap view refresh does not crash on providers without a running quota', function () {
+            const harness = createController();
+            delete harness.provider.getUsageInfo;
+            return harness.controller.getUsageInfo().then(function (usage) {
+                (usage === null).should.be.true;
+            });
+        });
+
+        it('should return the provider\'s usage info when the method is implemented', function () {
+            const harness = createController();
+            harness.provider.usageInfo = { inputUsage: 100, inputQuota: 1000, percentUsed: 10 };
+            return harness.controller.getUsageInfo().then(function (usage) {
+                usage.should.deep.equal({ inputUsage: 100, inputQuota: 1000, percentUsed: 10 });
+            });
+        });
+    });
+
     describe('idle-killed session recovery (provider-internal)', function () {
         it('should carry the current Conversation Memory into the messages array on every send, so a send after Chrome kills the idle background service worker still references earlier turns via the provider\'s own re-seeding', function () {
             const harness = createController();

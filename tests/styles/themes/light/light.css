@@ -1311,7 +1311,6 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
-  margin-left: 8px;
 }
 .ai-status-banner .download-button:hover:not(:disabled),
 .ai-status-banner .clear-history-button:hover:not(:disabled) {
@@ -1322,6 +1321,13 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
   opacity: 0.5;
   cursor: not-allowed;
 }
+.ai-status-banner .banner-actions {
+  display: flex;
+  align-items: center;
+}
+.ai-status-banner .banner-actions > button + button {
+  margin-left: 8px;
+}
 .ai-status-banner .clear-history-button {
   background-color: #bbb;
   border-color: #bbb;
@@ -1330,7 +1336,6 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
   background-color: #a3a3a3;
 }
 .ai-status-banner .settings-button {
-  margin-left: 8px;
   padding: 4px 8px;
   border: 1px solid #d4d4d4;
   background-color: transparent;
