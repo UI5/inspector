@@ -65,7 +65,7 @@ OpenAIProvider.prototype._connect = function () {
  */
 OpenAIProvider.prototype.checkAvailability = function () {
     if (this._baseUrl && this._apiKey && this._model) {
-        return Promise.resolve({ status: 'ready', message: 'Ready' });
+        return Promise.resolve({ status: 'ready', message: 'OpenAI-compatible (' + this._model + ') ready' });
     }
     return Promise.resolve({ status: 'unavailable', message: 'not configured' });
 };

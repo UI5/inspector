@@ -68,6 +68,14 @@ describe('OpenAIProvider', function () {
             });
         });
 
+        it('should identify itself in the ready message so the banner does not fall back to a generic or Gemini-shaped label after setUrl / clearConversation re-emits it', function () {
+            const { provider } = createProvider({ model: 'gpt-4o-mini' });
+            return provider.checkAvailability().then(function (result) {
+                result.message.should.contain('OpenAI');
+                result.message.should.contain('gpt-4o-mini');
+            });
+        });
+
         it('should return `unavailable` when baseUrl is missing', function () {
             const { provider } = createProvider({ baseUrl: '' });
             return provider.checkAvailability().then(function (result) {

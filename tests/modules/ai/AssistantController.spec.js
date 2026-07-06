@@ -1040,6 +1040,35 @@ describe('AssistantController', function () {
                 });
             });
         });
+
+        it('should re-emit the provider\'s own ready message (not a hard-coded string) after setUrl, so the banner reflects the active provider — a non-Gemini provider is not mislabelled as Gemini', function () {
+            const harness = createController();
+            harness.provider.availabilityResult = { status: 'ready', message: 'OpenAI-compatible (gpt-4o-mini) is ready' };
+            harness.controller.setUrl('https://example.com');
+            return harness.controller.initialize().then(function () {
+                const stateCountBeforeSwitch = harness.capabilityStates.length;
+                return harness.controller.setUrl('https://other.example.com').then(function () {
+                    const newStates = harness.capabilityStates.slice(stateCountBeforeSwitch);
+                    newStates.should.have.length(1);
+                    newStates[0].status.should.equal('ready');
+                    newStates[0].message.should.equal('OpenAI-compatible (gpt-4o-mini) is ready');
+                });
+            });
+        });
+
+        it('should re-emit the provider\'s own ready message (not a hard-coded string) after clearConversation, so the banner is not clobbered with a Gemini-specific label on a different provider', function () {
+            const harness = createController();
+            harness.provider.availabilityResult = { status: 'ready', message: 'OpenAI-compatible ready' };
+            harness.controller.setUrl('https://example.com');
+            return harness.controller.initialize().then(function () {
+                const stateCountBeforeClear = harness.capabilityStates.length;
+                return harness.controller.clearConversation().then(function () {
+                    const newStates = harness.capabilityStates.slice(stateCountBeforeClear);
+                    newStates.should.have.length(1);
+                    newStates[0].message.should.equal('OpenAI-compatible ready');
+                });
+            });
+        });
     });
 
     describe('idle-killed session recovery (provider-internal)', function () {
