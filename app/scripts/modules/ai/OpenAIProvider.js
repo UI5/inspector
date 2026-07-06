@@ -1,15 +1,15 @@
 'use strict';
 
 /**
- * AI Provider backed by any OpenAI-compatible HTTP endpoint (real OpenAI, Ollama, LM Studio, Groq,
- * etc.). Streams responses via SSE. All network I/O goes through `options.fetch`, defaulting to
- * `window.fetch`, so tests can inject a fake at the constructor seam.
+ * AI Provider backed by any OpenAI-compatible HTTP endpoint. Wraps the background service worker's
+ * `openai-api` port protocol — the panel's CSP blocks cross-origin `fetch`, so all network I/O
+ * runs in the service worker (see modules/background/openaiHandler.js).
  *
  * @param {Object} config
  * @param {string} config.baseUrl - e.g. `http://localhost:6655/openai/v1`. No trailing `/`.
  * @param {string} config.apiKey  - Bearer token. Never included in error messages or logs.
  * @param {string} config.model   - Model identifier passed to the API.
- * @param {Function} [config.fetch] - Test seam. Defaults to the global `fetch`.
+ * @param {Function} [config.portFactory] - Test seam. Defaults to a `chrome.runtime.connect` call.
  * @constructor
  */
 function OpenAIProvider(config) {
@@ -17,11 +17,14 @@ function OpenAIProvider(config) {
     this._baseUrl = cfg.baseUrl || '';
     this._apiKey = cfg.apiKey || '';
     this._model = cfg.model || '';
-    this._fetch = cfg.fetch || (typeof window !== 'undefined' && window.fetch ? window.fetch.bind(window) : null);
-    this._abortController = null;
+    this._portFactory = cfg.portFactory || function () {
+        return chrome.runtime.connect({ name: 'openai-api' });
+    };
+    this._port = null;
+    this._isConnected = false;
+    this._messageHandlers = {};
+    this._disconnectHandler = null;
 }
-
-const DONE = Symbol('sse-done');
 
 function abortError() {
     const err = new Error('Aborted');
@@ -29,91 +32,35 @@ function abortError() {
     return err;
 }
 
-function extractErrorMessage(response) {
-    return response.json().then(
-        function (body) {
-            if (body && body.error && body.error.message) {
-                return body.error.message;
-            }
-            return 'HTTP ' + response.status;
-        },
-        function () {
-            return 'HTTP ' + response.status;
+OpenAIProvider.prototype._connect = function () {
+    if (this._isConnected) {
+        return;
+    }
+
+    this._port = this._portFactory();
+    this._isConnected = true;
+
+    this._port.onMessage.addListener((message) => {
+        const handler = this._messageHandlers[message.type];
+        if (handler) {
+            handler(message);
         }
-    );
-}
+    });
 
-function parseSseEvent(event) {
-    const trimmed = event.trim();
-    if (!trimmed.startsWith('data:')) {
-        return '';
-    }
-    const payload = trimmed.slice(5).trim();
-    if (payload === '[DONE]') {
-        return DONE;
-    }
-    try {
-        const parsed = JSON.parse(payload);
-        const choices = parsed && parsed.choices;
-        if (!choices || !choices.length) {
-            return '';
+    this._port.onDisconnect.addListener(() => {
+        this._isConnected = false;
+        this._port = null;
+
+        if (this._disconnectHandler) {
+            const h = this._disconnectHandler;
+            this._disconnectHandler = null;
+            h();
         }
-        const delta = choices[0].delta;
-        return (delta && typeof delta.content === 'string') ? delta.content : '';
-    } catch (e) {
-        return '';
-    }
-}
-
-function readSseStream(body, onChunk, signal) {
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let fullText = '';
-
-    function pump() {
-        if (signal && signal.aborted) {
-            reader.cancel();
-            return Promise.reject(abortError());
-        }
-        return reader.read().then(function (result) {
-            if (result.done) {
-                return fullText;
-            }
-            buffer += decoder.decode(result.value, { stream: true });
-
-            let separatorIdx = buffer.indexOf('\n\n');
-            while (separatorIdx !== -1) {
-                const event = buffer.slice(0, separatorIdx);
-                buffer = buffer.slice(separatorIdx + 2);
-
-                const delta = parseSseEvent(event);
-                if (delta === DONE) {
-                    reader.cancel();
-                    return fullText;
-                }
-                if (delta) {
-                    fullText += delta;
-                    if (typeof onChunk === 'function') {
-                        onChunk(delta);
-                    }
-                }
-                separatorIdx = buffer.indexOf('\n\n');
-            }
-            return pump();
-        }, function (err) {
-            if (signal && signal.aborted) {
-                throw abortError();
-            }
-            throw err;
-        });
-    }
-
-    return pump();
-}
+    });
+};
 
 /**
- * Return `ready` iff `baseUrl`, `apiKey`, and `model` are all set. No network ping.
+ * Return `ready` iff `baseUrl`, `apiKey`, and `model` are all set. Local check — no port traffic.
  * @returns {Promise<{status: string, message: string}>}
  */
 OpenAIProvider.prototype.checkAvailability = function () {
@@ -124,8 +71,8 @@ OpenAIProvider.prototype.checkAvailability = function () {
 };
 
 /**
- * POST `messages` to `${baseUrl}/chat/completions` with `stream: true`, parse the SSE response,
- * forward content deltas via `onChunk`, and resolve with the accumulated full text.
+ * Post the messages to the background over the `openai-api` port. Route incoming
+ * `chunk`/`complete`/`error` frames. Resolve with the accumulated text on `complete`.
  *
  * @param {Array<{role: string, content: string}>} messages
  * @param {{onChunk?: Function, signal?: AbortSignal}} [options]
@@ -141,43 +88,87 @@ OpenAIProvider.prototype.sendMessage = function (messages, options) {
         return Promise.reject(abortError());
     }
 
-    const internalController = new AbortController();
-    this._abortController = internalController;
-    const combinedSignal = opts.signal ?
-        AbortSignal.any([opts.signal, internalController.signal]) :
-        internalController.signal;
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        let fullText = '';
+        let abortListener = null;
 
-    const url = this._baseUrl + '/chat/completions';
-    const body = JSON.stringify({
-        model: this._model,
-        messages: messages,
-        stream: true
-    });
-    const headers = {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + this._apiKey
-    };
+        const cleanup = () => {
+            delete this._messageHandlers.chunk;
+            delete this._messageHandlers.complete;
+            delete this._messageHandlers.error;
+            this._disconnectHandler = null;
+            if (opts.signal && abortListener) {
+                opts.signal.removeEventListener('abort', abortListener);
+            }
+        };
 
-    return this._fetch(url, {
-        method: 'POST',
-        headers: headers,
-        body: body,
-        signal: combinedSignal
-    }).then(function (response) {
-        if (!response.ok) {
-            return extractErrorMessage(response).then(function (msg) {
-                throw new Error(msg);
-            });
+        const settle = (fn) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            fn();
+        };
+
+        this._messageHandlers.chunk = (message) => {
+            if (settled) {
+                return;
+            }
+            fullText += message.content;
+            if (typeof opts.onChunk === 'function') {
+                opts.onChunk(message.content);
+            }
+        };
+
+        this._messageHandlers.complete = () => {
+            settle(() => resolve(fullText));
+        };
+
+        this._messageHandlers.error = (message) => {
+            settle(() => reject(new Error(message.message)));
+        };
+
+        this._disconnectHandler = () => {
+            settle(() => reject(new Error('Connection to background script lost. Please try again.')));
+        };
+
+        if (opts.signal) {
+            abortListener = () => {
+                if (this._isConnected) {
+                    this._port.postMessage({ type: 'cancel' });
+                }
+                settle(() => reject(abortError()));
+            };
+            opts.signal.addEventListener('abort', abortListener);
         }
-        return readSseStream(response.body, opts.onChunk, combinedSignal);
+
+        this._connect();
+        this._port.postMessage({
+            type: 'send',
+            config: {
+                baseUrl: this._baseUrl,
+                apiKey: this._apiKey,
+                model: this._model
+            },
+            messages: messages
+        });
     });
 };
 
+/**
+ * Cancel any in-flight request and disconnect the port.
+ */
 OpenAIProvider.prototype.destroy = function () {
-    if (this._abortController) {
-        this._abortController.abort();
-        this._abortController = null;
+    if (this._isConnected && this._port) {
+        this._port.postMessage({ type: 'cancel' });
+        this._port.disconnect();
     }
+    this._port = null;
+    this._isConnected = false;
+    this._messageHandlers = {};
+    this._disconnectHandler = null;
 };
 
 module.exports = OpenAIProvider;
