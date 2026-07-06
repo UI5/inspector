@@ -34,6 +34,7 @@ function AssistantController({
     clearConsoleErrors = () => {}
 } = {}) {
     this._promptBuilder = promptBuilder;
+    this._createProvider = createProvider;
     this._provider = createProvider(providerName, providerConfig);
     this._conversationStore = conversationStore;
     this._getAppInfo = getAppInfo;
@@ -46,6 +47,7 @@ function AssistantController({
     this._conversationMemory = [];
     this._inspectionContext = null;
     this._isStreaming = false;
+    this._activeAbortController = null;
 }
 
 /**
@@ -142,12 +144,17 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
     });
 
     this._isStreaming = true;
+    const abortController = new AbortController();
+    this._activeAbortController = abortController;
 
     const onChunk = (textDelta) => {
         this._emit('stream-chunk', textDelta);
     };
 
-    return this._provider.sendMessage(messages, { onChunk: onChunk }).then((fullText) => {
+    return this._provider.sendMessage(messages, {
+        onChunk: onChunk,
+        signal: abortController.signal
+    }).then((fullText) => {
         return this._conversationStore.append(this._currentUrl, {
             role: 'user',
             content: userMessage
@@ -160,6 +167,9 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
             this._conversationMemory.push({ role: 'user', content: userMessage });
             this._conversationMemory.push({ role: 'assistant', content: fullText });
             this._isStreaming = false;
+            if (this._activeAbortController === abortController) {
+                this._activeAbortController = null;
+            }
             if (this._capabilityState.status === 'streaming-failed') {
                 this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
             }
@@ -168,6 +178,12 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
         });
     }, (err) => {
         this._isStreaming = false;
+        if (this._activeAbortController === abortController) {
+            this._activeAbortController = null;
+        }
+        if (err && err.name === 'AbortError') {
+            throw err;
+        }
         this._setCapabilityState('streaming-failed', err && err.message ? err.message : 'Streaming failed', 0);
         this._emit('stream-failed', err);
         throw err;
@@ -276,6 +292,32 @@ AssistantController.prototype.downloadModel = function () {
  */
 AssistantController.prototype.getUsageInfo = function () {
     return this._provider.getUsageInfo();
+};
+
+/**
+ * Swap the active provider. Aborts any in-flight stream, destroys the current provider, and
+ * constructs the replacement via the registry factory. Conversation memory is preserved.
+ * `capability-state-changed` is emitted from the new provider's `checkAvailability`.
+ *
+ * @param {string} name - Registry key of the new provider.
+ * @param {Object} [config] - Config passed to the new provider's constructor.
+ * @returns {Promise<void>}
+ */
+AssistantController.prototype.setProvider = function (name, config) {
+    if (this._activeAbortController) {
+        this._activeAbortController.abort();
+        this._activeAbortController = null;
+    }
+    this._isStreaming = false;
+
+    this._provider.destroy();
+    this._provider = this._createProvider(name, config || {});
+
+    return this._provider.checkAvailability().then((capability) => {
+        this._setCapabilityState(capability.status, capability.message, 0);
+    }, (err) => {
+        this._setCapabilityState('unavailable', err && err.message ? err.message : 'Provider unavailable', 0);
+    });
 };
 
 AssistantController.prototype.destroy = function () {

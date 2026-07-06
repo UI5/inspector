@@ -20,6 +20,10 @@ const AssistantTranscript = require('../ai/AssistantTranscript.js');
  *     {@link PromptBuilder#buildUserPrompt} on each send.
  * @param {Function} [options.clearConsoleErrors] - Clears the recent-console-errors buffer for the
  *     current URL. Called by the controller on Clear Conversation and URL change.
+ * @param {string} [options.providerName] - Registry key of the provider to construct. Defaults to
+ *     `'gemini-nano'`. Ignored when `controller` is provided.
+ * @param {Object} [options.providerConfig] - Config object passed to the provider constructor.
+ *     Ignored when `controller` is provided.
  * @param {AssistantController} [options.controller] - Pre-built controller for tests. Defaults to a
  *                                                     fresh AssistantController.
  * @param {Function} [options.transcriptFactory] - Test seam: `(container, options) => AssistantTranscript`.
@@ -31,6 +35,8 @@ function AIChat(containerId, {
     getAppInfo = null,
     getConsoleErrors = null,
     clearConsoleErrors = null,
+    providerName = 'gemini-nano',
+    providerConfig = {},
     controller = null,
     transcriptFactory = function (host, options) {
         return new AssistantTranscript(host, options);
@@ -42,12 +48,8 @@ function AIChat(containerId, {
     this._getConsoleErrors = getConsoleErrors;
     this._clearConsoleErrors = clearConsoleErrors;
     this._controller = controller || new AssistantController({
-        providerName: 'openai',
-        providerConfig: {
-            baseUrl: 'http://localhost:6655/openai/v1',
-            apiKey: 'REPLACE_WITH_TEST_GATEWAY_KEY',
-            model: 'gpt-5.4'
-        },
+        providerName: providerName,
+        providerConfig: providerConfig,
         getAppInfo: this._getAppInfo || function () { return null; },
         getConsoleErrors: this._getConsoleErrors || function () { return []; },
         clearConsoleErrors: this._clearConsoleErrors || function () {}

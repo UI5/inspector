@@ -449,7 +449,7 @@
     });
 
     // AI Chat component
-    var aiChat = new AIChat('ai-chat', {
+    var aiChatOptions = {
         getAppInfo: function () {
             var currentFrameId = framesSelect.getSelectedId();
             return frameData[currentFrameId] ? frameData[currentFrameId].applicationInformation : null;
@@ -473,12 +473,25 @@
                 frameId: currentFrameId
             });
         }
+    };
+
+    var aiChat;
+    chrome.storage.local.get(['ai_provider_name', 'ai_provider_config'], function (stored) {
+        /* jshint camelcase:false */
+        var name = stored && typeof stored.ai_provider_name === 'string' ? stored.ai_provider_name : 'gemini-nano';
+        var perProvider = stored && stored.ai_provider_config && typeof stored.ai_provider_config === 'object' ? stored.ai_provider_config : {};
+        var config = perProvider[name] && typeof perProvider[name] === 'object' ? perProvider[name] : {};
+        aiChatOptions.providerName = name;
+        aiChatOptions.providerConfig = config;
+        aiChat = new AIChat('ai-chat', aiChatOptions);
     });
 
     // Tear down the AI session when the panel page is unloaded so the background
     // service worker disconnects the prompt-api port and destroys the model session.
     window.addEventListener('beforeunload', function () {
-        aiChat.destroy();
+        if (aiChat) {
+            aiChat.destroy();
+        }
     });
 
     // Notify the AI tab when it becomes active so the transcript scrolls to the
@@ -489,7 +502,9 @@
     if (aiTabElement) {
         aiTabElement.addEventListener('click', function () {
             window.requestAnimationFrame(function () {
-                aiChat.onTabActivated();
+                if (aiChat) {
+                    aiChat.onTabActivated();
+                }
             });
         });
     }
@@ -550,7 +565,9 @@
                 controlTree.setData(message.controlTree);
 
                 // Set URL for AI Chat history
-                aiChat.setUrl(frameData[frameId].url);
+                if (aiChat) {
+                    aiChat.setUrl(frameData[frameId].url);
+                }
                 appInfo.setData(message.applicationInformation);
                 oElementsRegistryMasterView.setData(message.elementRegistry);
             }
@@ -639,16 +656,18 @@
                     }
                 }
 
-                aiChat.updateContext({
-                    control: {
-                        type: controlType,
-                        id: controlId,
-                        properties: message.controlProperties,
-                        bindings: message.controlBindings,
-                        aggregations: message.controlAggregations
-                    },
-                    appInfo: frameData[frameId].applicationInformation
-                });
+                if (aiChat) {
+                    aiChat.updateContext({
+                        control: {
+                            type: controlType,
+                            id: controlId,
+                            properties: message.controlProperties,
+                            bindings: message.controlBindings,
+                            aggregations: message.controlAggregations
+                        },
+                        appInfo: frameData[frameId].applicationInformation
+                    });
+                }
             }
         },
 
