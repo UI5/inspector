@@ -2,63 +2,45 @@
 
 const OpenAIProvider = require('../../../app/scripts/modules/ai/OpenAIProvider.js');
 
-function sseEvent(data) {
-    return 'data: ' + JSON.stringify(data) + '\n\n';
-}
+function createFakePort() {
+    const messageListeners = [];
+    const disconnectListeners = [];
 
-function contentEvent(text) {
-    return sseEvent({ choices: [{ delta: { content: text } }] });
-}
-
-function createResponse({ ok = true, status = 200, chunks = [], errorBody = null } = {}) {
-    let cursor = 0;
-    const encoder = new TextEncoder();
-
-    const body = {
-        getReader: function () {
-            return {
-                read: function () {
-                    if (cursor >= chunks.length) {
-                        return Promise.resolve({ done: true, value: undefined });
-                    }
-                    const chunk = chunks[cursor++];
-                    return Promise.resolve({
-                        done: false,
-                        value: typeof chunk === 'string' ? encoder.encode(chunk) : chunk
-                    });
-                },
-                cancel: function () {
-                    cursor = chunks.length;
-                    return Promise.resolve();
-                }
-            };
-        }
+    const port = {
+        postMessage: function (message) {
+            port.posted.push(message);
+        },
+        onMessage: {
+            addListener: function (listener) {
+                messageListeners.push(listener);
+            }
+        },
+        onDisconnect: {
+            addListener: function (listener) {
+                disconnectListeners.push(listener);
+            }
+        },
+        disconnect: function () {
+            port.disconnected = true;
+        },
+        posted: [],
+        disconnected: false
     };
 
     return {
-        ok: ok,
-        status: status,
-        body: body,
-        json: function () {
-            return Promise.resolve(errorBody || {});
+        port: port,
+        posted: port.posted,
+        emit: function (message) {
+            messageListeners.forEach(function (listener) {
+                listener(message);
+            });
         },
-        text: function () {
-            return Promise.resolve(errorBody ? JSON.stringify(errorBody) : '');
+        triggerDisconnect: function () {
+            disconnectListeners.forEach(function (listener) {
+                listener();
+            });
         }
     };
-}
-
-function createFakeFetch(response) {
-    const calls = [];
-    const fetch = function (url, options) {
-        calls.push({ url: url, options: options });
-        if (typeof response === 'function') {
-            return Promise.resolve(response({ url: url, options: options }));
-        }
-        return Promise.resolve(response);
-    };
-    fetch.calls = calls;
-    return fetch;
 }
 
 function defaultConfig(overrides) {
@@ -69,17 +51,25 @@ function defaultConfig(overrides) {
     }, overrides || {});
 }
 
+function createProvider(configOverrides) {
+    const fake = createFakePort();
+    const provider = new OpenAIProvider(Object.assign(defaultConfig(configOverrides), {
+        portFactory: function () { return fake.port; }
+    }));
+    return { provider: provider, fake: fake };
+}
+
 describe('OpenAIProvider', function () {
     describe('#checkAvailability()', function () {
         it('should return `ready` when baseUrl, apiKey, and model are all present', function () {
-            const provider = new OpenAIProvider(defaultConfig());
+            const { provider } = createProvider();
             return provider.checkAvailability().then(function (result) {
                 result.status.should.equal('ready');
             });
         });
 
         it('should return `unavailable` when baseUrl is missing', function () {
-            const provider = new OpenAIProvider(defaultConfig({ baseUrl: '' }));
+            const { provider } = createProvider({ baseUrl: '' });
             return provider.checkAvailability().then(function (result) {
                 result.status.should.equal('unavailable');
                 result.message.should.contain('not configured');
@@ -87,342 +77,209 @@ describe('OpenAIProvider', function () {
         });
 
         it('should return `unavailable` when apiKey is missing', function () {
-            const provider = new OpenAIProvider(defaultConfig({ apiKey: '' }));
+            const { provider } = createProvider({ apiKey: '' });
             return provider.checkAvailability().then(function (result) {
                 result.status.should.equal('unavailable');
             });
         });
 
         it('should return `unavailable` when model is missing', function () {
-            const provider = new OpenAIProvider(defaultConfig({ model: '' }));
+            const { provider } = createProvider({ model: '' });
             return provider.checkAvailability().then(function (result) {
                 result.status.should.equal('unavailable');
             });
         });
 
-        it('should not make any network request', function () {
-            const fetch = createFakeFetch(createResponse());
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
+        it('should not post anything on the port', function () {
+            const { provider, fake } = createProvider();
             return provider.checkAvailability().then(function () {
-                fetch.calls.length.should.equal(0);
+                fake.posted.should.have.length(0);
             });
         });
     });
 
-    describe('#sendMessage() — request wiring', function () {
-        it('should POST to `${baseUrl}/chat/completions` with the messages, model, and stream:true', function () {
-            const fetch = createFakeFetch(createResponse({
-                chunks: [contentEvent('hi'), 'data: [DONE]\n\n']
-            }));
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
+    describe('#sendMessage() — port protocol', function () {
+        it('should reject when the messages array is empty', function () {
+            const { provider } = createProvider();
+            return provider.sendMessage([]).then(function () {
+                throw new Error('Expected sendMessage to reject');
+            }, function (err) {
+                err.message.should.contain('non-empty');
+            });
+        });
+
+        it('should reject with AbortError when the signal is already aborted', function () {
+            const { provider } = createProvider();
+            const controller = new AbortController();
+            controller.abort();
+            return provider.sendMessage([
+                { role: 'user', content: 'Hi' }
+            ], { signal: controller.signal }).then(function () {
+                throw new Error('Expected reject');
+            }, function (err) {
+                err.name.should.equal('AbortError');
+            });
+        });
+
+        it('should post {type:send, config, messages} on the port carrying baseUrl, apiKey, and model', async function () {
+            const { provider, fake } = createProvider();
             const messages = [
                 { role: 'system', content: 'You are helpful.' },
                 { role: 'user', content: 'Hello' }
             ];
-            return provider.sendMessage(messages).then(function () {
-                fetch.calls.length.should.equal(1);
-                fetch.calls[0].url.should.equal('http://localhost:6655/openai/v1/chat/completions');
-                fetch.calls[0].options.method.should.equal('POST');
-                const body = JSON.parse(fetch.calls[0].options.body);
-                body.model.should.equal('gpt-5.4');
-                body.stream.should.equal(true);
-                body.messages.should.deep.equal(messages);
+
+            const sendPromise = provider.sendMessage(messages);
+            await Promise.resolve();
+
+            fake.posted.should.have.length(1);
+            const posted = fake.posted[0];
+            posted.type.should.equal('send');
+            posted.messages.should.deep.equal(messages);
+            posted.config.should.deep.equal({
+                baseUrl: 'http://localhost:6655/openai/v1',
+                apiKey: 'secret-key',
+                model: 'gpt-5.4'
             });
+
+            fake.emit({ type: 'chunk', content: 'x' });
+            fake.emit({ type: 'complete' });
+            await sendPromise;
         });
 
-        it('should include a Bearer Authorization header with the API key', function () {
-            const fetch = createFakeFetch(createResponse({
-                chunks: [contentEvent('hi'), 'data: [DONE]\n\n']
-            }));
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
-            return provider.sendMessage([{ role: 'user', content: 'Hi' }]).then(function () {
-                const headers = fetch.calls[0].options.headers;
-                headers.Authorization.should.equal('Bearer secret-key');
-                headers['Content-Type'].should.equal('application/json');
-            });
-        });
-    });
-
-    describe('#sendMessage() — SSE parsing', function () {
-        it('should accumulate content deltas across chunks and resolve with the full text', function () {
-            const fetch = createFakeFetch(createResponse({
-                chunks: [
-                    contentEvent('Hello, '),
-                    contentEvent('world'),
-                    contentEvent('!'),
-                    'data: [DONE]\n\n'
-                ]
-            }));
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
+        it('should forward chunk messages via onChunk and resolve with the accumulated text on complete', async function () {
+            const { provider, fake } = createProvider();
             const received = [];
-            return provider.sendMessage(
+            const sendPromise = provider.sendMessage(
                 [{ role: 'user', content: 'Hi' }],
                 { onChunk: function (t) { received.push(t); } }
-            ).then(function (fullText) {
-                received.should.deep.equal(['Hello, ', 'world', '!']);
-                fullText.should.equal('Hello, world!');
-            });
+            );
+
+            await Promise.resolve();
+            fake.emit({ type: 'chunk', content: 'Hello, ' });
+            fake.emit({ type: 'chunk', content: 'world' });
+            fake.emit({ type: 'chunk', content: '!' });
+            fake.emit({ type: 'complete' });
+
+            const full = await sendPromise;
+            full.should.equal('Hello, world!');
+            received.should.deep.equal(['Hello, ', 'world', '!']);
         });
 
-        it('should buffer partial lines split across reads', function () {
-            const event = contentEvent('streamed');
-            const midpoint = Math.floor(event.length / 2);
-            const fetch = createFakeFetch(createResponse({
-                chunks: [
-                    event.slice(0, midpoint),
-                    event.slice(midpoint),
-                    'data: [DONE]\n\n'
-                ]
-            }));
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
-            return provider.sendMessage(
-                [{ role: 'user', content: 'Hi' }]
-            ).then(function (fullText) {
-                fullText.should.equal('streamed');
-            });
-        });
+        it('should reject with the transport-supplied message when an error frame arrives', async function () {
+            const { provider, fake } = createProvider();
+            const sendPromise = provider.sendMessage([{ role: 'user', content: 'Hi' }]);
 
-        it('should handle multiple SSE events packed in one read', function () {
-            const packed = contentEvent('one') + contentEvent('two') + contentEvent('three') + 'data: [DONE]\n\n';
-            const fetch = createFakeFetch(createResponse({ chunks: [packed] }));
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
-            return provider.sendMessage(
-                [{ role: 'user', content: 'Hi' }]
-            ).then(function (fullText) {
-                fullText.should.equal('onetwothree');
-            });
-        });
+            await Promise.resolve();
+            fake.emit({ type: 'error', message: 'Invalid API key' });
 
-        it('should ignore SSE events whose delta has no content field (e.g. role-only opener)', function () {
-            const fetch = createFakeFetch(createResponse({
-                chunks: [
-                    sseEvent({ choices: [{ delta: { role: 'assistant' } }] }),
-                    contentEvent('body'),
-                    'data: [DONE]\n\n'
-                ]
-            }));
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
-            return provider.sendMessage(
-                [{ role: 'user', content: 'Hi' }]
-            ).then(function (fullText) {
-                fullText.should.equal('body');
-            });
-        });
-
-        it('should stop cleanly at the [DONE] sentinel without treating it as JSON', function () {
-            const fetch = createFakeFetch(createResponse({
-                chunks: [contentEvent('done-test'), 'data: [DONE]\n\n', contentEvent('after')]
-            }));
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
-            return provider.sendMessage(
-                [{ role: 'user', content: 'Hi' }]
-            ).then(function (fullText) {
-                fullText.should.equal('done-test');
-            });
-        });
-    });
-
-    describe('#sendMessage() — error surfacing', function () {
-        it('should reject with the API error message on 401', function () {
-            const fetch = createFakeFetch(createResponse({
-                ok: false,
-                status: 401,
-                errorBody: { error: { message: 'Invalid API key' } }
-            }));
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
-            return provider.sendMessage([{ role: 'user', content: 'Hi' }]).then(function () {
+            try {
+                await sendPromise;
                 throw new Error('Expected reject');
-            }, function (err) {
-                err.message.should.contain('Invalid API key');
-            });
+            } catch (err) {
+                err.message.should.equal('Invalid API key');
+            }
         });
 
-        it('should reject with the API error message on 404', function () {
-            const fetch = createFakeFetch(createResponse({
-                ok: false,
-                status: 404,
-                errorBody: { error: { message: 'Model not found' } }
-            }));
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
-            return provider.sendMessage([{ role: 'user', content: 'Hi' }]).then(function () {
-                throw new Error('Expected reject');
-            }, function (err) {
-                err.message.should.contain('Model not found');
-            });
-        });
+        it('should reject when the port disconnects mid-request', async function () {
+            const { provider, fake } = createProvider();
+            const sendPromise = provider.sendMessage([{ role: 'user', content: 'Hi' }]);
 
-        it('should reject with the API error message on 429', function () {
-            const fetch = createFakeFetch(createResponse({
-                ok: false,
-                status: 429,
-                errorBody: { error: { message: 'Rate limited' } }
-            }));
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
-            return provider.sendMessage([{ role: 'user', content: 'Hi' }]).then(function () {
-                throw new Error('Expected reject');
-            }, function (err) {
-                err.message.should.contain('Rate limited');
-            });
-        });
+            await Promise.resolve();
+            fake.triggerDisconnect();
 
-        it('should never include the API key in error messages', function () {
-            const fetch = createFakeFetch(createResponse({
-                ok: false,
-                status: 401,
-                errorBody: { error: { message: 'Bad auth' } }
-            }));
-            const provider = new OpenAIProvider(Object.assign(defaultConfig({ apiKey: 'super-secret-abc123' }), { fetch: fetch }));
-            return provider.sendMessage([{ role: 'user', content: 'Hi' }]).then(function () {
+            try {
+                await sendPromise;
                 throw new Error('Expected reject');
-            }, function (err) {
-                err.message.should.not.contain('super-secret-abc123');
-            });
-        });
-
-        it('should reject with a generic status message when the API body is not parseable', function () {
-            const fetch = function () {
-                return Promise.resolve({
-                    ok: false,
-                    status: 500,
-                    body: null,
-                    json: function () { return Promise.reject(new Error('bad json')); },
-                    text: function () { return Promise.resolve(''); }
-                });
-            };
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
-            return provider.sendMessage([{ role: 'user', content: 'Hi' }]).then(function () {
-                throw new Error('Expected reject');
-            }, function (err) {
-                err.message.should.contain('500');
-            });
+            } catch (err) {
+                err.message.should.contain('Connection');
+            }
         });
     });
 
     describe('#sendMessage() — cancellation', function () {
-        it('should reject with an AbortError when the signal is already aborted', function () {
-            const fetch = createFakeFetch(createResponse({
-                chunks: [contentEvent('x'), 'data: [DONE]\n\n']
-            }));
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
+        it('should post {type:cancel} and reject with AbortError when the signal aborts mid-stream', async function () {
+            const { provider, fake } = createProvider();
             const controller = new AbortController();
+
+            const sendPromise = provider.sendMessage(
+                [{ role: 'user', content: 'Hi' }],
+                { signal: controller.signal }
+            );
+
+            await Promise.resolve();
+            fake.emit({ type: 'chunk', content: 'partial' });
             controller.abort();
-            return provider.sendMessage(
-                [{ role: 'user', content: 'Hi' }],
-                { signal: controller.signal }
-            ).then(function () {
+
+            try {
+                await sendPromise;
                 throw new Error('Expected reject');
-            }, function (err) {
+            } catch (err) {
                 err.name.should.equal('AbortError');
-            });
+            }
+
+            const cancelPosts = fake.posted.filter(function (m) { return m.type === 'cancel'; });
+            cancelPosts.should.have.length(1);
         });
 
-        it('should forward caller-signal aborts to the fetch call', function () {
-            const fetch = createFakeFetch(createResponse({
-                chunks: [contentEvent('x'), 'data: [DONE]\n\n']
-            }));
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
+        it('should ignore chunks that arrive after the signal aborts', async function () {
+            const { provider, fake } = createProvider();
             const controller = new AbortController();
-            return provider.sendMessage(
+            const received = [];
+
+            const sendPromise = provider.sendMessage(
                 [{ role: 'user', content: 'Hi' }],
-                { signal: controller.signal }
-            ).then(function () {
-                const fetchSignal = fetch.calls[0].options.signal;
-                (typeof fetchSignal === 'object').should.equal(true);
-                (fetchSignal.aborted === false).should.equal(true);
-                controller.abort();
-                (fetchSignal.aborted === true).should.equal(true);
-            });
-        });
-
-        it('should reject with AbortError when the signal aborts mid-stream', function () {
-            const controller = new AbortController();
-            let readCount = 0;
-            const encoder = new TextEncoder();
-
-            const response = {
-                ok: true,
-                status: 200,
-                body: {
-                    getReader: function () {
-                        return {
-                            read: function () {
-                                readCount++;
-                                if (readCount === 1) {
-                                    return Promise.resolve({
-                                        done: false,
-                                        value: encoder.encode(contentEvent('first'))
-                                    });
-                                }
-                                controller.abort();
-                                const err = new Error('Aborted');
-                                err.name = 'AbortError';
-                                return Promise.reject(err);
-                            },
-                            cancel: function () {
-                                return Promise.resolve();
-                            }
-                        };
-                    }
+                {
+                    onChunk: function (t) { received.push(t); },
+                    signal: controller.signal
                 }
-            };
+            );
 
-            const fetch = createFakeFetch(response);
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
+            await Promise.resolve();
+            fake.emit({ type: 'chunk', content: 'first' });
+            controller.abort();
 
-            return provider.sendMessage(
-                [{ role: 'user', content: 'Hi' }],
-                { signal: controller.signal }
-            ).then(function () {
+            // Late chunk after abort — must not be surfaced.
+            fake.emit({ type: 'chunk', content: 'late' });
+            fake.emit({ type: 'complete' });
+
+            try {
+                await sendPromise;
                 throw new Error('Expected reject');
-            }, function (err) {
+            } catch (err) {
                 err.name.should.equal('AbortError');
-            });
+            }
+
+            received.should.deep.equal(['first']);
         });
     });
 
     describe('#destroy()', function () {
-        it('should abort any in-flight request', function () {
-            let capturedSignal = null;
-            const response = {
-                ok: true,
-                status: 200,
-                body: {
-                    getReader: function () {
-                        return {
-                            read: function () {
-                                return new Promise(function (resolve, reject) {
-                                    capturedSignal.addEventListener('abort', function () {
-                                        const err = new Error('Aborted');
-                                        err.name = 'AbortError';
-                                        reject(err);
-                                    });
-                                });
-                            },
-                            cancel: function () { return Promise.resolve(); }
-                        };
-                    }
-                }
-            };
+        it('should disconnect the port when a request has been sent', async function () {
+            const { provider, fake } = createProvider();
+            provider.sendMessage([{ role: 'user', content: 'Hi' }]).catch(function () { /* ignore */ });
 
-            const fetch = function (url, options) {
-                capturedSignal = options.signal;
-                return Promise.resolve(response);
-            };
+            await Promise.resolve();
+            provider.destroy();
 
-            const provider = new OpenAIProvider(Object.assign(defaultConfig(), { fetch: fetch }));
-            const sendPromise = provider.sendMessage([{ role: 'user', content: 'Hi' }]).then(function () {
-                throw new Error('Expected reject');
-            }, function (err) {
-                err.name.should.equal('AbortError');
-            });
+            fake.port.disconnected.should.be.true;
+        });
 
-            // Let the fetch resolve and read to start.
-            return Promise.resolve().then(function () {
-                return Promise.resolve();
-            }).then(function () {
-                provider.destroy();
-                return sendPromise;
-            });
+        it('should post {type:cancel} when an in-flight request is destroyed', async function () {
+            const { provider, fake } = createProvider();
+            provider.sendMessage([{ role: 'user', content: 'Hi' }]).catch(function () { /* ignore */ });
+
+            await Promise.resolve();
+            provider.destroy();
+
+            const cancelPosts = fake.posted.filter(function (m) { return m.type === 'cancel'; });
+            cancelPosts.should.have.length(1);
+        });
+
+        it('should be a no-op when never connected', function () {
+            const { provider, fake } = createProvider();
+            provider.destroy();
+            fake.port.disconnected.should.be.false;
+            fake.posted.should.have.length(0);
         });
     });
 });
