@@ -42,8 +42,12 @@ function AIChat(containerId, {
     this._getConsoleErrors = getConsoleErrors;
     this._clearConsoleErrors = clearConsoleErrors;
     this._controller = controller || new AssistantController({
-        providerName: 'gemini-nano',
-        providerConfig: {},
+        providerName: 'openai',
+        providerConfig: {
+            baseUrl: 'http://localhost:6655/openai/v1',
+            apiKey: 'REPLACE_WITH_TEST_GATEWAY_KEY',
+            model: 'gpt-5.4'
+        },
         getAppInfo: this._getAppInfo || function () { return null; },
         getConsoleErrors: this._getConsoleErrors || function () { return []; },
         clearConsoleErrors: this._clearConsoleErrors || function () {}
