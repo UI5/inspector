@@ -1210,52 +1210,95 @@ describe('PromptBuilder', function () {
     // ---- helpers for section-extraction assertions -----------------------------
     // See the top of the file for the extractor helpers used by buildUserPrompt tests above.
 
-    describe('#buildSeedMessages()', function () {
-        it('should produce a single system message when there is no Conversation Memory to replay', function () {
-            const seed = promptBuilder.buildSeedMessages(null, []);
+    describe('#buildMessages()', function () {
+        it('should produce [system, user] when there is no history to replay', function () {
+            const messages = promptBuilder.buildMessages({
+                appInfo: null,
+                history: [],
+                userMessage: 'Hello'
+            });
 
-            seed.should.have.lengthOf(1);
-            seed[0].role.should.equal('system');
-            seed[0].content.should.contain('UI5 Inspector');
-            seed[0].content.should.contain('Rules:');
+            messages.should.have.lengthOf(2);
+            messages[0].role.should.equal('system');
+            messages[0].content.should.contain('UI5 Inspector');
+            messages[0].content.should.contain('Rules:');
+            messages[1].should.deep.equal({ role: 'user', content: 'Hello' });
         });
 
-        it('should replay prior user and assistant turns after the system message', function () {
-            const memory = [
-                { role: 'user', content: 'Hello' },
-                { role: 'assistant', content: 'Hi there' }
+        it('should replay prior user and assistant turns between the system message and the current user turn', function () {
+            const history = [
+                { role: 'user', content: 'Prev Q' },
+                { role: 'assistant', content: 'Prev A' }
             ];
 
-            const seed = promptBuilder.buildSeedMessages(null, memory);
+            const messages = promptBuilder.buildMessages({
+                history: history,
+                userMessage: 'Next Q'
+            });
 
-            seed.should.have.lengthOf(3);
-            seed[0].role.should.equal('system');
-            seed[1].should.deep.equal({ role: 'user', content: 'Hello' });
-            seed[2].should.deep.equal({ role: 'assistant', content: 'Hi there' });
+            messages.should.have.lengthOf(4);
+            messages[0].role.should.equal('system');
+            messages[1].should.deep.equal({ role: 'user', content: 'Prev Q' });
+            messages[2].should.deep.equal({ role: 'assistant', content: 'Prev A' });
+            messages[3].should.deep.equal({ role: 'user', content: 'Next Q' });
         });
 
-        it('should skip UI-only system notices and empty assistant placeholders from Conversation Memory', function () {
-            const memory = [
+        it('should skip non-user/assistant history turns and empty content when building the messages array', function () {
+            const history = [
                 { role: 'user', content: 'Hello' },
                 { role: 'system', content: 'UI notice' },
                 { role: 'assistant', content: '' }
             ];
 
-            const seed = promptBuilder.buildSeedMessages(null, memory);
+            const messages = promptBuilder.buildMessages({
+                history: history,
+                userMessage: 'Q'
+            });
 
-            seed.should.have.lengthOf(2);
-            seed[0].role.should.equal('system');
-            seed[1].should.deep.equal({ role: 'user', content: 'Hello' });
+            messages.should.have.lengthOf(3);
+            messages[0].role.should.equal('system');
+            messages[1].should.deep.equal({ role: 'user', content: 'Hello' });
+            messages[2].should.deep.equal({ role: 'user', content: 'Q' });
         });
 
-        it('should include application metadata in the seed system message when app info is provided', function () {
+        it('should include application metadata in the system message when app info is provided', function () {
             const appInfo = {
                 common: { data: { OpenUI5: '1.120.0' } }
             };
 
-            const seed = promptBuilder.buildSeedMessages(appInfo, []);
+            const messages = promptBuilder.buildMessages({
+                appInfo: appInfo,
+                history: [],
+                userMessage: 'Hi'
+            });
 
-            seed[0].content.should.contain('Framework: 1.120.0');
+            messages[0].content.should.contain('Framework: 1.120.0');
+        });
+
+        it('should wrap the current user message with Inspection Context when a control snapshot is attached', function () {
+            const messages = promptBuilder.buildMessages({
+                history: [],
+                userMessage: 'Explain this',
+                inspectionContext: { control: { type: 'sap.m.Button', id: 'okBtn' } }
+            });
+
+            const userTurn = messages[messages.length - 1];
+            userTurn.role.should.equal('user');
+            userTurn.content.should.contain('User asked: Explain this');
+            userTurn.content.should.contain('Type: sap.m.Button');
+            userTurn.content.should.contain('Now answer: Explain this');
+        });
+
+        it('should wrap the current user message with Recent Console Errors when a snapshot is provided', function () {
+            const messages = promptBuilder.buildMessages({
+                history: [],
+                userMessage: 'Why?',
+                consoleErrors: [{ type: 'error', message: 'boom', frame: 'app.js:1', count: 1 }]
+            });
+
+            const userTurn = messages[messages.length - 1];
+            userTurn.content.should.contain('Recent Console Errors:');
+            userTurn.content.should.contain('- boom');
         });
     });
 });
