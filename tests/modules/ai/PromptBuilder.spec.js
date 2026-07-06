@@ -532,7 +532,7 @@ describe('PromptBuilder', function () {
 
             it('should truncate the properties section to its cap with a [truncated] marker on adversarial input', function () {
                 const largeData = {};
-                for (let i = 0; i < 500; i++) {
+                for (let i = 0; i < 5000; i++) {
                     largeData['property' + i] = 'value'.repeat(20);
                 }
                 const inspectionContext = {
@@ -546,8 +546,8 @@ describe('PromptBuilder', function () {
                 const propsSection = _extractPropertiesSection(result);
 
                 propsSection.should.contain('[truncated]');
-                // 800-char cap plus the "... [truncated]" tail, plus the "Properties:\n" header line.
-                propsSection.length.should.be.lessThan(1000);
+                // 8000-char cap plus the "... [truncated]" tail, plus the "Properties:\n" header line.
+                propsSection.length.should.be.lessThan(8200);
             });
         });
 
@@ -690,8 +690,8 @@ describe('PromptBuilder', function () {
                 result.should.contain('formatter: yes');
             });
 
-            it('should truncate a very long resolved value at approximately 100 characters', function () {
-                const longValue = 'x'.repeat(500);
+            it('should truncate a very long resolved value at approximately 1200 characters', function () {
+                const longValue = 'x'.repeat(5000);
                 const inspectionContext = {
                     control: {
                         type: 'sap.m.Text',
@@ -730,7 +730,7 @@ describe('PromptBuilder', function () {
 
             it('should truncate the bindings section to its cap on adversarial input', function () {
                 const many = {};
-                for (let i = 0; i < 500; i++) {
+                for (let i = 0; i < 5000; i++) {
                     many['prop' + i] = { path: '/very/long/path/' + i, value: 'value' + i };
                 }
                 const inspectionContext = {
@@ -744,7 +744,7 @@ describe('PromptBuilder', function () {
                 const bindingsSection = _extractBindingsSection(result);
 
                 bindingsSection.should.contain('[truncated]');
-                bindingsSection.length.should.be.lessThan(1000);
+                bindingsSection.length.should.be.lessThan(8200);
             });
 
             it('should handle a selected control with circular binding data without throwing', function () {
@@ -844,7 +844,7 @@ describe('PromptBuilder', function () {
 
             it('should truncate the aggregations section to its cap on adversarial input', function () {
                 const data = {};
-                for (let i = 0; i < 100; i++) {
+                for (let i = 0; i < 500; i++) {
                     const children = [];
                     for (let j = 0; j < 200; j++) {
                         children.push({ id: 'child' + i + '_' + j, type: 'sap.m.SomeReallyLongTypeName' });
@@ -862,7 +862,7 @@ describe('PromptBuilder', function () {
                 const aggregationsSection = _extractAggregationsSection(result);
 
                 aggregationsSection.should.contain('[truncated]');
-                aggregationsSection.length.should.be.lessThan(600);
+                aggregationsSection.length.should.be.lessThan(8200);
             });
         });
 
@@ -1088,9 +1088,9 @@ describe('PromptBuilder', function () {
                 errorsIdx.should.be.greaterThan(controlIdx);
             });
 
-            it('should cap the section at ~400 characters and append the [truncated] marker on adversarial input', function () {
+            it('should cap the section at ~8000 characters and append the [truncated] marker on adversarial input', function () {
                 const consoleErrors = [];
-                for (let i = 0; i < 50; i++) {
+                for (let i = 0; i < 500; i++) {
                     consoleErrors.push({
                         type: 'error',
                         message: 'a really long error message number ' + i + ' with more filler text to burn budget',
@@ -1102,12 +1102,12 @@ describe('PromptBuilder', function () {
                 const result = promptBuilder.buildUserPrompt('Q', null, consoleErrors);
 
                 result.should.contain('[truncated]');
-                // The section body is capped — check the whole errors block stays under ~450 chars
-                // (400 body cap + header + [truncated] tail).
+                // The section body is capped — check the whole errors block stays under ~8100 chars
+                // (8000 body cap + header + [truncated] tail).
                 const start = result.indexOf('Recent Console Errors:');
                 const end = result.indexOf('\n\nNow answer:');
                 const section = result.substring(start, end);
-                section.length.should.be.lessThan(500);
+                section.length.should.be.lessThan(8100);
             });
 
             it('golden: errors only (no inspection context)', function () {
@@ -1175,9 +1175,9 @@ describe('PromptBuilder', function () {
                 promptBuilder.buildUserPrompt('Q', null, consoleErrors).should.equal(expected);
             });
 
-            it('golden: adversarial (50 different errors triggering the section cap)', function () {
+            it('golden: adversarial (500 different errors triggering the section cap)', function () {
                 const consoleErrors = [];
-                for (let i = 0; i < 50; i++) {
+                for (let i = 0; i < 500; i++) {
                     consoleErrors.push({
                         type: 'error',
                         message: 'error number ' + i + ' with plenty of filler text to burn budget quickly',
@@ -1188,14 +1188,14 @@ describe('PromptBuilder', function () {
 
                 const result = promptBuilder.buildUserPrompt('Q', null, consoleErrors);
 
-                // The section body is capped at 400 chars. Newest-first means index 49 comes
-                // first. Build the exact expected body by joining lines until we exceed 400 chars,
-                // then truncating at 400 + '... [truncated]'.
+                // The section body is capped at 8000 chars. Newest-first means index 499 comes
+                // first. Build the exact expected body by joining lines until we exceed 8000 chars,
+                // then truncating at 8000 + '... [truncated]'.
                 const reversedLines = consoleErrors.slice().reverse().map(function (entry) {
                     return '- ' + entry.message + '\n  at ' + entry.frame;
                 });
                 const fullBody = reversedLines.join('\n');
-                const cappedBody = fullBody.substring(0, 400) + '... [truncated]';
+                const cappedBody = fullBody.substring(0, 8000) + '... [truncated]';
                 const expected =
                     'User asked: Q\n\n' +
                     'Recent Console Errors:\n' +

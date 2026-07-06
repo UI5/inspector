@@ -1,11 +1,11 @@
 'use strict';
 
 // Per-section size caps. Truncation appends `... [truncated]`.
-const PROPERTIES_CAP = 800;
-const BINDINGS_CAP = 800;
-const AGGREGATIONS_CAP = 400;
-const CONSOLE_ERRORS_CAP = 400;
-const BINDING_VALUE_CAP = 100;
+const PROPERTIES_CAP = 8000;
+const BINDINGS_CAP = 8000;
+const AGGREGATIONS_CAP = 8000;
+const CONSOLE_ERRORS_CAP = 8000;
+const BINDING_VALUE_CAP = 1200;
 
 const UNSERIALIZABLE_PLACEHOLDER = '(Data available but cannot serialize)';
 
