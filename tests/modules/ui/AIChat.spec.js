@@ -30,6 +30,9 @@ function createFakeController() {
         downloadModel: function () { return Promise.resolve(); },
         sendUserMessage: function () { return Promise.resolve(); },
         clearConversation: function () { return Promise.resolve(); },
+        getProviderCapabilities: function () {
+            return { hasDownloadModel: true, hasUsageInfo: true };
+        },
         destroy: function () {}
     };
 }
@@ -1007,6 +1010,163 @@ describe('AIChat', function () {
                 setProviderCalls[0].config.should.deep.equal({ baseUrl: 'x', apiKey: 'x', model: 'x' });
                 (document.querySelector('.ai-settings-modal') === null).should.be.true;
             });
+        });
+    });
+
+    describe('Per-provider feature detection', function () {
+        it('should hide the token counter when the active provider does not implement getUsageInfo, even after messages exist and the counter would otherwise be visible', function () {
+            fakeController.getProviderCapabilities = function () {
+                return { hasDownloadModel: true, hasUsageInfo: false };
+            };
+            fakeController.getUsageInfo = function () {
+                return Promise.resolve({inputUsage: 100, inputQuota: 1000, percentUsed: 10});
+            };
+
+            fixtures.innerHTML = '<div id="ai-chat"></div>';
+            aiChat = new AIChat('ai-chat', {
+                controller: fakeController,
+                transcriptFactory: function () { return fakeTranscript; },
+                providersRegistry: fakeProviders,
+                storage: fakeStorage
+            });
+
+            const input = document.getElementById('ai-input');
+            input.value = 'q';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+            fakeController.fire('stream-complete', {content: 'a'});
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                const counter = document.getElementById('ai-token-counter');
+                counter.hasAttribute('hidden').should.be.true;
+            });
+        });
+
+        it('should hide the download button on downloadable/downloading capability states when the active provider does not implement downloadModel, so a provider without a download flow never shows the button', function () {
+            fakeController.getProviderCapabilities = function () {
+                return { hasDownloadModel: false, hasUsageInfo: false };
+            };
+            fixtures.innerHTML = '<div id="ai-chat"></div>';
+            aiChat = new AIChat('ai-chat', {
+                controller: fakeController,
+                transcriptFactory: function () { return fakeTranscript; },
+                providersRegistry: fakeProviders,
+                storage: fakeStorage
+            });
+
+            fakeController.fire('capability-state-changed', {
+                status: 'downloadable', message: 'x', progress: 0
+            });
+            document.getElementById('ai-download-button').style.display.should.equal('none');
+
+            fakeController.fire('capability-state-changed', {
+                status: 'downloading', message: 'x', progress: 0.4
+            });
+            document.getElementById('ai-download-button').style.display.should.equal('none');
+        });
+
+        it('should re-run feature detection on the next capability-state-changed after a provider swap, so the token counter and download button reflect the new provider\'s capability set immediately', function () {
+            // Start with a provider that has both capabilities.
+            fakeController.getUsageInfo = function () {
+                return Promise.resolve({inputUsage: 100, inputQuota: 1000, percentUsed: 10});
+            };
+
+            const input = document.getElementById('ai-input');
+            input.value = 'q';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+            fakeController.fire('stream-complete', {content: 'a'});
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'Gemini Nano is ready', progress: 0
+            });
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                document.getElementById('ai-token-counter').hasAttribute('hidden').should.be.false;
+
+                // Simulate provider swap: capabilities change, then the new provider re-emits ready.
+                fakeController.getProviderCapabilities = function () {
+                    return { hasDownloadModel: false, hasUsageInfo: false };
+                };
+                fakeController.fire('capability-state-changed', {
+                    status: 'ready', message: 'OpenAI ready', progress: 0
+                });
+
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                document.getElementById('ai-token-counter').hasAttribute('hidden').should.be.true;
+            });
+        });
+    });
+
+    describe('"Not configured" banner action', function () {
+        it('should render a settings-link action button in the banner when the capability state includes reason=not-configured, so the user has a one-click path to fix it', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unavailable',
+                reason: 'not-configured',
+                message: 'OpenAI is not configured. Open settings to configure.',
+                progress: 0
+            });
+
+            const action = document.getElementById('ai-banner-action');
+            action.should.exist;
+            action.hidden.should.be.false;
+            action.textContent.should.contain('Open settings');
+        });
+
+        it('should keep the banner action hidden for a plain unavailable state without reason=not-configured, so unrelated unavailable copy is not overloaded with a settings link', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unavailable', message: 'Local AI cannot run on this device', progress: 0
+            });
+
+            const action = document.getElementById('ai-banner-action');
+            action.hidden.should.be.true;
+        });
+
+        it('should open the settings modal when the not-configured banner action is clicked', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unavailable',
+                reason: 'not-configured',
+                message: 'OpenAI is not configured. Open settings to configure.',
+                progress: 0
+            });
+
+            document.getElementById('ai-banner-action').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                settingsModalCallCount.should.equal(1);
+                fakeSettingsModal.opened.should.be.true;
+            });
+        });
+    });
+
+    describe('Input disabled for unavailable / unsupported states', function () {
+        it('should disable the input and send button while the capability state is unavailable, so the user does not type into a dead chat', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unavailable', message: 'nope', progress: 0
+            });
+            document.getElementById('ai-input').disabled.should.be.true;
+            document.getElementById('ai-send-button').disabled.should.be.true;
+        });
+
+        it('should disable the input and send button while the capability state is unsupported', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unsupported', message: 'Browser unsupported', progress: 0
+            });
+            document.getElementById('ai-input').disabled.should.be.true;
+            document.getElementById('ai-send-button').disabled.should.be.true;
+        });
+
+        it('should re-enable the input when the capability state transitions to ready', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unavailable', message: 'nope', progress: 0
+            });
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+            document.getElementById('ai-input').disabled.should.be.false;
         });
     });
 });
