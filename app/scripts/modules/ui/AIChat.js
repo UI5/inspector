@@ -131,13 +131,15 @@ AIChat.prototype._render = function () {
                     <span class="status-indicator"></span>
                     <span class="status-text">Checking model status...</span>
                 </div>
-                <button class="download-button" id="ai-download-button" style="display: none;" aria-label="Download AI model">
-                    Download Model
-                </button>
-                <button class="clear-history-button" id="ai-clear-history-button" style="display: none;" aria-label="Clear chat history">
-                    Clear History
-                </button>
-                <button class="settings-button" id="ai-settings-button" aria-label="Settings" title="Settings">⚙</button>
+                <div class="banner-actions">
+                    <button class="download-button" id="ai-download-button" style="display: none;" aria-label="Download AI model">
+                        Download Model
+                    </button>
+                    <button class="clear-history-button" id="ai-clear-history-button" style="display: none;" aria-label="Clear chat history">
+                        Clear History
+                    </button>
+                    <button class="settings-button" id="ai-settings-button" aria-label="Settings" title="Settings">⚙</button>
+                </div>
             </div>
 
             <div class="ai-messages-wrapper">
