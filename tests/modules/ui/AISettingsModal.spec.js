@@ -112,6 +112,40 @@ describe('AISettingsModal', function () {
             const fields = fixtures.querySelectorAll('.ai-settings-field');
             fields.length.should.equal(0);
         });
+
+        it('should apply the schema entry\'s placeholder to the rendered input when one is present, so empty fields hint at the expected shape without pre-filling a real value', function () {
+            const providersWithPlaceholders = {
+                'openai': {
+                    displayName: 'OpenAI-compatible',
+                    configSchema: [
+                        { key: 'baseUrl', label: 'Base URL', type: 'text', required: true, placeholder: 'https://host/v1' },
+                        { key: 'apiKey', label: 'API Key', type: 'password', required: true, placeholder: 'your API key' }
+                    ]
+                }
+            };
+            build({ providers: providersWithPlaceholders, initialProviderName: 'openai' });
+
+            const inputs = fixtures.querySelectorAll('.ai-settings-field input');
+            const byLabel = {};
+            Array.prototype.forEach.call(inputs, function (input) {
+                const label = input.closest('.ai-settings-field').querySelector('label').textContent;
+                byLabel[label] = input.getAttribute('placeholder');
+            });
+            byLabel['Base URL'].should.equal('https://host/v1');
+            byLabel['API Key'].should.equal('your API key');
+        });
+
+        it('should not set a placeholder attribute when the schema entry has no placeholder, so the input stays clean', function () {
+            const providersNoPlaceholders = {
+                'x': {
+                    displayName: 'X',
+                    configSchema: [{ key: 'k', label: 'K', type: 'text', required: true }]
+                }
+            };
+            build({ providers: providersNoPlaceholders, initialProviderName: 'x' });
+            const input = fixtures.querySelector('.ai-settings-field input');
+            input.hasAttribute('placeholder').should.be.false;
+        });
     });
 
     describe('Pre-fill from storage', function () {
