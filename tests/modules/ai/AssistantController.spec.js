@@ -124,7 +124,7 @@ function createController(overrides) {
 
     const controller = new AssistantController({
         promptBuilder: promptBuilder,
-        provider: provider,
+        createProvider: function () { return provider; },
         conversationStore: conversationStore,
         getAppInfo: getAppInfo,
         getConsoleErrors: getConsoleErrors,
@@ -676,9 +676,10 @@ describe('AssistantController', function () {
         });
 
         it('should treat a missing getConsoleErrors option as an empty snapshot', function () {
+            const fakeProvider = createFakeProvider();
             const controller = new AssistantController({
                 promptBuilder: new PromptBuilder(),
-                provider: createFakeProvider(),
+                createProvider: function () { return fakeProvider; },
                 conversationStore: createFakeConversationStore()
             });
             controller._capabilityState = { status: 'ready', message: '', progress: 0 };
