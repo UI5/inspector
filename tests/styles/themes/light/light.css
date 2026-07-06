@@ -1329,6 +1329,20 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
 .ai-status-banner .clear-history-button:hover:not(:disabled) {
   background-color: #a3a3a3;
 }
+.ai-status-banner .settings-button {
+  margin-left: 8px;
+  padding: 4px 8px;
+  border: 1px solid #d4d4d4;
+  background-color: transparent;
+  color: #222;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.ai-status-banner .settings-button:hover {
+  background-color: #eee;
+}
 .ai-status-banner.status-ready {
   background-color: rgba(56, 121, 217, 0.2);
   border-color: #d4d4d4;
@@ -1999,6 +2013,117 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
   100% {
     content: '...';
   }
+}
+.ai-settings-modal-root {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ai-settings-modal-root .ai-settings-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+.ai-settings-modal-root .ai-settings-modal {
+  position: relative;
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px;
+  max-width: 480px;
+  width: 90%;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  z-index: 1;
+  animation: confirmSlideIn 0.2s ease-out;
+}
+.ai-settings-modal-root .ai-settings-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #222;
+  margin-bottom: 16px;
+}
+.ai-settings-modal-root .ai-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.ai-settings-modal-root .ai-settings-provider-row,
+.ai-settings-modal-root .ai-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ai-settings-modal-root .ai-settings-provider-row label,
+.ai-settings-modal-root .ai-settings-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #a3a3a3;
+}
+.ai-settings-modal-root .ai-settings-provider-row select,
+.ai-settings-modal-root .ai-settings-field select,
+.ai-settings-modal-root .ai-settings-provider-row input,
+.ai-settings-modal-root .ai-settings-field input {
+  padding: 6px 8px;
+  border: 1px solid #d4d4d4;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #222;
+  background-color: #fff;
+}
+.ai-settings-modal-root .ai-settings-provider-row select:focus,
+.ai-settings-modal-root .ai-settings-field select:focus,
+.ai-settings-modal-root .ai-settings-provider-row input:focus,
+.ai-settings-modal-root .ai-settings-field input:focus {
+  outline: none;
+  border-color: #3879D9;
+}
+.ai-settings-modal-root .ai-settings-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ai-settings-modal-root .ai-settings-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.ai-settings-modal-root .ai-settings-cancel,
+.ai-settings-modal-root .ai-settings-save {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background-color 0.2s;
+}
+.ai-settings-modal-root .ai-settings-cancel {
+  background-color: #eee;
+  color: #222;
+}
+.ai-settings-modal-root .ai-settings-cancel:hover {
+  background-color: #d5d5d5;
+}
+.ai-settings-modal-root .ai-settings-save {
+  background-color: #3879D9;
+  color: #fff;
+}
+.ai-settings-modal-root .ai-settings-save:hover:not(:disabled) {
+  background-color: #2460ba;
+}
+.ai-settings-modal-root .ai-settings-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .ai-message.message-assistant .message-content {
   color: #222 !important;

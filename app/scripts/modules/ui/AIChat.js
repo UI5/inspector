@@ -2,6 +2,33 @@
 
 const AssistantController = require('../ai/AssistantController.js');
 const AssistantTranscript = require('../ai/AssistantTranscript.js');
+const AISettingsModal = require('./AISettingsModal.js');
+const providersRegistryDefault = require('../ai/providers/index.js');
+
+/**
+ * Promise-adapted view of `chrome.storage.local`. Kept private so unit tests don't need `chrome`
+ * — the constructor accepts an injected `storage`.
+ */
+function defaultStorage() {
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+        return {
+            get: function () { return Promise.resolve({}); },
+            set: function () { return Promise.resolve(); }
+        };
+    }
+    return {
+        get: function (keys) {
+            return new Promise(function (resolve) {
+                chrome.storage.local.get(keys, function (data) { resolve(data || {}); });
+            });
+        },
+        set: function (obj) {
+            return new Promise(function (resolve) {
+                chrome.storage.local.set(obj, function () { resolve(); });
+            });
+        }
+    };
+}
 
 /**
  * Thin view over the assistant. Owns the banner, input area, confirm dialog, token counter, and
@@ -29,6 +56,14 @@ const AssistantTranscript = require('../ai/AssistantTranscript.js');
  * @param {Function} [options.transcriptFactory] - Test seam: `(container, options) => AssistantTranscript`.
  *                                                 Wired with `{ onCopyFailed }` so the transcript
  *                                                 can report clipboard failures back to the view.
+ * @param {Object} [options.providersRegistry] - Registry of providers keyed by name. Defaults to
+ *     the app's built-in registry. The settings modal reads `displayName` and `configSchema` from
+ *     each entry.
+ * @param {Object} [options.storage] - `chrome.storage.local`-compatible surface used to persist
+ *     provider selection and per-provider config. Must expose `get(keys) => Promise<Object>` and
+ *     `set(obj) => Promise<void>`. Defaults to a promise-adapted `chrome.storage.local`.
+ * @param {Function} [options.settingsModalFactory] - Test seam: `(options) => AISettingsModal`.
+ *                                                    Defaults to constructing an `AISettingsModal`.
  * @constructor
  */
 function AIChat(containerId, {
@@ -40,6 +75,11 @@ function AIChat(containerId, {
     controller = null,
     transcriptFactory = function (host, options) {
         return new AssistantTranscript(host, options);
+    },
+    providersRegistry = providersRegistryDefault.PROVIDERS,
+    storage = null,
+    settingsModalFactory = function (options) {
+        return new AISettingsModal(options);
     }
 } = {}) {
     this._container = document.getElementById(containerId);
@@ -55,6 +95,10 @@ function AIChat(containerId, {
         clearConsoleErrors: this._clearConsoleErrors || function () {}
     });
     this._transcriptFactory = transcriptFactory;
+    this._providersRegistry = providersRegistry;
+    this._storage = storage || defaultStorage();
+    this._settingsModalFactory = settingsModalFactory;
+    this._settingsModal = null;
 
     this._isStreaming = false;
     this._streamingHandle = null;
@@ -93,6 +137,7 @@ AIChat.prototype._render = function () {
                 <button class="clear-history-button" id="ai-clear-history-button" style="display: none;" aria-label="Clear chat history">
                     Clear History
                 </button>
+                <button class="settings-button" id="ai-settings-button" aria-label="Settings" title="Settings">⚙</button>
             </div>
 
             <div class="ai-messages-wrapper">
@@ -172,6 +217,13 @@ AIChat.prototype._attachEventListeners = function () {
     clearHistoryButton.addEventListener('click', () => {
         this._handleClearHistory();
     });
+
+    const settingsButton = document.getElementById('ai-settings-button');
+    if (settingsButton) {
+        settingsButton.addEventListener('click', () => {
+            this._openSettings();
+        });
+    }
 
     contextClearButton.addEventListener('click', () => {
         this._clearContext();
@@ -373,6 +425,40 @@ AIChat.prototype._handleSendMessage = function () {
 
 AIChat.prototype._handleClearHistory = function () {
     this._showConfirmDialog();
+};
+
+AIChat.prototype._openSettings = function () {
+    const wrapper = this._container.querySelector('.ai-chat-wrapper') || this._container;
+    /* jshint camelcase:false */
+    this._storage.get(['ai_provider_name', 'ai_provider_config']).then((stored) => {
+        const currentName = typeof stored.ai_provider_name === 'string' ? stored.ai_provider_name : 'gemini-nano';
+        const perProvider = stored.ai_provider_config && typeof stored.ai_provider_config === 'object' ? stored.ai_provider_config : {};
+        this._settingsModal = this._settingsModalFactory({
+            host: wrapper,
+            providers: this._providersRegistry,
+            initialProviderName: currentName,
+            initialConfigByProvider: perProvider,
+            onSave: (name, config) => { this._onSettingsSave(name, config); },
+            onCancel: () => {}
+        });
+        this._settingsModal.open();
+    });
+};
+
+AIChat.prototype._onSettingsSave = function (name, config) {
+    /* jshint camelcase:false */
+    this._storage.get(['ai_provider_config']).then((stored) => {
+        const perProvider = stored.ai_provider_config && typeof stored.ai_provider_config === 'object' ? stored.ai_provider_config : {};
+        perProvider[name] = config;
+        return this._storage.set({
+            ai_provider_name: name,
+            ai_provider_config: perProvider
+        });
+    }).then(() => {
+        return this._controller.setProvider(name, config);
+    }).catch((err) => {
+        this._showError('Failed to save settings: ' + (err && err.message ? err.message : err));
+    });
 };
 
 AIChat.prototype._showConfirmDialog = function () {

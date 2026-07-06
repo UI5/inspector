@@ -26,6 +26,7 @@ function createFakeController() {
         getUsageInfo: function () { return Promise.resolve(null); },
         updateInspectionContext: function () {},
         setUrl: function () {},
+        setProvider: function () { return Promise.resolve(); },
         downloadModel: function () { return Promise.resolve(); },
         sendUserMessage: function () { return Promise.resolve(); },
         clearConversation: function () { return Promise.resolve(); },
@@ -69,11 +70,39 @@ describe('AIChat', function () {
     let aiChat;
     let fakeController;
     let fakeTranscript;
+    let fakeSettingsModal;
+    let settingsModalCallCount;
+    let fakeStorage;
+    let fakeProviders;
 
     beforeEach(function () {
         fixtures.innerHTML = '<div id="ai-chat"></div>';
         fakeController = createFakeController();
         fakeTranscript = createFakeTranscript();
+        settingsModalCallCount = 0;
+        fakeSettingsModal = null;
+        fakeStorage = {
+            _data: {},
+            get: function (keys) {
+                const out = {};
+                (keys || []).forEach(function (k) {
+                    if (fakeStorage._data[k] !== undefined) { out[k] = fakeStorage._data[k]; }
+                });
+                return Promise.resolve(out);
+            },
+            set: function (obj) {
+                Object.keys(obj).forEach(function (k) { fakeStorage._data[k] = obj[k]; });
+                return Promise.resolve();
+            }
+        };
+        fakeProviders = {
+            'gemini-nano': { displayName: 'Gemini Nano', configSchema: [] },
+            'openai': { displayName: 'OpenAI', configSchema: [
+                { key: 'baseUrl', label: 'Base URL', type: 'text', required: true },
+                { key: 'apiKey', label: 'API Key', type: 'password', required: true },
+                { key: 'model', label: 'Model', type: 'text', required: true }
+            ] }
+        };
         aiChat = new AIChat('ai-chat', {
             getAppInfo: function () { return null; },
             controller: fakeController,
@@ -82,6 +111,19 @@ describe('AIChat', function () {
                     fakeTranscript.onCopyFailed = options.onCopyFailed;
                 }
                 return fakeTranscript;
+            },
+            providersRegistry: fakeProviders,
+            storage: fakeStorage,
+            settingsModalFactory: function (opts) {
+                settingsModalCallCount++;
+                fakeSettingsModal = {
+                    opened: false,
+                    closed: false,
+                    options: opts,
+                    open: function () { this.opened = true; },
+                    close: function () { this.closed = true; }
+                };
+                return fakeSettingsModal;
             }
         });
     });
@@ -826,6 +868,145 @@ describe('AIChat', function () {
 
             slot.textContent.should.contain('second');
             slot.textContent.should.not.contain('first');
+        });
+    });
+
+    describe('Settings modal', function () {
+        /* jshint camelcase:false */
+        it('should render a gear icon button in the header with an accessible label', function () {
+            const gear = document.getElementById('ai-settings-button');
+            gear.should.exist;
+            gear.getAttribute('aria-label').should.equal('Settings');
+        });
+
+        it('should open the settings modal when the gear icon is clicked, passing the registry, the currently-selected provider name, and per-provider config from storage', function () {
+            fakeStorage._data.ai_provider_name = 'openai';
+            fakeStorage._data.ai_provider_config = { openai: { baseUrl: 'https://x', apiKey: 'k', model: 'm' } };
+
+            document.getElementById('ai-settings-button').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                settingsModalCallCount.should.equal(1);
+                fakeSettingsModal.opened.should.be.true;
+                fakeSettingsModal.options.providers.should.equal(fakeProviders);
+                fakeSettingsModal.options.initialProviderName.should.equal('openai');
+                fakeSettingsModal.options.initialConfigByProvider.should.deep.equal({
+                    openai: { baseUrl: 'https://x', apiKey: 'k', model: 'm' }
+                });
+            });
+        });
+
+        it('should default the modal\'s initial provider name to gemini-nano when storage is empty', function () {
+            document.getElementById('ai-settings-button').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                fakeSettingsModal.options.initialProviderName.should.equal('gemini-nano');
+                fakeSettingsModal.options.initialConfigByProvider.should.deep.equal({});
+            });
+        });
+
+        it('should persist the new provider name and per-provider config to storage on Save', function () {
+            document.getElementById('ai-settings-button').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                fakeSettingsModal.options.onSave('openai', { baseUrl: 'https://api', apiKey: 'sk', model: 'gpt-4' });
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                fakeStorage._data.ai_provider_name.should.equal('openai');
+                fakeStorage._data.ai_provider_config.should.deep.equal({
+                    openai: { baseUrl: 'https://api', apiKey: 'sk', model: 'gpt-4' }
+                });
+            });
+        });
+
+        it('should merge the saved config into any pre-existing per-provider config so other providers\' credentials survive a save', function () {
+            fakeStorage._data.ai_provider_config = { openai: { baseUrl: 'old', apiKey: 'old', model: 'old' } };
+
+            document.getElementById('ai-settings-button').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                fakeSettingsModal.options.onSave('gemini-nano', {});
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                fakeStorage._data.ai_provider_name.should.equal('gemini-nano');
+                fakeStorage._data.ai_provider_config.openai.should.deep.equal({ baseUrl: 'old', apiKey: 'old', model: 'old' });
+                fakeStorage._data.ai_provider_config['gemini-nano'].should.deep.equal({});
+            });
+        });
+
+        it('should call controller.setProvider with the new name and config on Save', function () {
+            const calls = [];
+            fakeController.setProvider = function (name, config) {
+                calls.push({ name: name, config: config });
+                return Promise.resolve();
+            };
+
+            document.getElementById('ai-settings-button').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                fakeSettingsModal.options.onSave('openai', { baseUrl: 'u', apiKey: 'k', model: 'm' });
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                calls.length.should.equal(1);
+                calls[0].name.should.equal('openai');
+                calls[0].config.should.deep.equal({ baseUrl: 'u', apiKey: 'k', model: 'm' });
+            });
+        });
+
+        it('should not persist or call controller.setProvider when Cancel fires onCancel', function () {
+            const providerCalls = [];
+            fakeController.setProvider = function () { providerCalls.push(1); return Promise.resolve(); };
+
+            document.getElementById('ai-settings-button').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                fakeSettingsModal.options.onCancel();
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                providerCalls.length.should.equal(0);
+                (fakeStorage._data.ai_provider_name === undefined).should.be.true;
+            });
+        });
+
+        it('should drive the real settings modal end-to-end: gear click opens the modal, Save on the modal triggers controller.setProvider', function () {
+            const setProviderCalls = [];
+            fakeController.setProvider = function (name, config) {
+                setProviderCalls.push({ name: name, config: config });
+                return Promise.resolve();
+            };
+
+            fixtures.innerHTML = '<div id="ai-chat"></div>';
+            aiChat = new AIChat('ai-chat', {
+                controller: fakeController,
+                transcriptFactory: function () { return fakeTranscript; },
+                providersRegistry: fakeProviders,
+                storage: fakeStorage
+            });
+
+            document.getElementById('ai-settings-button').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                const dialog = document.querySelector('.ai-settings-modal');
+                dialog.should.exist;
+
+                const select = document.querySelector('.ai-settings-provider-select');
+                select.value = 'openai';
+                select.dispatchEvent(new Event('change'));
+
+                const inputs = document.querySelectorAll('.ai-settings-fields input');
+                Array.prototype.forEach.call(inputs, function (input) {
+                    input.value = 'x';
+                    input.dispatchEvent(new Event('input'));
+                });
+
+                document.querySelector('.ai-settings-save').click();
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                setProviderCalls.length.should.equal(1);
+                setProviderCalls[0].name.should.equal('openai');
+                setProviderCalls[0].config.should.deep.equal({ baseUrl: 'x', apiKey: 'x', model: 'x' });
+                (document.querySelector('.ai-settings-modal') === null).should.be.true;
+            });
         });
     });
 });
