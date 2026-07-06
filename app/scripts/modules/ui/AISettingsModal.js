@@ -40,7 +40,6 @@ AISettingsModal.prototype.open = function () {
 
     this._attachHandlers();
     this._renderFieldsForSelected();
-    this._updateSaveDisabled();
 
     const dialog = this._root.querySelector('.ai-settings-modal');
     const firstFocusable = dialog.querySelector('select, input, button');
@@ -106,7 +105,6 @@ AISettingsModal.prototype._attachHandlers = function () {
     select.addEventListener('change', () => {
         this._selectedName = select.value;
         this._renderFieldsForSelected();
-        this._updateSaveDisabled();
     });
 
     this._keydownHandler = (e) => {
@@ -170,7 +168,6 @@ AISettingsModal.prototype._renderFieldsForSelected = function () {
         if (config[entry.key] !== undefined && config[entry.key] !== null) {
             input.value = config[entry.key];
         }
-        input.addEventListener('input', () => { this._updateSaveDisabled(); });
 
         wrapper.appendChild(label);
         wrapper.appendChild(input);
@@ -185,18 +182,6 @@ AISettingsModal.prototype._collectFormConfig = function () {
         config[input.dataset.key] = input.value;
     });
     return config;
-};
-
-AISettingsModal.prototype._updateSaveDisabled = function () {
-    const saveBtn = this._root.querySelector('.ai-settings-save');
-    const inputs = this._root.querySelectorAll('.ai-settings-fields input');
-    let allRequiredFilled = true;
-    Array.prototype.forEach.call(inputs, (input) => {
-        if (input.dataset.required === 'true' && input.value.trim() === '') {
-            allRequiredFilled = false;
-        }
-    });
-    saveBtn.disabled = !allRequiredFilled;
 };
 
 AISettingsModal.prototype._save = function () {

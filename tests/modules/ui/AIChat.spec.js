@@ -1099,6 +1099,39 @@ describe('AIChat', function () {
                 document.getElementById('ai-token-counter').hasAttribute('hidden').should.be.true;
             });
         });
+
+        it('should hide the token counter after a provider swap that lands on an unavailable state, so switching from a healthy Gemini session to a not-configured OpenAI leaves no stale token pill', function () {
+            fakeController.getUsageInfo = function () {
+                return Promise.resolve({inputUsage: 100, inputQuota: 1000, percentUsed: 10});
+            };
+
+            const input = document.getElementById('ai-input');
+            input.value = 'q';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+            fakeController.fire('stream-complete', {content: 'a'});
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                document.getElementById('ai-token-counter').hasAttribute('hidden').should.be.false;
+
+                fakeController.getProviderCapabilities = function () {
+                    return { hasDownloadModel: false, hasUsageInfo: false };
+                };
+                fakeController.fire('capability-state-changed', {
+                    status: 'unavailable',
+                    reason: 'not-configured',
+                    message: 'OpenAI is not configured. Open settings to configure.',
+                    progress: 0
+                });
+
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                document.getElementById('ai-token-counter').hasAttribute('hidden').should.be.true;
+            });
+        });
     });
 
     describe('"Not configured" banner action', function () {

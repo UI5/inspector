@@ -189,13 +189,13 @@ describe('AISettingsModal', function () {
     });
 
     describe('Save button state', function () {
-        it('should disable Save while any required field is empty', function () {
+        it('should enable Save even when required fields are empty, so the user can save an empty config to remove credentials — the provider surfaces the missing-config state via checkAvailability', function () {
             build({ initialProviderName: 'openai' });
             const save = fixtures.querySelector('.ai-settings-save');
-            save.disabled.should.be.true;
+            save.disabled.should.be.false;
         });
 
-        it('should enable Save when all required fields have non-empty values', function () {
+        it('should enable Save when all fields have non-empty values', function () {
             build({
                 initialProviderName: 'openai',
                 initialConfigByProvider: {
@@ -206,35 +206,36 @@ describe('AISettingsModal', function () {
             save.disabled.should.be.false;
         });
 
-        it('should re-evaluate Save enabled state when the user types into a required field', function () {
-            build({ initialProviderName: 'openai' });
-            const save = fixtures.querySelector('.ai-settings-save');
-            save.disabled.should.be.true;
-
-            const inputs = fixtures.querySelectorAll('.ai-settings-field input');
-            Array.prototype.forEach.call(inputs, function (input) {
-                input.value = 'x';
-                input.dispatchEvent(new Event('input'));
-            });
-
-            save.disabled.should.be.false;
-        });
-
         it('should enable Save immediately for a provider with an empty configSchema', function () {
             build({ initialProviderName: 'gemini-nano' });
             const save = fixtures.querySelector('.ai-settings-save');
             save.disabled.should.be.false;
         });
 
-        it('should treat whitespace-only values as empty for required-field validation', function () {
+        it('should let the user save an empty value into a previously-filled required field, so credentials can be cleared', function () {
+            const saved = [];
             build({
                 initialProviderName: 'openai',
                 initialConfigByProvider: {
-                    openai: { baseUrl: '   ', apiKey: 'k', model: 'm' }
+                    openai: { baseUrl: 'https://x', apiKey: 'secret', model: 'gpt-4' }
+                },
+                onSave: function (name, config) { saved.push({ name: name, config: config }); }
+            });
+
+            const inputs = fixtures.querySelectorAll('.ai-settings-field input');
+            Array.prototype.forEach.call(inputs, function (input) {
+                if (input.dataset.key === 'apiKey') {
+                    input.value = '';
+                    input.dispatchEvent(new Event('input'));
                 }
             });
+
             const save = fixtures.querySelector('.ai-settings-save');
-            save.disabled.should.be.true;
+            save.disabled.should.be.false;
+            save.click();
+
+            saved.length.should.equal(1);
+            saved[0].config.apiKey.should.equal('');
         });
     });
 
