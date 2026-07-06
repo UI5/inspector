@@ -135,6 +135,9 @@ AIChat.prototype._render = function () {
                     <button class="download-button" id="ai-download-button" style="display: none;" aria-label="Download AI model">
                         Download Model
                     </button>
+                    <button class="banner-action-button" id="ai-banner-action" hidden aria-label="Open settings">
+                        Open settings
+                    </button>
                     <button class="clear-history-button" id="ai-clear-history-button" style="display: none;" aria-label="Clear chat history">
                         Clear History
                     </button>
@@ -223,6 +226,13 @@ AIChat.prototype._attachEventListeners = function () {
     const settingsButton = document.getElementById('ai-settings-button');
     if (settingsButton) {
         settingsButton.addEventListener('click', () => {
+            this._openSettings();
+        });
+    }
+
+    const bannerAction = document.getElementById('ai-banner-action');
+    if (bannerAction) {
+        bannerAction.addEventListener('click', () => {
             this._openSettings();
         });
     }
@@ -320,12 +330,13 @@ AIChat.prototype._attachControllerListeners = function () {
 /**
  * Canonical capability state config. The banner CSS class is `status-<key>` for every key.
  * `skip: true` means no banner update. `showClearButton: true` makes the clear-history button
- * visible. `updateTokens: true` refreshes the token counter. Unknown statuses route to `unavailable`.
+ * visible. `updateTokens: true` refreshes the token counter. `disableInput: true` disables the
+ * send input and button while the state is active. Unknown statuses route to `unavailable`.
  * @private
  */
 AIChat._CAPABILITY_CONFIG = {
-    'unsupported':      {},
-    'unavailable':      {},
+    'unsupported':      { disableInput: true },
+    'unavailable':      { disableInput: true },
     'downloadable':     {},
     'downloading':      {},
     'ready':            { showClearButton: true, updateTokens: true },
@@ -338,7 +349,7 @@ AIChat._CAPABILITY_CONFIG = {
 /**
  * React to a capability state change.
  * @private
- * @param {{status: string, message: string, progress: number}} state
+ * @param {{status: string, message: string, progress: number, reason: (string|null)}} state
  */
 AIChat.prototype._onCapabilityStateChanged = function (state) {
     let config = AIChat._CAPABILITY_CONFIG[state.status];
@@ -354,6 +365,8 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
     }
 
     this._renderCapabilityBanner(status, state);
+    this._renderBannerAction(state);
+    this._applyInputDisabledState(!!config.disableInput);
 
     if (config.showClearButton) {
         // `ready` is gated on `_hasMessages` so a post-clear reseed does not re-reveal the button.
@@ -365,6 +378,29 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
     }
     if (config.updateTokens) {
         this._updateTokenCounter();
+    }
+};
+
+AIChat.prototype._renderBannerAction = function (state) {
+    const action = document.getElementById('ai-banner-action');
+    if (!action) {
+        return;
+    }
+    action.hidden = state.reason !== 'not-configured';
+};
+
+AIChat.prototype._applyInputDisabledState = function (disabled) {
+    const input = document.getElementById('ai-input');
+    const sendButton = document.getElementById('ai-send-button');
+    if (!input || !sendButton) {
+        return;
+    }
+    if (disabled) {
+        input.disabled = true;
+        sendButton.disabled = true;
+    } else {
+        input.disabled = false;
+        sendButton.disabled = !input.value.trim().length;
     }
 };
 
@@ -513,6 +549,11 @@ AIChat.prototype._renderCapabilityBanner = function (status, state) {
     }
     statusText.textContent = message;
 
+    if (!this._controller.getProviderCapabilities().hasDownloadModel) {
+        downloadButton.style.display = 'none';
+        return;
+    }
+
     if (status === 'downloadable') {
         downloadButton.style.display = 'inline-block';
         downloadButton.disabled = false;
@@ -533,7 +574,8 @@ AIChat.prototype._updateTokenCounter = function () {
         return;
     }
 
-    if (!this._hasMessages) {
+    const capabilities = this._controller.getProviderCapabilities();
+    if (!capabilities.hasUsageInfo || !this._hasMessages) {
         counter.textContent = '';
         counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
         counter.hidden = true;

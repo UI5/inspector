@@ -87,12 +87,14 @@ AssistantController.prototype._emit = function (event, payload) {
  * @param {string} status
  * @param {string} [message]
  * @param {number} [progress]
+ * @param {string} [reason]
  */
-AssistantController.prototype._setCapabilityState = function (status, message, progress) {
+AssistantController.prototype._setCapabilityState = function (status, message, progress, reason) {
     this._capabilityState = {
         status: status,
         message: message || '',
-        progress: typeof progress === 'number' ? progress : 0
+        progress: typeof progress === 'number' ? progress : 0,
+        reason: reason || null
     };
     if (status === 'ready' && message) {
         this._lastReadyMessage = message;
@@ -108,7 +110,7 @@ AssistantController.prototype._setCapabilityState = function (status, message, p
  */
 AssistantController.prototype.initialize = function () {
     return this._provider.checkAvailability().then((capability) => {
-        this._setCapabilityState(capability.status, capability.message, 0);
+        this._setCapabilityState(capability.status, capability.message, 0, capability.reason);
         return this._loadConversationMemory();
     }, (err) => {
         this._setCapabilityState('unavailable', err && err.message ? err.message : 'Local AI is unavailable', 0);
@@ -302,6 +304,19 @@ AssistantController.prototype.getUsageInfo = function () {
 };
 
 /**
+ * Report which optional Provider methods the currently-installed provider implements, so the view
+ * can hide widgets tied to those methods (token counter, download button) after a provider swap.
+ *
+ * @returns {{hasDownloadModel: boolean, hasUsageInfo: boolean}}
+ */
+AssistantController.prototype.getProviderCapabilities = function () {
+    return {
+        hasDownloadModel: typeof this._provider.downloadModel === 'function',
+        hasUsageInfo: typeof this._provider.getUsageInfo === 'function'
+    };
+};
+
+/**
  * Swap the active provider. Aborts any in-flight stream, destroys the current provider, and
  * constructs the replacement via the registry factory. Conversation memory is preserved.
  * `capability-state-changed` is emitted from the new provider's `checkAvailability`.
@@ -321,7 +336,7 @@ AssistantController.prototype.setProvider = function (name, config) {
     this._provider = this._createProvider(name, config || {});
 
     return this._provider.checkAvailability().then((capability) => {
-        this._setCapabilityState(capability.status, capability.message, 0);
+        this._setCapabilityState(capability.status, capability.message, 0, capability.reason);
     }, (err) => {
         this._setCapabilityState('unavailable', err && err.message ? err.message : 'Provider unavailable', 0);
     });

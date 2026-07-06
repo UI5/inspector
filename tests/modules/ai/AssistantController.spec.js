@@ -222,7 +222,8 @@ describe('AssistantController', function () {
                 harness.capabilityStates.should.deep.include({
                     status: 'ready',
                     message: 'Gemini Nano is ready',
-                    progress: 0
+                    progress: 0,
+                    reason: null
                 });
             });
         });
@@ -240,6 +241,21 @@ describe('AssistantController', function () {
             harness.provider.availabilityResult = { status: 'unsupported', message: 'Browser unsupported' };
             return harness.controller.initialize().then(function () {
                 harness.controller._capabilityState.status.should.equal('unsupported');
+            });
+        });
+
+        it('should carry the provider\'s reason through to the emitted capability state, so the view can distinguish missing-config unavailable from other unavailable reasons', function () {
+            const harness = createController();
+            harness.provider.availabilityResult = {
+                status: 'unavailable',
+                reason: 'not-configured',
+                message: 'OpenAI is not configured. Open settings to configure.'
+            };
+            return harness.controller.initialize().then(function () {
+                const last = harness.capabilityStates[harness.capabilityStates.length - 1];
+                last.status.should.equal('unavailable');
+                last.reason.should.equal('not-configured');
+                last.message.should.contain('not configured');
             });
         });
 
@@ -1249,6 +1265,54 @@ describe('AssistantController', function () {
             harness.provider.usageInfo = { inputUsage: 100, inputQuota: 1000, percentUsed: 10 };
             return harness.controller.getUsageInfo().then(function (usage) {
                 usage.should.deep.equal({ inputUsage: 100, inputQuota: 1000, percentUsed: 10 });
+            });
+        });
+    });
+
+    describe('#getProviderCapabilities() — feature detection for the view', function () {
+        it('should report both capabilities present when the provider implements downloadModel and getUsageInfo', function () {
+            const harness = createController();
+            const caps = harness.controller.getProviderCapabilities();
+            caps.hasDownloadModel.should.be.true;
+            caps.hasUsageInfo.should.be.true;
+        });
+
+        it('should report hasUsageInfo=false when the provider omits getUsageInfo, so the view can hide the token counter without probing the method', function () {
+            const harness = createController();
+            delete harness.provider.getUsageInfo;
+            const caps = harness.controller.getProviderCapabilities();
+            caps.hasUsageInfo.should.be.false;
+        });
+
+        it('should report hasDownloadModel=false when the provider omits downloadModel, so the view can hide the download button without waiting for a capability state transition', function () {
+            const harness = createController();
+            delete harness.provider.downloadModel;
+            const caps = harness.controller.getProviderCapabilities();
+            caps.hasDownloadModel.should.be.false;
+        });
+
+        it('should reflect the newly-installed provider after setProvider, so a hot swap flips the reported capability set atomically with the swap', function () {
+            const barebones = {
+                checkAvailability: function () { return Promise.resolve({ status: 'ready', message: 'ok' }); },
+                sendMessage: function () { return Promise.resolve(''); },
+                destroy: function () {}
+            };
+            let callCount = 0;
+            const initialProvider = createFakeProvider();
+            const controller = new AssistantController({
+                createProvider: function () {
+                    callCount += 1;
+                    return callCount === 1 ? initialProvider : barebones;
+                }
+            });
+
+            controller.getProviderCapabilities().hasUsageInfo.should.be.true;
+            controller.getProviderCapabilities().hasDownloadModel.should.be.true;
+
+            return controller.setProvider('other', {}).then(function () {
+                const caps = controller.getProviderCapabilities();
+                caps.hasDownloadModel.should.be.false;
+                caps.hasUsageInfo.should.be.false;
             });
         });
     });

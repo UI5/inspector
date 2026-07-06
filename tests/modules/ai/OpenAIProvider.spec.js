@@ -84,6 +84,14 @@ describe('OpenAIProvider', function () {
             });
         });
 
+        it('should tag missing-config unavailable with reason=not-configured, so the view can distinguish it from other unavailable reasons and show the "Open settings" action', function () {
+            const { provider } = createProvider({ apiKey: '' });
+            return provider.checkAvailability().then(function (result) {
+                result.status.should.equal('unavailable');
+                result.reason.should.equal('not-configured');
+            });
+        });
+
         it('should return `unavailable` when apiKey is missing', function () {
             const { provider } = createProvider({ apiKey: '' });
             return provider.checkAvailability().then(function (result) {
