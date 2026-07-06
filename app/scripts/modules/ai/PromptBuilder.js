@@ -380,28 +380,38 @@ PromptBuilder.prototype._renderAggregationsSection = function (aggregations) {
 };
 
 /**
- * Build the seed messages for a new session: a system message followed by prior
- * user/assistant turns.
+ * Build the full messages array for a send: `[system, ...history, wrappedUser]`. The wrapped user
+ * message injects Inspection Context and Recent Console Errors when present.
  *
- * @param {Object} [appInfo]
- * @param {Array} [conversationMemory]
+ * @param {Object} params
+ * @param {Object} [params.appInfo]
+ * @param {Array<{role: string, content: string}>} [params.history]
+ * @param {string} params.userMessage
+ * @param {Object} [params.inspectionContext]
+ * @param {Array} [params.consoleErrors]
  * @returns {Array<{role: string, content: string}>}
  */
-PromptBuilder.prototype.buildSeedMessages = function (appInfo, conversationMemory) {
-    const seed = [
-        { role: 'system', content: this.buildSystemPrompt(appInfo) }
+PromptBuilder.prototype.buildMessages = function (params) {
+    const p = params || {};
+    const messages = [
+        { role: 'system', content: this.buildSystemPrompt(p.appInfo) }
     ];
 
-    if (conversationMemory && conversationMemory.length) {
-        for (let i = 0; i < conversationMemory.length; i++) {
-            const turn = conversationMemory[i];
+    if (p.history && p.history.length) {
+        for (let i = 0; i < p.history.length; i++) {
+            const turn = p.history[i];
             if ((turn.role === 'user' || turn.role === 'assistant') && turn.content) {
-                seed.push({ role: turn.role, content: turn.content });
+                messages.push({ role: turn.role, content: turn.content });
             }
         }
     }
 
-    return seed;
+    messages.push({
+        role: 'user',
+        content: this.buildUserPrompt(p.userMessage, p.inspectionContext, p.consoleErrors)
+    });
+
+    return messages;
 };
 
 module.exports = PromptBuilder;
