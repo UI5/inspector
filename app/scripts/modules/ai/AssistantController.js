@@ -42,6 +42,7 @@ function AssistantController({
     this._clearConsoleErrors = clearConsoleErrors;
 
     this._capabilityState = { status: 'unavailable', message: 'Checking model status...', progress: 0 };
+    this._lastReadyMessage = 'Ready';
     this._listeners = {};
     this._currentUrl = null;
     this._conversationMemory = [];
@@ -93,6 +94,9 @@ AssistantController.prototype._setCapabilityState = function (status, message, p
         message: message || '',
         progress: typeof progress === 'number' ? progress : 0
     };
+    if (status === 'ready' && message) {
+        this._lastReadyMessage = message;
+    }
     this._emit('capability-state-changed', this._capabilityState);
 };
 
@@ -171,7 +175,7 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
                 this._activeAbortController = null;
             }
             if (this._capabilityState.status === 'streaming-failed') {
-                this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
+                this._setCapabilityState('ready', this._lastReadyMessage, 0);
             }
             this._emit('stream-complete', { content: fullText });
             return { content: fullText };
@@ -219,7 +223,7 @@ AssistantController.prototype.setUrl = function (url) {
 
     return this._loadConversationMemory().then(() => {
         this._provider.destroy();
-        this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
+        this._setCapabilityState('ready', this._lastReadyMessage, 0);
     });
 };
 
@@ -253,7 +257,7 @@ AssistantController.prototype.clearConversation = function () {
         this._provider.destroy();
         this._emit('conversation-cleared');
         if (this._capabilityState.status === 'ready') {
-            this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
+            this._setCapabilityState('ready', this._lastReadyMessage, 0);
         }
     });
 };
