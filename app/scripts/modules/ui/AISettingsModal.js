@@ -164,6 +164,9 @@ AISettingsModal.prototype._renderFieldsForSelected = function () {
         input.type = entry.type === 'password' ? 'password' : 'text';
         input.dataset.key = entry.key;
         input.dataset.required = entry.required ? 'true' : 'false';
+        if (entry.placeholder) {
+            input.placeholder = entry.placeholder;
+        }
         if (config[entry.key] !== undefined && config[entry.key] !== null) {
             input.value = config[entry.key];
         }
