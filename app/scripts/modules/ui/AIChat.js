@@ -116,13 +116,10 @@ AIChat.prototype.init = function () {
     });
     this._attachEventListeners();
     this._attachControllerListeners();
-    this._checkModelAvailability();
+    this._controller.initialize();
 };
 
-/**
- * The messages container is created here but its contents are owned by {@link AssistantTranscript}.
- * @private
- */
+/** Renders the shell HTML. The messages container's contents are owned by {@link AssistantTranscript}. */
 AIChat.prototype._render = function () {
     this._container.innerHTML = `
         <div class="ai-chat-wrapper" role="region" aria-label="AI Chat">
@@ -282,10 +279,7 @@ AIChat.prototype._attachControllerListeners = function () {
         this._transcript.reset(turns || []);
         if (turns && turns.length > 0) {
             this._hasMessages = true;
-            const clearButton = document.getElementById('ai-clear-history-button');
-            if (clearButton) {
-                clearButton.style.display = 'inline-block';
-            }
+            this._setClearHistoryVisible(true);
         }
     });
 
@@ -315,10 +309,7 @@ AIChat.prototype._attachControllerListeners = function () {
         this._transcript.clear();
         this._hasShownUsageWarning = false;
         this._hasMessages = false;
-        const clearButton = document.getElementById('ai-clear-history-button');
-        if (clearButton) {
-            clearButton.style.display = 'none';
-        }
+        this._setClearHistoryVisible(false);
         this._updateTokenCounter();
     });
 
@@ -327,13 +318,7 @@ AIChat.prototype._attachControllerListeners = function () {
     });
 };
 
-/**
- * Canonical capability state config. The banner CSS class is `status-<key>` for every key.
- * `skip: true` means no banner update. `showClearButton: true` makes the clear-history button
- * visible. `disableInput: true` disables the send input and button while the state is active.
- * Unknown statuses route to `unavailable`.
- * @private
- */
+/** Capability status → view flags. Banner class is `status-<key>`. Unknown statuses route to `unavailable`. */
 AIChat._CAPABILITY_CONFIG = {
     'unsupported':      { disableInput: true },
     'unavailable':      { disableInput: true },
@@ -372,9 +357,8 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
     if (config.showClearButton) {
         // `ready` is gated on `_hasMessages` so a post-clear reseed does not re-reveal the button.
         // `session-failed` still forces it visible — clearing is the recovery path.
-        const clearButton = document.getElementById('ai-clear-history-button');
-        if (clearButton && (status !== 'ready' || this._hasMessages)) {
-            clearButton.style.display = 'inline-block';
+        if (status !== 'ready' || this._hasMessages) {
+            this._setClearHistoryVisible(true);
         }
     }
 };
@@ -403,8 +387,11 @@ AIChat.prototype._applyInputDisabledState = function (disabled) {
 };
 
 /** @private */
-AIChat.prototype._checkModelAvailability = function () {
-    this._controller.initialize();
+AIChat.prototype._setClearHistoryVisible = function (visible) {
+    const clearButton = document.getElementById('ai-clear-history-button');
+    if (clearButton) {
+        clearButton.style.display = visible ? 'inline-block' : 'none';
+    }
 };
 
 /**
@@ -446,10 +433,7 @@ AIChat.prototype._handleSendMessage = function () {
 
     this._transcript.appendUserTurn(userMessage);
     this._hasMessages = true;
-    const clearButton = document.getElementById('ai-clear-history-button');
-    if (clearButton) {
-        clearButton.style.display = 'inline-block';
-    }
+    this._setClearHistoryVisible(true);
 
     this._isStreaming = true;
     this._streamingHandle = this._transcript.beginAssistantTurn();
@@ -575,7 +559,7 @@ AIChat.prototype._updateTokenCounter = function () {
     const capabilities = this._controller.getProviderCapabilities();
     if (!capabilities.hasUsageInfo || !this._hasMessages) {
         counter.textContent = '';
-        counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
+        this._resetTokenCounterClasses(counter);
         counter.hidden = true;
         return;
     }
@@ -584,7 +568,7 @@ AIChat.prototype._updateTokenCounter = function () {
         if (usageInfo) {
             counter.textContent = 'Tokens: ' + usageInfo.inputUsage + '/' + usageInfo.inputQuota + ' (' + usageInfo.percentUsed + '%)';
 
-            counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
+            this._resetTokenCounterClasses(counter);
 
             if (usageInfo.percentUsed >= 100) {
                 counter.classList.add('quota-exhausted');
@@ -605,6 +589,11 @@ AIChat.prototype._updateTokenCounter = function () {
     }, () => {
         // Rejected usage: same no-op as null.
     });
+};
+
+/** @private */
+AIChat.prototype._resetTokenCounterClasses = function (counter) {
+    counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
 };
 
 /**
@@ -628,11 +617,7 @@ AIChat.prototype._clearContext = function () {
     this._controller.updateInspectionContext(null);
 };
 
-/**
- * Hide the Context pill in response to `inspection-context-cleared`. The show path
- * (`updateContext`) writes the pill directly — the controller does not re-emit its data.
- * @private
- */
+/** Hide the Context pill on `inspection-context-cleared`. Show path is `updateContext`, not a controller re-emit. */
 AIChat.prototype._hideContextPill = function () {
     const contextInfo = document.getElementById('ai-context-info');
     if (contextInfo) {
@@ -666,12 +651,7 @@ AIChat.prototype.setUrl = function (url) {
     this._controller.setUrl(url);
 };
 
-/**
- * Show a transient error in the inline slot above the input. Replaces any current message.
- * Auto-clears on the next input activity.
- * @private
- * @param {string} message
- */
+/** Show a transient error in the inline slot; auto-clears on next input activity. */
 AIChat.prototype._showError = function (message) {
     const slot = document.getElementById('ai-error-slot');
     if (!slot) {
@@ -681,10 +661,6 @@ AIChat.prototype._showError = function (message) {
     slot.hidden = false;
 };
 
-/**
- * Empty and hide the inline error slot.
- * @private
- */
 AIChat.prototype._clearError = function () {
     const slot = document.getElementById('ai-error-slot');
     if (!slot) {
