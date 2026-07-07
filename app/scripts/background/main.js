@@ -471,10 +471,6 @@
             promptAPIController.abort();
             promptAPIController = null;
         }
-
-        port.postMessage({
-            type: 'session-destroyed'
-        });
     }
 
     // Listen for long-lived connections for Prompt API

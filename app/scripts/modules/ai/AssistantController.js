@@ -4,6 +4,10 @@ const PromptBuilder = require('./PromptBuilder.js');
 const providersRegistry = require('./providers/index.js');
 const ConversationStore = require('./ConversationStore.js');
 
+function _msg(err, fallback) {
+    return (err && err.message) || fallback;
+}
+
 /**
  * Coordinates the AI Assistant: capability state, per-URL conversation memory, inspection context,
  * streaming, and persistence. Delegates all provider-specific concerns (session lifecycle, prefix
@@ -47,7 +51,6 @@ function AssistantController({
     this._currentUrl = null;
     this._conversationMemory = [];
     this._inspectionContext = null;
-    this._isStreaming = false;
     this._activeAbortController = null;
 }
 
@@ -113,7 +116,7 @@ AssistantController.prototype.initialize = function () {
         this._setCapabilityState(capability.status, capability.message, 0, capability.reason);
         return this._loadConversationMemory();
     }, (err) => {
-        this._setCapabilityState('unavailable', err && err.message ? err.message : 'Local AI is unavailable', 0);
+        this._setCapabilityState('unavailable', _msg(err, 'Local AI is unavailable'), 0);
     });
 };
 
@@ -122,7 +125,7 @@ AssistantController.prototype.initialize = function () {
  * persist both turns, and emit stream events. The current Inspection Context is injected.
  *
  * @param {string} userMessage
- * @returns {Promise<{content: string}>}
+ * @returns {Promise<void>}
  */
 AssistantController.prototype.sendUserMessage = function (userMessage) {
     const consoleErrors = this._getConsoleErrors();
@@ -134,7 +137,6 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
         consoleErrors: consoleErrors
     });
 
-    this._isStreaming = true;
     const abortController = new AbortController();
     this._activeAbortController = abortController;
 
@@ -155,9 +157,10 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
                 content: fullText
             });
         }).then(() => {
-            this._conversationMemory.push({ role: 'user', content: userMessage });
-            this._conversationMemory.push({ role: 'assistant', content: fullText });
-            this._isStreaming = false;
+            this._conversationMemory.push(
+                { role: 'user', content: userMessage },
+                { role: 'assistant', content: fullText }
+            );
             if (this._activeAbortController === abortController) {
                 this._activeAbortController = null;
             }
@@ -165,17 +168,15 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
                 this._setCapabilityState('ready', this._lastReadyMessage, 0);
             }
             this._emit('stream-complete', { content: fullText });
-            return { content: fullText };
         });
     }, (err) => {
-        this._isStreaming = false;
         if (this._activeAbortController === abortController) {
             this._activeAbortController = null;
         }
         if (err && err.name === 'AbortError') {
             throw err;
         }
-        this._setCapabilityState('streaming-failed', err && err.message ? err.message : 'Streaming failed', 0);
+        this._setCapabilityState('streaming-failed', _msg(err, 'Streaming failed'), 0);
         this._emit('stream-failed', err);
         throw err;
     });
@@ -262,7 +263,7 @@ AssistantController.prototype.downloadModel = function () {
     }).then(() => {
         this._setCapabilityState('ready', 'Model ready', 1);
     }, (err) => {
-        this._setCapabilityState('unavailable', err && err.message ? err.message : 'Download failed', 0);
+        this._setCapabilityState('unavailable', _msg(err, 'Download failed'), 0);
         throw err;
     });
 };
@@ -271,10 +272,9 @@ AssistantController.prototype.downloadModel = function () {
  * @returns {Promise<Object|null>}
  */
 AssistantController.prototype.getUsageInfo = function () {
-    if (typeof this._provider.getUsageInfo !== 'function') {
-        return Promise.resolve(null);
-    }
-    return this._provider.getUsageInfo();
+    return typeof this._provider.getUsageInfo === 'function' ?
+        this._provider.getUsageInfo() :
+        Promise.resolve(null);
 };
 
 /**
@@ -304,7 +304,6 @@ AssistantController.prototype.setProvider = function (name, config) {
         this._activeAbortController.abort();
         this._activeAbortController = null;
     }
-    this._isStreaming = false;
 
     this._provider.destroy();
     this._provider = this._createProvider(name, config || {});
@@ -312,7 +311,7 @@ AssistantController.prototype.setProvider = function (name, config) {
     return this._provider.checkAvailability().then((capability) => {
         this._setCapabilityState(capability.status, capability.message, 0, capability.reason);
     }, (err) => {
-        this._setCapabilityState('unavailable', err && err.message ? err.message : 'Provider unavailable', 0);
+        this._setCapabilityState('unavailable', _msg(err, 'Provider unavailable'), 0);
     });
 };
 

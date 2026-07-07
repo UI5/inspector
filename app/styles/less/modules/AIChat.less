@@ -136,10 +136,9 @@
         }
     }
 
-    // Recoverable session failure: framed as a warning, not a terminal
+    // Recoverable failure: framed as a warning, not a terminal
     // error, because the developer can recover via clear-history or a
     // controller-driven reseed on the next clearConversation()/setUrl().
-    &.status-session-failed,
     &.status-streaming-failed {
         background-color: fade(@red, 15%);
         border-color: @border-gray-lighter;
