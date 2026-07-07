@@ -118,21 +118,6 @@ AssistantController.prototype.initialize = function () {
 };
 
 /**
- * Call the injected `getConsoleErrors`. A missing or throwing accessor returns [] so a broken
- * wiring doesn't break the send.
- * @private
- * @returns {Array}
- */
-AssistantController.prototype._safeGetConsoleErrors = function () {
-    try {
-        const snapshot = this._getConsoleErrors();
-        return Array.isArray(snapshot) ? snapshot : [];
-    } catch (e) {
-        return [];
-    }
-};
-
-/**
  * Send a user message: build the full messages array, stream the response via the provider,
  * persist both turns, and emit stream events. The current Inspection Context is injected.
  *
@@ -140,7 +125,7 @@ AssistantController.prototype._safeGetConsoleErrors = function () {
  * @returns {Promise<{content: string}>}
  */
 AssistantController.prototype.sendUserMessage = function (userMessage) {
-    const consoleErrors = this._safeGetConsoleErrors();
+    const consoleErrors = this._getConsoleErrors();
     const messages = this._promptBuilder.buildMessages({
         appInfo: this._getAppInfo(),
         history: this._conversationMemory,
@@ -217,7 +202,7 @@ AssistantController.prototype.setUrl = function (url) {
         this._emit('inspection-context-cleared');
     }
 
-    this._safeClearConsoleErrors();
+    this._clearConsoleErrors();
 
     if (this._capabilityState.status !== 'ready') {
         return Promise.resolve();
@@ -255,24 +240,13 @@ AssistantController.prototype.updateInspectionContext = function (context) {
 AssistantController.prototype.clearConversation = function () {
     return this._conversationStore.clear(this._currentUrl).then(() => {
         this._conversationMemory = [];
-        this._safeClearConsoleErrors();
+        this._clearConsoleErrors();
         this._provider.destroy();
         this._emit('conversation-cleared');
         if (this._capabilityState.status === 'ready') {
             this._setCapabilityState('ready', this._lastReadyMessage, 0);
         }
     });
-};
-
-/**
- * @private
- */
-AssistantController.prototype._safeClearConsoleErrors = function () {
-    try {
-        this._clearConsoleErrors();
-    } catch (e) {
-        // See _safeGetConsoleErrors.
-    }
 };
 
 /**
