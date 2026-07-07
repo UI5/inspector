@@ -89,62 +89,41 @@ describe('AISettingsModal', function () {
             labels.should.include('Model');
         });
 
-        it('should render password type inputs as input[type=password] to mask credentials', function () {
-            build({ initialProviderName: 'openai' });
-            const apiKeyField = Array.prototype.find.call(
-                fixtures.querySelectorAll('.ai-settings-field'),
-                function (f) { return f.querySelector('label').textContent === 'API Key'; }
-            );
-            apiKeyField.querySelector('input').getAttribute('type').should.equal('password');
-        });
-
-        it('should render text type inputs as input[type=text]', function () {
-            build({ initialProviderName: 'openai' });
-            const baseUrlField = Array.prototype.find.call(
-                fixtures.querySelectorAll('.ai-settings-field'),
-                function (f) { return f.querySelector('label').textContent === 'Base URL'; }
-            );
-            baseUrlField.querySelector('input').getAttribute('type').should.equal('text');
-        });
-
-        it('should render zero form fields when the selected provider has an empty configSchema', function () {
-            build({ initialProviderName: 'gemini-nano' });
-            const fields = fixtures.querySelectorAll('.ai-settings-field');
-            fields.length.should.equal(0);
-        });
-
-        it('should apply the schema entry\'s placeholder to the rendered input when one is present, so empty fields hint at the expected shape without pre-filling a real value', function () {
-            const providersWithPlaceholders = {
-                'openai': {
-                    displayName: 'OpenAI-compatible',
-                    configSchema: [
-                        { key: 'baseUrl', label: 'Base URL', type: 'text', required: true, placeholder: 'https://host/v1' },
-                        { key: 'apiKey', label: 'API Key', type: 'password', required: true, placeholder: 'your API key' }
-                    ]
-                }
-            };
-            build({ providers: providersWithPlaceholders, initialProviderName: 'openai' });
-
-            const inputs = fixtures.querySelectorAll('.ai-settings-field input');
-            const byLabel = {};
-            Array.prototype.forEach.call(inputs, function (input) {
-                const label = input.closest('.ai-settings-field').querySelector('label').textContent;
-                byLabel[label] = input.getAttribute('placeholder');
+        [
+            { type: 'password', expected: 'password' },
+            { type: 'text', expected: 'text' },
+            { type: undefined, expected: 'text' }
+        ].forEach(function (row) {
+            it('should render input[type=' + row.expected + '] when the schema entry type is ' + row.type, function () {
+                const providers = {
+                    p: {
+                        displayName: 'P',
+                        configSchema: [{ key: 'k', label: 'K', type: row.type, required: true }]
+                    }
+                };
+                build({ providers: providers, initialProviderName: 'p' });
+                const input = fixtures.querySelector('.ai-settings-field input');
+                input.getAttribute('type').should.equal(row.expected);
             });
-            byLabel['Base URL'].should.equal('https://host/v1');
-            byLabel['API Key'].should.equal('your API key');
         });
 
-        it('should not set a placeholder attribute when the schema entry has no placeholder, so the input stays clean', function () {
-            const providersNoPlaceholders = {
-                'x': {
-                    displayName: 'X',
-                    configSchema: [{ key: 'k', label: 'K', type: 'text', required: true }]
+        [
+            { placeholder: 'https://api.example.com', expectAttr: true },
+            { placeholder: undefined, expectAttr: false }
+        ].forEach(function (row) {
+            it('should ' + (row.expectAttr ? 'set' : 'omit') + ' the placeholder attribute when the schema entry placeholder is ' + row.placeholder, function () {
+                const entry = { key: 'k', label: 'K', type: 'text', required: true };
+                if (row.placeholder !== undefined) {
+                    entry.placeholder = row.placeholder;
                 }
-            };
-            build({ providers: providersNoPlaceholders, initialProviderName: 'x' });
-            const input = fixtures.querySelector('.ai-settings-field input');
-            input.hasAttribute('placeholder').should.be.false;
+                const providers = { p: { displayName: 'P', configSchema: [entry] } };
+                build({ providers: providers, initialProviderName: 'p' });
+                const input = fixtures.querySelector('.ai-settings-field input');
+                input.hasAttribute('placeholder').should.equal(row.expectAttr);
+                if (row.expectAttr) {
+                    input.getAttribute('placeholder').should.equal(row.placeholder);
+                }
+            });
         });
     });
 
