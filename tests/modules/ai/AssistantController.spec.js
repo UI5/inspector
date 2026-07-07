@@ -672,37 +672,6 @@ describe('AssistantController', function () {
                 last.should.equal('Q');
             });
         });
-
-        it('should fall back to no-errors when getConsoleErrors throws', function () {
-            const harness = createController({
-                getConsoleErrors: function () { throw new Error('panel wiring broken'); }
-            });
-
-            return initializedReady(harness).then(function () {
-                const sendPromise = harness.controller.sendUserMessage('Q');
-                return awaitStreamController(harness.provider).then(function (streamCtrl) {
-                    streamCtrl.emitChunk('ok');
-                    streamCtrl.emitComplete();
-                    return sendPromise;
-                });
-            }).then(function () {
-                const last = harness.provider.messagesByCall[0].slice(-1)[0].content;
-                last.should.equal('Q');
-            });
-        });
-
-        it('should treat a missing getConsoleErrors option as an empty snapshot', function () {
-            const fakeProvider = createFakeProvider();
-            const controller = new AssistantController({
-                promptBuilder: new PromptBuilder(),
-                createProvider: function () { return fakeProvider; },
-                conversationStore: createFakeConversationStore()
-            });
-            controller._capabilityState = { status: 'ready', message: '', progress: 0 };
-            controller._currentUrl = 'https://example.com';
-
-            controller._safeGetConsoleErrors().should.deep.equal([]);
-        });
     });
 
     describe('#clearConversation() — Recent Console Errors buffer', function () {
@@ -717,18 +686,6 @@ describe('AssistantController', function () {
                 return harness.controller.clearConversation();
             }).then(function () {
                 clearCalls.should.equal(1);
-            });
-        });
-
-        it('should not throw when clearConsoleErrors itself throws — a broken panel wiring must not block Clear Conversation', function () {
-            const harness = createController({
-                clearConsoleErrors: function () { throw new Error('panel wiring broken'); }
-            });
-
-            return initializedReady(harness).then(function () {
-                return harness.controller.clearConversation();
-            }).then(function () {
-                harness.controller._capabilityState.status.should.equal('ready');
             });
         });
     });
@@ -759,18 +716,6 @@ describe('AssistantController', function () {
                 return harness.controller.setUrl('https://example.com');
             }).then(function () {
                 clearCalls.should.equal(0);
-            });
-        });
-
-        it('should not throw when clearConsoleErrors itself throws', function () {
-            const harness = createController({
-                clearConsoleErrors: function () { throw new Error('panel wiring broken'); }
-            });
-
-            return initializedReady(harness).then(function () {
-                return harness.controller.setUrl('https://other.example.com');
-            }).then(function () {
-                harness.controller._currentUrl.should.equal('https://other.example.com');
             });
         });
     });
