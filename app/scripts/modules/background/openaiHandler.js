@@ -20,27 +20,22 @@ function parseSseEvent(event) {
     }
     try {
         const parsed = JSON.parse(payload);
-        const choices = parsed && parsed.choices;
-        if (!choices || !choices.length) {
-            return '';
-        }
-        const delta = choices[0].delta;
-        return (delta && typeof delta.content === 'string') ? delta.content : '';
+        const delta = parsed && parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
+        return delta && typeof delta.content === 'string' ? delta.content : '';
     } catch (e) {
         return '';
     }
 }
 
 function extractErrorMessage(response, apiKey) {
+    const fallback = 'HTTP ' + response.status;
     return response.json().then(
         function (body) {
-            if (body && body.error && body.error.message) {
-                return redact(body.error.message, apiKey);
-            }
-            return 'HTTP ' + response.status;
+            const message = body && body.error && body.error.message;
+            return message ? redact(message, apiKey) : fallback;
         },
         function () {
-            return 'HTTP ' + response.status;
+            return fallback;
         }
     );
 }
@@ -86,7 +81,7 @@ function readSseStream(body, port, signal) {
             if (signal.aborted) {
                 return;
             }
-            port.postMessage({ type: 'error', message: err && err.message ? err.message : 'Stream error' });
+            port.postMessage({ type: 'error', message: (err && err.message) || 'Stream error' });
         });
     }
 
@@ -149,8 +144,7 @@ function attachOpenAIHandler(port, options) {
                 if (signal.aborted) {
                     return;
                 }
-                const raw = err && err.message ? err.message : 'Network error';
-                port.postMessage({ type: 'error', message: redact(raw, config.apiKey) });
+                port.postMessage({ type: 'error', message: redact((err && err.message) || 'Network error', config.apiKey) });
             }
         );
     }

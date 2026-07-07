@@ -92,14 +92,13 @@ AISettingsModal.prototype._template = function () {
 };
 
 AISettingsModal.prototype._attachHandlers = function () {
-    const backdrop = this._root.querySelector('.ai-settings-backdrop');
-    backdrop.addEventListener('click', () => { this._cancel(); });
-
-    const cancelBtn = this._root.querySelector('.ai-settings-cancel');
-    cancelBtn.addEventListener('click', () => { this._cancel(); });
-
-    const saveBtn = this._root.querySelector('.ai-settings-save');
-    saveBtn.addEventListener('click', () => { this._save(); });
+    [
+        ['.ai-settings-backdrop', () => this._cancel()],
+        ['.ai-settings-cancel',   () => this._cancel()],
+        ['.ai-settings-save',     () => this._save()]
+    ].forEach(([selector, handler]) => {
+        this._root.querySelector(selector).addEventListener('click', handler);
+    });
 
     const select = this._root.querySelector('.ai-settings-provider-select');
     select.addEventListener('change', () => {
@@ -161,7 +160,6 @@ AISettingsModal.prototype._renderFieldsForSelected = function () {
         input.id = inputId;
         input.type = entry.type === 'password' ? 'password' : 'text';
         input.dataset.key = entry.key;
-        input.dataset.required = entry.required ? 'true' : 'false';
         if (entry.placeholder) {
             input.placeholder = entry.placeholder;
         }

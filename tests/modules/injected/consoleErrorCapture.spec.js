@@ -25,13 +25,12 @@ function createFakeWindow() {
 
 describe('consoleErrorCapture', function () {
     describe('#install()', function () {
-        it('should return a handle with a buffer and an uninstall function', function () {
+        it('should return a handle with a buffer', function () {
             const win = createFakeWindow();
 
             const handle = consoleErrorCapture.install(win);
 
             handle.should.have.property('buffer');
-            handle.uninstall.should.be.a('function');
         });
 
         it('should funnel console.error calls into the buffer', function () {

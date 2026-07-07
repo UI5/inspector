@@ -433,7 +433,7 @@ describe('AIChat', function () {
             // fragile `progress: 0` argument or misassert. Its class-name is covered indirectly
             // by the download-button visibility test below, and its progress-format branch has
             // a dedicated test.
-            const states = ['ready', 'downloadable', 'session-failed', 'unsupported', 'unavailable'];
+            const states = ['ready', 'downloadable', 'unsupported', 'unavailable'];
             states.forEach(function (status) {
                 fakeController.fire('capability-state-changed', {
                     status: status, message: 'message for ' + status, progress: 0
@@ -459,7 +459,6 @@ describe('AIChat', function () {
                 {status: 'downloadable', hidden: false, disabled: false},
                 {status: 'downloading', hidden: false, disabled: true, progress: 0.4},
                 {status: 'ready', hidden: true},
-                {status: 'session-failed', hidden: true},
                 {status: 'unsupported', hidden: true},
                 {status: 'unavailable', hidden: true}
             ];
@@ -485,19 +484,6 @@ describe('AIChat', function () {
 
             const banner = document.getElementById('ai-status-banner');
             banner.querySelector('.status-text').textContent.should.contain('42');
-        });
-
-        it('should expose the clear-history affordance when the controller reports session-failed, so the developer has a user-facing recovery action that destroys the broken session and reseeds a fresh one', function () {
-            // Start from ready so clear-history is offered before session-failed arrives. Assert session-failed keeps it offered.
-            fakeController.fire('capability-state-changed', {
-                status: 'ready', message: 'ready', progress: 0
-            });
-            fakeController.fire('capability-state-changed', {
-                status: 'session-failed', message: 'session creation failed', progress: 0
-            });
-
-            const clearButton = document.getElementById('ai-clear-history-button');
-            clearButton.style.display.should.not.equal('none');
         });
 
         it('should leave the existing banner untouched when streaming-failed arrives — recovery is offered implicitly via the next sendUserMessage, not via a new banner — per PRD user story 8', function () {

@@ -38,10 +38,7 @@ function _stringifyValue(value) {
  */
 function _stringifyBindingValue(value) {
     const rendered = _stringifyValue(value);
-    if (rendered.length > BINDING_VALUE_CAP) {
-        return rendered.substring(0, BINDING_VALUE_CAP) + '...';
-    }
-    return rendered;
+    return rendered.length > BINDING_VALUE_CAP ? rendered.substring(0, BINDING_VALUE_CAP) + '...' : rendered;
 }
 
 /**
@@ -112,12 +109,7 @@ PromptBuilder.prototype.buildSystemPrompt = function (appInfo) {
         'Bad: "Yes, sap.m.Slider has a `flashOnClick` property that lights it up."\n' +
         'Good: "I\'m not certain flashOnClick exists on sap.m.Slider — verify in the API reference."';
 
-    const zones = [role];
-    const appContext = this._buildAppContext(appInfo);
-    if (appContext) {
-        zones.push(appContext);
-    }
-    zones.push(rules, style, example);
+    const zones = [role, this._buildAppContext(appInfo), rules, style, example].filter(Boolean);
 
     return zones.join('\n\n');
 };
@@ -221,19 +213,11 @@ PromptBuilder.prototype._buildControlContextBlock = function (control) {
         '- ID: ' + (control.id || 'None')
     ];
 
-    const sections = [];
-    const propertiesSection = this._renderPropertiesSection(control.properties);
-    if (propertiesSection) {
-        sections.push(propertiesSection);
-    }
-    const bindingsSection = this._renderBindingsSection(control.bindings);
-    if (bindingsSection) {
-        sections.push(bindingsSection);
-    }
-    const aggregationsSection = this._renderAggregationsSection(control.aggregations);
-    if (aggregationsSection) {
-        sections.push(aggregationsSection);
-    }
+    const sections = [
+        this._renderPropertiesSection(control.properties),
+        this._renderBindingsSection(control.bindings),
+        this._renderAggregationsSection(control.aggregations)
+    ].filter(Boolean);
 
     const contextBody = identityLines.concat(sections).join('\n');
     return 'Current UI5 Control Context:\n' + contextBody;
@@ -266,10 +250,8 @@ PromptBuilder.prototype._buildConsoleErrorsBlock = function (consoleErrors) {
  * @private
  */
 PromptBuilder.prototype._capSection = function (header, body, maxLength) {
-    if (body.length > maxLength) {
-        return header + '\n' + body.substring(0, maxLength) + '... [truncated]';
-    }
-    return header + '\n' + body;
+    const capped = body.length > maxLength ? body.substring(0, maxLength) + '... [truncated]' : body;
+    return header + '\n' + capped;
 };
 
 /**
@@ -396,14 +378,13 @@ PromptBuilder.prototype.buildMessages = function (params) {
         { role: 'system', content: this.buildSystemPrompt(p.appInfo) }
     ];
 
-    if (p.history && p.history.length) {
-        for (let i = 0; i < p.history.length; i++) {
-            const turn = p.history[i];
-            if ((turn.role === 'user' || turn.role === 'assistant') && turn.content) {
-                messages.push({ role: turn.role, content: turn.content });
-            }
-        }
-    }
+    (p.history || [])
+        .filter(function (turn) {
+            return (turn.role === 'user' || turn.role === 'assistant') && turn.content;
+        })
+        .forEach(function (turn) {
+            messages.push({ role: turn.role, content: turn.content });
+        });
 
     messages.push({
         role: 'user',

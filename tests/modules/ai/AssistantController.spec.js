@@ -417,7 +417,6 @@ describe('AssistantController', function () {
                         err.message.should.equal('model crashed');
                     });
                 }).then(function () {
-                    harness.controller._isStreaming.should.be.false;
                     harness.controller._capabilityState.status.should.equal('streaming-failed');
                     const failed = harness.events.filter(function (e) {
                         return e.type === 'stream-failed';

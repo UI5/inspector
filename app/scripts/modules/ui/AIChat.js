@@ -220,19 +220,12 @@ AIChat.prototype._attachEventListeners = function () {
         this._handleClearHistory();
     });
 
-    const settingsButton = document.getElementById('ai-settings-button');
-    if (settingsButton) {
-        settingsButton.addEventListener('click', () => {
-            this._openSettings();
-        });
-    }
-
-    const bannerAction = document.getElementById('ai-banner-action');
-    if (bannerAction) {
-        bannerAction.addEventListener('click', () => {
-            this._openSettings();
-        });
-    }
+    ['ai-settings-button', 'ai-banner-action'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('click', () => { this._openSettings(); });
+        }
+    });
 
     contextClearButton.addEventListener('click', () => {
         this._clearContext();
@@ -325,8 +318,6 @@ AIChat._CAPABILITY_CONFIG = {
     'downloadable':     {},
     'downloading':      {},
     'ready':            { showClearButton: true },
-    // Recovery: clearConversation destroys the broken session and reseeds.
-    'session-failed':   { showClearButton: true },
     // Keep the prior banner; recovery clears on the next successful send. Error surfaces via `_showError`.
     'streaming-failed': { skip: true }
 };
@@ -356,8 +347,7 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
 
     if (config.showClearButton) {
         // `ready` is gated on `_hasMessages` so a post-clear reseed does not re-reveal the button.
-        // `session-failed` still forces it visible — clearing is the recovery path.
-        if (status !== 'ready' || this._hasMessages) {
+        if (this._hasMessages) {
             this._setClearHistoryVisible(true);
         }
     }
@@ -559,7 +549,7 @@ AIChat.prototype._updateTokenCounter = function () {
     const capabilities = this._controller.getProviderCapabilities();
     if (!capabilities.hasUsageInfo || !this._hasMessages) {
         counter.textContent = '';
-        this._resetTokenCounterClasses(counter);
+        counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
         counter.hidden = true;
         return;
     }
@@ -568,7 +558,7 @@ AIChat.prototype._updateTokenCounter = function () {
         if (usageInfo) {
             counter.textContent = 'Tokens: ' + usageInfo.inputUsage + '/' + usageInfo.inputQuota + ' (' + usageInfo.percentUsed + '%)';
 
-            this._resetTokenCounterClasses(counter);
+            counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
 
             if (usageInfo.percentUsed >= 100) {
                 counter.classList.add('quota-exhausted');
@@ -592,14 +582,6 @@ AIChat.prototype._updateTokenCounter = function () {
 };
 
 /** @private */
-AIChat.prototype._resetTokenCounterClasses = function (counter) {
-    counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
-};
-
-/**
- * @private
- * @param {number} percentUsed
- */
 AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
     if (percentUsed >= 70 && !this._hasShownUsageWarning) {
         this._hasShownUsageWarning = true;
@@ -631,14 +613,13 @@ AIChat.prototype._hideContextPill = function () {
 AIChat.prototype.updateContext = function (context) {
     this._controller.updateInspectionContext(context);
 
-    const contextInfo = document.getElementById('ai-context-info');
-    const contextText = contextInfo.querySelector('.context-text');
-
     if (context && context.control) {
+        const contextInfo = document.getElementById('ai-context-info');
+        const contextText = contextInfo.querySelector('.context-text');
         contextInfo.style.display = 'flex';
         contextText.textContent = 'Context: ' + (context.control.type || 'Control') + ' (' + (context.control.id || 'no ID') + ')';
     } else {
-        contextInfo.style.display = 'none';
+        this._hideContextPill();
     }
 };
 
@@ -657,17 +638,12 @@ AIChat.prototype._showError = function (message) {
     if (!slot) {
         return;
     }
-    slot.textContent = message;
-    slot.hidden = false;
+    slot.textContent = message || '';
+    slot.hidden = !message;
 };
 
 AIChat.prototype._clearError = function () {
-    const slot = document.getElementById('ai-error-slot');
-    if (!slot) {
-        return;
-    }
-    slot.textContent = '';
-    slot.hidden = true;
+    this._showError('');
 };
 
 AIChat.prototype.destroy = function () {
