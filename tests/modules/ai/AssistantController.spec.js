@@ -674,7 +674,45 @@ describe('AssistantController', function () {
         });
     });
 
-    describe('#clearConversation() — Recent Console Errors buffer', function () {
+    describe('#clearConversation()', function () {
+        it('should clear stored Conversation Memory for the inspected URL, destroy the provider so its cached state is dropped, and reset the messages history for subsequent sends', function () {
+            const harness = createController();
+            harness.conversationStore.data['https://example.com'] = [
+                { role: 'user', content: 'old' },
+                { role: 'assistant', content: 'old answer' }
+            ];
+
+            return initializedReady(harness).then(function () {
+                harness.controller._conversationMemory.should.have.length(2);
+
+                return harness.controller.clearConversation();
+            }).then(function () {
+                harness.conversationStore.cleared.should.deep.equal(['https://example.com']);
+                harness.provider.destroyed.should.be.at.least(1);
+                harness.controller._conversationMemory.should.have.length(0);
+
+                const clearedEvents = harness.events.filter(function (e) {
+                    return e.type === 'conversation-cleared';
+                });
+                clearedEvents.should.have.length(1);
+
+                const sendPromise = harness.controller.sendUserMessage('after clear');
+                return awaitStreamController(harness.provider).then(function (streamCtrl) {
+                    streamCtrl.emitChunk('ok');
+                    streamCtrl.emitComplete();
+                    return sendPromise;
+                });
+            }).then(function () {
+                // The messages array after clear should be just [system, user].
+                harness.provider.messagesByCall.should.have.length(1);
+                const messages = harness.provider.messagesByCall[0];
+                messages.should.have.length(2);
+                messages[0].role.should.equal('system');
+                messages[1].role.should.equal('user');
+                messages[1].content.should.equal('after clear');
+            });
+        });
+
         it('should invoke clearConsoleErrors alongside conversation-store clear so the buffer resets in lock-step with Conversation Memory', function () {
             let clearCalls = 0;
             const harness = createController({
@@ -688,39 +726,7 @@ describe('AssistantController', function () {
                 clearCalls.should.equal(1);
             });
         });
-    });
 
-    describe('#setUrl() — Recent Console Errors buffer', function () {
-        it('should invoke clearConsoleErrors when the URL changes so buffered errors from the previous page do not leak', function () {
-            let clearCalls = 0;
-            const harness = createController({
-                clearConsoleErrors: function () { clearCalls += 1; }
-            });
-
-            return initializedReady(harness).then(function () {
-                clearCalls = 0;
-                return harness.controller.setUrl('https://other.example.com');
-            }).then(function () {
-                clearCalls.should.equal(1);
-            });
-        });
-
-        it('should not invoke clearConsoleErrors when setUrl is called with the same URL', function () {
-            let clearCalls = 0;
-            const harness = createController({
-                clearConsoleErrors: function () { clearCalls += 1; }
-            });
-
-            return initializedReady(harness).then(function () {
-                clearCalls = 0;
-                return harness.controller.setUrl('https://example.com');
-            }).then(function () {
-                clearCalls.should.equal(0);
-            });
-        });
-    });
-
-    describe('#clearConversation() and Inspection Context', function () {
         it('should not touch the Inspection Context — clearing Conversation Memory is orthogonal', function () {
             const harness = createController();
 
@@ -761,9 +767,123 @@ describe('AssistantController', function () {
                 clearedEvents.should.have.length(0);
             });
         });
+
+        it('should emit a ready capability state after clearConversation, so the panel can reset the token counter, drop quota-exhausted styling, and re-enable the input', function () {
+            const harness = createController();
+            harness.conversationStore.data['https://example.com'] = [
+                { role: 'user', content: 'old' },
+                { role: 'assistant', content: 'old answer' }
+            ];
+
+            return initializedReady(harness).then(function () {
+                const stateCountBeforeClear = harness.capabilityStates.length;
+                return harness.controller.clearConversation().then(function () {
+                    const newStates = harness.capabilityStates.slice(stateCountBeforeClear);
+                    newStates.should.have.length(1);
+                    newStates[0].status.should.equal('ready');
+                    newStates[0].progress.should.equal(0);
+                });
+            });
+        });
+
+        it('should emit the ready capability state after the conversation-cleared event', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                const eventCountBeforeClear = harness.events.length;
+                return harness.controller.clearConversation().then(function () {
+                    const newEvents = harness.events.slice(eventCountBeforeClear);
+                    const clearedIndex = newEvents.findIndex(function (e) { return e.type === 'conversation-cleared'; });
+                    const readyIndex = newEvents.findIndex(function (e) {
+                        return e.type === 'capability-state-changed' && e.state.status === 'ready';
+                    });
+                    clearedIndex.should.be.at.least(0);
+                    readyIndex.should.be.at.least(0);
+                    readyIndex.should.be.above(clearedIndex);
+                });
+            });
+        });
     });
 
-    describe('#setUrl() and Inspection Context', function () {
+    describe('#setUrl()', function () {
+        it('should load the Conversation Memory for the new inspected URL and use it as history on subsequent sends', function () {
+            const harness = createController();
+            harness.conversationStore.data['https://a.example.com'] = [
+                { role: 'user', content: 'A1' },
+                { role: 'assistant', content: 'A2' }
+            ];
+            harness.conversationStore.data['https://b.example.com'] = [
+                { role: 'user', content: 'B1' }
+            ];
+            harness.provider.availabilityResult = { status: 'ready', message: 'ready' };
+            harness.controller.setUrl('https://a.example.com');
+
+            return harness.controller.initialize().then(function () {
+                return harness.controller.setUrl('https://b.example.com');
+            }).then(function () {
+                harness.provider.destroyed.should.be.at.least(1);
+
+                const loadedEvents = harness.events.filter(function (e) {
+                    return e.type === 'conversation-loaded';
+                });
+                loadedEvents.should.have.length(2);
+                loadedEvents[1].turns.should.deep.equal([{ role: 'user', content: 'B1' }]);
+
+                const sendPromise = harness.controller.sendUserMessage('B2');
+                return awaitStreamController(harness.provider).then(function (streamCtrl) {
+                    streamCtrl.emitChunk('ok');
+                    streamCtrl.emitComplete();
+                    return sendPromise;
+                });
+            }).then(function () {
+                const messages = harness.provider.messagesByCall[0];
+                messages[0].role.should.equal('system');
+                messages[1].should.deep.equal({ role: 'user', content: 'B1' });
+                messages[2].should.deep.equal({ role: 'user', content: 'B2' });
+            });
+        });
+
+        it('should not touch the provider when setUrl is called with the same URL', function () {
+            const harness = createController();
+            harness.provider.availabilityResult = { status: 'ready', message: 'ready' };
+            harness.controller.setUrl('https://example.com');
+
+            return harness.controller.initialize().then(function () {
+                const destroyedBefore = harness.provider.destroyed;
+                return harness.controller.setUrl('https://example.com').then(function () {
+                    harness.provider.destroyed.should.equal(destroyedBefore);
+                });
+            });
+        });
+
+        it('should invoke clearConsoleErrors when the URL changes so buffered errors from the previous page do not leak', function () {
+            let clearCalls = 0;
+            const harness = createController({
+                clearConsoleErrors: function () { clearCalls += 1; }
+            });
+
+            return initializedReady(harness).then(function () {
+                clearCalls = 0;
+                return harness.controller.setUrl('https://other.example.com');
+            }).then(function () {
+                clearCalls.should.equal(1);
+            });
+        });
+
+        it('should not invoke clearConsoleErrors when setUrl is called with the same URL', function () {
+            let clearCalls = 0;
+            const harness = createController({
+                clearConsoleErrors: function () { clearCalls += 1; }
+            });
+
+            return initializedReady(harness).then(function () {
+                clearCalls = 0;
+                return harness.controller.setUrl('https://example.com');
+            }).then(function () {
+                clearCalls.should.equal(0);
+            });
+        });
+
         it('should clear the Inspection Context, emit inspection-context-cleared exactly once, and not carry the snapshot into the next send after switching URL', function () {
             const harness = createController();
 
@@ -820,159 +940,6 @@ describe('AssistantController', function () {
                 clearedEvents.should.have.length(0);
             });
         });
-    });
-
-    describe('#clearConversation()', function () {
-        it('should clear stored Conversation Memory for the inspected URL, destroy the provider so its cached state is dropped, and reset the messages history for subsequent sends', function () {
-            const harness = createController();
-            harness.conversationStore.data['https://example.com'] = [
-                { role: 'user', content: 'old' },
-                { role: 'assistant', content: 'old answer' }
-            ];
-
-            return initializedReady(harness).then(function () {
-                harness.controller._conversationMemory.should.have.length(2);
-
-                return harness.controller.clearConversation();
-            }).then(function () {
-                harness.conversationStore.cleared.should.deep.equal(['https://example.com']);
-                harness.provider.destroyed.should.be.at.least(1);
-                harness.controller._conversationMemory.should.have.length(0);
-
-                const clearedEvents = harness.events.filter(function (e) {
-                    return e.type === 'conversation-cleared';
-                });
-                clearedEvents.should.have.length(1);
-
-                const sendPromise = harness.controller.sendUserMessage('after clear');
-                return awaitStreamController(harness.provider).then(function (streamCtrl) {
-                    streamCtrl.emitChunk('ok');
-                    streamCtrl.emitComplete();
-                    return sendPromise;
-                });
-            }).then(function () {
-                // The messages array after clear should be just [system, user].
-                harness.provider.messagesByCall.should.have.length(1);
-                const messages = harness.provider.messagesByCall[0];
-                messages.should.have.length(2);
-                messages[0].role.should.equal('system');
-                messages[1].role.should.equal('user');
-                messages[1].content.should.equal('after clear');
-            });
-        });
-    });
-
-    describe('#setUrl() — history change on URL change', function () {
-        it('should load the Conversation Memory for the new inspected URL and use it as history on subsequent sends', function () {
-            const harness = createController();
-            harness.conversationStore.data['https://a.example.com'] = [
-                { role: 'user', content: 'A1' },
-                { role: 'assistant', content: 'A2' }
-            ];
-            harness.conversationStore.data['https://b.example.com'] = [
-                { role: 'user', content: 'B1' }
-            ];
-            harness.provider.availabilityResult = { status: 'ready', message: 'ready' };
-            harness.controller.setUrl('https://a.example.com');
-
-            return harness.controller.initialize().then(function () {
-                return harness.controller.setUrl('https://b.example.com');
-            }).then(function () {
-                harness.provider.destroyed.should.be.at.least(1);
-
-                const loadedEvents = harness.events.filter(function (e) {
-                    return e.type === 'conversation-loaded';
-                });
-                loadedEvents.should.have.length(2);
-                loadedEvents[1].turns.should.deep.equal([{ role: 'user', content: 'B1' }]);
-
-                const sendPromise = harness.controller.sendUserMessage('B2');
-                return awaitStreamController(harness.provider).then(function (streamCtrl) {
-                    streamCtrl.emitChunk('ok');
-                    streamCtrl.emitComplete();
-                    return sendPromise;
-                });
-            }).then(function () {
-                const messages = harness.provider.messagesByCall[0];
-                messages[0].role.should.equal('system');
-                messages[1].should.deep.equal({ role: 'user', content: 'B1' });
-                messages[2].should.deep.equal({ role: 'user', content: 'B2' });
-            });
-        });
-
-        it('should not touch the provider when setUrl is called with the same URL', function () {
-            const harness = createController();
-            harness.provider.availabilityResult = { status: 'ready', message: 'ready' };
-            harness.controller.setUrl('https://example.com');
-
-            return harness.controller.initialize().then(function () {
-                const destroyedBefore = harness.provider.destroyed;
-                return harness.controller.setUrl('https://example.com').then(function () {
-                    harness.provider.destroyed.should.equal(destroyedBefore);
-                });
-            });
-        });
-    });
-
-    describe('#downloadModel()', function () {
-        it('should drive the provider download flow, emit downloading capability state with progress, and resolve to ready once the model is available', function () {
-            const harness = createController();
-            harness.provider.availabilityResult = { status: 'downloadable', message: 'Needs download' };
-            harness.provider.downloadProgressValues = [0.25, 0.5, 1.0];
-
-            return harness.controller.initialize().then(function () {
-                harness.controller._capabilityState.status.should.equal('downloadable');
-                return harness.controller.downloadModel();
-            }).then(function () {
-                const states = harness.capabilityStates.map(function (s) { return s.status; });
-                states.should.include('downloading');
-                states.should.include('ready');
-
-                const downloadingStates = harness.capabilityStates.filter(function (s) {
-                    return s.status === 'downloading';
-                });
-                downloadingStates.length.should.be.at.least(1);
-                downloadingStates[downloadingStates.length - 1].progress.should.equal(1.0);
-            });
-        });
-    });
-
-    describe('capability-state refresh on clear / URL change', function () {
-        it('should emit a ready capability state after clearConversation, so the panel can reset the token counter, drop quota-exhausted styling, and re-enable the input', function () {
-            const harness = createController();
-            harness.conversationStore.data['https://example.com'] = [
-                { role: 'user', content: 'old' },
-                { role: 'assistant', content: 'old answer' }
-            ];
-
-            return initializedReady(harness).then(function () {
-                const stateCountBeforeClear = harness.capabilityStates.length;
-                return harness.controller.clearConversation().then(function () {
-                    const newStates = harness.capabilityStates.slice(stateCountBeforeClear);
-                    newStates.should.have.length(1);
-                    newStates[0].status.should.equal('ready');
-                    newStates[0].progress.should.equal(0);
-                });
-            });
-        });
-
-        it('should emit the ready capability state after the conversation-cleared event', function () {
-            const harness = createController();
-
-            return initializedReady(harness).then(function () {
-                const eventCountBeforeClear = harness.events.length;
-                return harness.controller.clearConversation().then(function () {
-                    const newEvents = harness.events.slice(eventCountBeforeClear);
-                    const clearedIndex = newEvents.findIndex(function (e) { return e.type === 'conversation-cleared'; });
-                    const readyIndex = newEvents.findIndex(function (e) {
-                        return e.type === 'capability-state-changed' && e.state.status === 'ready';
-                    });
-                    clearedIndex.should.be.at.least(0);
-                    readyIndex.should.be.at.least(0);
-                    readyIndex.should.be.above(clearedIndex);
-                });
-            });
-        });
 
         it('should emit a ready capability state after setUrl for a new inspected URL', function () {
             const harness = createController();
@@ -1001,32 +968,52 @@ describe('AssistantController', function () {
                 });
             });
         });
+    });
 
-        it('should re-emit the provider\'s own ready message (not a hard-coded string) after setUrl, so the banner reflects the active provider — a non-Gemini provider is not mislabelled as Gemini', function () {
+    describe('#downloadModel()', function () {
+        it('should drive the provider download flow, emit downloading capability state with progress, and resolve to ready once the model is available', function () {
             const harness = createController();
-            harness.provider.availabilityResult = { status: 'ready', message: 'OpenAI-compatible (gpt-4o-mini) is ready' };
+            harness.provider.availabilityResult = { status: 'downloadable', message: 'Needs download' };
+            harness.provider.downloadProgressValues = [0.25, 0.5, 1.0];
+
+            return harness.controller.initialize().then(function () {
+                harness.controller._capabilityState.status.should.equal('downloadable');
+                return harness.controller.downloadModel();
+            }).then(function () {
+                const states = harness.capabilityStates.map(function (s) { return s.status; });
+                states.should.include('downloading');
+                states.should.include('ready');
+
+                const downloadingStates = harness.capabilityStates.filter(function (s) {
+                    return s.status === 'downloading';
+                });
+                downloadingStates.length.should.be.at.least(1);
+                downloadingStates[downloadingStates.length - 1].progress.should.equal(1.0);
+            });
+        });
+    });
+
+    describe('capability-state message pass-through', function () {
+        it('should re-emit the provider\'s own ready message (not a hard-coded string) after both setUrl and clearConversation, so the banner reflects the active provider — a non-Gemini provider is not mislabelled as Gemini', function () {
+            const harness = createController();
+            const providerMessage = 'OpenAI-compatible (gpt-4o-mini) is ready';
+            harness.provider.availabilityResult = { status: 'ready', message: providerMessage };
             harness.controller.setUrl('https://example.com');
             return harness.controller.initialize().then(function () {
                 const stateCountBeforeSwitch = harness.capabilityStates.length;
                 return harness.controller.setUrl('https://other.example.com').then(function () {
-                    const newStates = harness.capabilityStates.slice(stateCountBeforeSwitch);
-                    newStates.should.have.length(1);
-                    newStates[0].status.should.equal('ready');
-                    newStates[0].message.should.equal('OpenAI-compatible (gpt-4o-mini) is ready');
-                });
-            });
-        });
+                    const afterSetUrl = harness.capabilityStates.slice(stateCountBeforeSwitch);
+                    afterSetUrl.should.have.length(1);
+                    afterSetUrl[0].status.should.equal('ready');
+                    afterSetUrl[0].message.should.equal(providerMessage);
 
-        it('should re-emit the provider\'s own ready message (not a hard-coded string) after clearConversation, so the banner is not clobbered with a Gemini-specific label on a different provider', function () {
-            const harness = createController();
-            harness.provider.availabilityResult = { status: 'ready', message: 'OpenAI-compatible ready' };
-            harness.controller.setUrl('https://example.com');
-            return harness.controller.initialize().then(function () {
-                const stateCountBeforeClear = harness.capabilityStates.length;
-                return harness.controller.clearConversation().then(function () {
-                    const newStates = harness.capabilityStates.slice(stateCountBeforeClear);
-                    newStates.should.have.length(1);
-                    newStates[0].message.should.equal('OpenAI-compatible ready');
+                    const stateCountBeforeClear = harness.capabilityStates.length;
+                    return harness.controller.clearConversation().then(function () {
+                        const afterClear = harness.capabilityStates.slice(stateCountBeforeClear);
+                        afterClear.should.have.length(1);
+                        afterClear[0].status.should.equal('ready');
+                        afterClear[0].message.should.equal(providerMessage);
+                    });
                 });
             });
         });
@@ -1130,28 +1117,7 @@ describe('AssistantController', function () {
             });
         });
 
-        it('should emit capability-state-changed after checking availability on the new provider', function () {
-            const h = createControllerWithFactory();
-            h.controller.setUrl('https://example.com');
-            return h.controller.initialize().then(function () {
-                const beforeSwap = h.controller._capabilityState;
-                beforeSwap.status.should.equal('ready');
-                const stateCountBeforeSwap = (function () {
-                    let n = 0;
-                    h.controller._listeners['capability-state-changed'] = h.controller._listeners['capability-state-changed'] || [];
-                    return n;
-                })();
-                const events = [];
-                h.controller.on('capability-state-changed', function (s) { events.push(s); });
-                return h.controller.setProvider('openai', {}).then(function () {
-                    void stateCountBeforeSwap;
-                    events.length.should.be.at.least(1);
-                    events[events.length - 1].status.should.equal('ready');
-                });
-            });
-        });
-
-        it('should call checkAvailability on the new provider (not the old one) after swap', function () {
+        it('should emit capability-state-changed by checking availability on the new provider — not the old one — after the swap', function () {
             const h = createControllerWithFactory();
             let firstChecks = 0;
             const originalCheck = h.constructed[0].checkAvailability;
@@ -1161,8 +1127,14 @@ describe('AssistantController', function () {
             };
             h.controller.setUrl('https://example.com');
             return h.controller.initialize().then(function () {
+                const beforeSwap = h.controller._capabilityState;
+                beforeSwap.status.should.equal('ready');
                 const initialFirstChecks = firstChecks;
+                const events = [];
+                h.controller.on('capability-state-changed', function (s) { events.push(s); });
                 return h.controller.setProvider('openai', {}).then(function () {
+                    events.length.should.be.at.least(1);
+                    events[events.length - 1].status.should.equal('ready');
                     firstChecks.should.equal(initialFirstChecks);
                 });
             });
