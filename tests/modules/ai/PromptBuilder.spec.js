@@ -831,6 +831,264 @@ describe('PromptBuilder', function () {
             });
         });
 
+        describe('enums rendering', function () {
+            it('should emit an `Enums used:` subsection with members in insertion order when an own property is enum-typed', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: {
+                            own: {
+                                data: {
+                                    type: { value: 'Emphasized', isDefault: false }
+                                },
+                                types: {
+                                    type: { Default: 'Default', Accept: 'Accept', Reject: 'Reject', Transparent: 'Transparent', Emphasized: 'Emphasized' }
+                                },
+                                typeNames: { type: 'sap.m.ButtonType' }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('Enums used:');
+                result.should.contain('- sap.m.ButtonType: Default | Accept | Reject | Transparent | Emphasized');
+            });
+
+            it('should dedupe an enum used by two own properties down to a single subsection entry', function () {
+                const enumObj = { A: 'A', B: 'B', C: 'C' };
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Custom',
+                        properties: {
+                            own: {
+                                data: {
+                                    primary: { value: 'A', isDefault: false },
+                                    secondary: { value: 'B', isDefault: false }
+                                },
+                                types: {
+                                    primary: enumObj,
+                                    secondary: enumObj
+                                },
+                                typeNames: {
+                                    primary: 'my.lib.Kind',
+                                    secondary: 'my.lib.Kind'
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                const first = result.indexOf('- my.lib.Kind:');
+                const second = result.indexOf('- my.lib.Kind:', first + 1);
+                first.should.be.greaterThan(-1);
+                second.should.equal(-1);
+                result.should.contain('- my.lib.Kind: A | B | C');
+            });
+
+            it('should render an enum defined on an inherited property', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: {
+                            own: {
+                                data: { text: { value: 'Hi', isDefault: false } },
+                                types: { text: 'string' },
+                                typeNames: { text: 'string' }
+                            },
+                            inherited0: {
+                                meta: { controlName: 'sap.ui.core.Control' },
+                                data: { textDirection: { value: 'Inherit', isDefault: true } },
+                                types: { textDirection: { Inherit: 'Inherit', LTR: 'LTR', RTL: 'RTL' } },
+                                typeNames: { textDirection: 'sap.ui.core.TextDirection' }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('Enums used:');
+                result.should.contain('- sap.ui.core.TextDirection: Inherit | LTR | RTL');
+            });
+
+            it('should dedupe an enum used on both an own property and an inherited property', function () {
+                const enumObj = { Default: 'Default', Emphasized: 'Emphasized' };
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: {
+                            own: {
+                                data: { type: { value: 'Emphasized', isDefault: false } },
+                                types: { type: enumObj },
+                                typeNames: { type: 'sap.m.ButtonType' }
+                            },
+                            inherited0: {
+                                meta: { controlName: 'sap.m.ButtonBase' },
+                                data: { fallbackType: { value: 'Default', isDefault: true } },
+                                types: { fallbackType: enumObj },
+                                typeNames: { fallbackType: 'sap.m.ButtonType' }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                const first = result.indexOf('- sap.m.ButtonType:');
+                const second = result.indexOf('- sap.m.ButtonType:', first + 1);
+                first.should.be.greaterThan(-1);
+                second.should.equal(-1);
+                result.should.contain('- sap.m.ButtonType: Default | Emphasized');
+            });
+
+            it('should skip a custom-library enum whose `typeNames[key]` is missing or empty', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'my.lib.Widget',
+                        properties: {
+                            own: {
+                                data: {
+                                    mode: { value: 'Fast', isDefault: false },
+                                    text: { value: 'Hi', isDefault: false }
+                                },
+                                types: {
+                                    mode: { Fast: 'Fast', Slow: 'Slow' },
+                                    text: 'string'
+                                },
+                                typeNames: {
+                                    mode: '',
+                                    text: 'string'
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.not.contain('Enums used:');
+                result.should.contain('- mode = "Fast"');
+            });
+
+            it('should omit the `Enums used:` heading when no property is enum-typed across own and inherited groups', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        properties: {
+                            own: {
+                                data: { text: { value: 'Hi', isDefault: false } },
+                                types: { text: 'string' },
+                                typeNames: { text: 'string' }
+                            },
+                            inherited0: {
+                                meta: { controlName: 'sap.ui.core.Control' },
+                                data: { visible: { value: true, isDefault: true } },
+                                types: { visible: 'boolean' },
+                                typeNames: { visible: 'boolean' }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.not.contain('Enums used:');
+            });
+
+            it('should place `Enums used:` after the last property group and before `Bindings:`', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: {
+                            own: {
+                                data: { type: { value: 'Emphasized', isDefault: false } },
+                                types: { type: { Default: 'Default', Emphasized: 'Emphasized' } },
+                                typeNames: { type: 'sap.m.ButtonType' }
+                            },
+                            inherited0: {
+                                meta: { controlName: 'sap.ui.core.Control' },
+                                data: { visible: { value: true, isDefault: true } },
+                                types: { visible: 'boolean' },
+                                typeNames: { visible: 'boolean' }
+                            }
+                        },
+                        bindings: {
+                            text: { path: '/Name', value: 'Alice', model: 'default' }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                const inheritedIdx = result.indexOf('Properties (inherited from sap.ui.core.Control):');
+                const enumsIdx = result.indexOf('Enums used:');
+                const bindingsIdx = result.indexOf('Bindings:');
+
+                inheritedIdx.should.be.greaterThan(-1);
+                enumsIdx.should.be.greaterThan(inheritedIdx);
+                bindingsIdx.should.be.greaterThan(enumsIdx);
+            });
+
+            it('should truncate the enums subsection with `... [truncated]` when its rendered length would exceed the cap', function () {
+                const bigEnum = {};
+                // Each key is ~40 chars, producing >2000 chars of pipe-joined output.
+                for (let i = 0; i < 200; i++) {
+                    const k = 'ValueWithSomeLengthNumber' + i + 'XXXXXXXX';
+                    bigEnum[k] = k;
+                }
+                const inspectionContext = {
+                    control: {
+                        type: 'my.lib.Widget',
+                        properties: {
+                            own: {
+                                data: { mode: { value: 'ValueWithSomeLengthNumber0XXXXXXXX', isDefault: false } },
+                                types: { mode: bigEnum },
+                                typeNames: { mode: 'my.lib.BigEnum' }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('Enums used:');
+                const section = _extractSection(result, 'Enums used:');
+                section.should.contain('... [truncated]');
+            });
+
+            it('should skip non-enum properties whose `types[key]` is a primitive string like "string" or "boolean"', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        properties: {
+                            own: {
+                                data: {
+                                    text: { value: 'Hi', isDefault: false },
+                                    wrapping: { value: true, isDefault: false }
+                                },
+                                types: {
+                                    text: 'string',
+                                    wrapping: 'boolean'
+                                },
+                                typeNames: {
+                                    text: 'string',
+                                    wrapping: 'boolean'
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.not.contain('Enums used:');
+            });
+        });
+
         describe('bindings rendering', function () {
             it('should render a single binding on one line with path, model, and resolved value', function () {
                 const inspectionContext = {

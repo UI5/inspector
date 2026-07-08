@@ -2,6 +2,7 @@
 
 // Per-section size caps. Truncation appends `... [truncated]`.
 const PROPERTIES_CAP = 8000;
+const ENUMS_CAP = 2000;
 const BINDINGS_CAP = 8000;
 const AGGREGATIONS_CAP = 8000;
 const CONSOLE_ERRORS_CAP = 8000;
@@ -282,19 +283,12 @@ PromptBuilder.prototype._buildControlContextBlock = function (control) {
         '- ID: ' + (control.id || 'None')
     ];
 
-    const sections = [];
-    const propertiesSection = this._renderPropertiesSection(control.properties);
-    if (propertiesSection) {
-        sections.push(propertiesSection);
-    }
-    const bindingsSection = this._renderBindingsSection(control.bindings);
-    if (bindingsSection) {
-        sections.push(bindingsSection);
-    }
-    const aggregationsSection = this._renderAggregationsSection(control.aggregations);
-    if (aggregationsSection) {
-        sections.push(aggregationsSection);
-    }
+    const sections = [
+        this._renderPropertiesSection(control.properties),
+        this._renderEnumsSection(control.properties),
+        this._renderBindingsSection(control.bindings),
+        this._renderAggregationsSection(control.aggregations)
+    ].filter(Boolean);
 
     const contextBody = identityLines.concat(sections).join('\n');
     return 'Current UI5 Control Context:\n' + contextBody;
@@ -389,6 +383,65 @@ PromptBuilder.prototype._renderPropertiesSection = function (properties) {
     }
 
     return kept.join(joiner);
+};
+
+/**
+ * Render the `Enums used:` subsection. Walks own + all inheritedN groups and emits one line
+ * per unique enum type name (dedup by `typeNames[key]`). Members come from
+ * `Object.keys(types[key])` in insertion order. Detection requires `typeof types[key] === 'object'`
+ * AND a non-empty `typeNames[key]`. Custom-library enums missing a resolvable type name are
+ * silently skipped. Section omitted entirely when no enums are found.
+ * @private
+ * @param {Object} properties
+ * @returns {string}
+ */
+PromptBuilder.prototype._renderEnumsSection = function (properties) {
+    if (!properties) {
+        return '';
+    }
+
+    const seen = Object.create(null);
+    const lines = [];
+
+    const collect = function (group) {
+        if (!group || !group.data || !group.types) {
+            return;
+        }
+        const data = group.data;
+        const types = group.types;
+        const typeNames = group.typeNames || {};
+        const keys = Object.keys(data);
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            const typeObj = types[key];
+            const typeName = typeNames[key];
+            if (typeof typeObj !== 'object' || typeObj === null) {
+                continue;
+            }
+            if (!typeName) {
+                continue;
+            }
+            if (seen[typeName]) {
+                continue;
+            }
+            seen[typeName] = true;
+            const members = Object.keys(typeObj);
+            lines.push('- ' + typeName + ': ' + members.join(' | '));
+        }
+    };
+
+    collect(properties.own);
+    let i = 0;
+    while (Object.prototype.hasOwnProperty.call(properties, 'inherited' + i)) {
+        collect(properties['inherited' + i]);
+        i++;
+    }
+
+    if (lines.length === 0) {
+        return '';
+    }
+
+    return this._capSection('Enums used:', lines.join('\n'), ENUMS_CAP);
 };
 
 /**
