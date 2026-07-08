@@ -453,6 +453,25 @@
         getAppInfo: function () {
             var currentFrameId = framesSelect.getSelectedId();
             return frameData[currentFrameId] ? frameData[currentFrameId].applicationInformation : null;
+        },
+        getConsoleErrors: function () {
+            var currentFrameId = framesSelect.getSelectedId();
+            return frameData[currentFrameId] && frameData[currentFrameId].consoleErrors ?
+                frameData[currentFrameId].consoleErrors : [];
+        },
+        clearConsoleErrors: function () {
+            var currentFrameId = framesSelect.getSelectedId();
+            if (currentFrameId === undefined || currentFrameId === null) {
+                return;
+            }
+            if (frameData[currentFrameId]) {
+                frameData[currentFrameId].consoleErrors = [];
+            }
+            // Keep the panel cache and page-side buffer in sync.
+            port.postMessage({
+                action: 'do-clear-console-errors',
+                frameId: currentFrameId
+            });
         }
     });
 
@@ -712,6 +731,18 @@
             if (bFrameUpdate) {
                 framesSelect.setData(frameData);
             }
+        },
+
+        /**
+         * Cache the console-errors snapshot pushed from the injected script.
+         * @param {Object} message
+         */
+        'on-console-errors-updated': function (message, messageSender) {
+            var frameId = messageSender.frameId;
+            if (!frameData[frameId]) {
+                return;
+            }
+            frameData[frameId].consoleErrors = message.consoleErrors || [];
         }
     };
 

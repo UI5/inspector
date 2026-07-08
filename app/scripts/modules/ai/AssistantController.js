@@ -13,18 +13,26 @@ const ConversationStore = require('./ConversationStore.js');
  * @param {PromptClient} [options.promptClient]
  * @param {ConversationStore} [options.conversationStore]
  * @param {Function} [options.getAppInfo] - Returns the app metadata snapshot for session seeding.
+ * @param {Function} [options.getConsoleErrors] - Returns the recent-console-errors snapshot;
+ *     passed to {@link PromptBuilder#buildUserPrompt} on each send.
+ * @param {Function} [options.clearConsoleErrors] - Clears the recent-console-errors buffer.
+ *     Called from {@link #clearConversation} and {@link #setUrl} so both signals reset together.
  * @constructor
  */
 function AssistantController({
     promptBuilder = new PromptBuilder(),
     promptClient = new PromptClient(),
     conversationStore = new ConversationStore(),
-    getAppInfo = () => null
+    getAppInfo = () => null,
+    getConsoleErrors = () => [],
+    clearConsoleErrors = () => {}
 } = {}) {
     this._promptBuilder = promptBuilder;
     this._promptClient = promptClient;
     this._conversationStore = conversationStore;
     this._getAppInfo = getAppInfo;
+    this._getConsoleErrors = getConsoleErrors;
+    this._clearConsoleErrors = clearConsoleErrors;
 
     // Seeded as `unavailable` until `initialize()` resolves the real status.
     this._capabilityState = { status: 'unavailable', message: 'Checking model status...', progress: 0 };
@@ -33,10 +41,10 @@ function AssistantController({
     this._conversationMemory = [];
     this._inspectionContext = null;
     this._isStreaming = false;
-    // The in-flight reseed. `sendUserMessage` awaits this so a Send during a reseed window does
-    // not race the Prompt Client's "No active session" guard. A reseed rejection is caught by
-    // `_trackReseed` and surfaced as `session-failed`.
-    this._pendingReseed = Promise.resolve();
+    // The in-flight reseed, or `null` when no reseed is running. `sendUserMessage` awaits this
+    // so a Send during a reseed window does not race the Prompt Client's "No active session"
+    // guard. A reseed rejection is caught by `_trackReseed` and surfaced as `session-failed`.
+    this._pendingReseed = null;
 }
 
 /**
@@ -44,9 +52,6 @@ function AssistantController({
  *
  * Events: `capability-state-changed`, `conversation-loaded`, `stream-chunk`, `stream-complete`,
  * `stream-failed`, `conversation-cleared`, `inspection-context-cleared`.
- *
- * In-process event bus, not `chrome.runtime` message dispatch. The cross-process port protocol
- * lives in PromptClient.
  *
  * @param {string} event
  * @param {Function} handler
@@ -109,34 +114,28 @@ AssistantController.prototype.initialize = function () {
 };
 
 /**
- * Store `rawSeed` as `_pendingReseed` (raw, so `sendUserMessage` awaiters observe rejection) and
- * translate a failure into `session-failed`.
+ * Store `rawSeed` as `_pendingReseed` (so `sendUserMessage` awaiters observe rejection) and
+ * translate a failure into `session-failed`. With `announceReady`, re-emit `ready` on success so
+ * the view can refresh session-tied state (token counter, quota styling, input enablement).
+ *
+ * `_pendingReseed` is cleared back to `null` when the reseed settles so the idle-recovery check
+ * in `sendUserMessage` has a single source of truth for "no reseed in flight".
  *
  * @private
  * @param {Promise<*>} rawSeed
+ * @param {{announceReady?: boolean}} [options]
  * @returns {Promise<void>}
  */
-AssistantController.prototype._trackReseed = function (rawSeed) {
+AssistantController.prototype._trackReseed = function (rawSeed, { announceReady = false } = {}) {
     this._pendingReseed = rawSeed;
-    return rawSeed.then(undefined, (err) => {
-        this._setCapabilityState('session-failed', err && err.message ? err.message : 'Session creation failed', 0);
-    });
-};
-
-/**
- * Like `_trackReseed`, but re-emits `ready` on success so the view can refresh session-tied state
- * (token counter, quota styling, input enablement). Used by destroy-then-reseed paths. On failure,
- * does not emit `ready` — `session-failed` is already surfaced.
- *
- * @private
- * @param {Promise<*>} rawSeed
- * @returns {Promise<void>}
- */
-AssistantController.prototype._trackReseedAndAnnounceReady = function (rawSeed) {
-    return this._trackReseed(rawSeed).then(() => {
-        if (this._capabilityState.status === 'ready') {
+    return rawSeed.then(() => {
+        this._pendingReseed = null;
+        if (announceReady && this._capabilityState.status === 'ready') {
             this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
         }
+    }, (err) => {
+        this._pendingReseed = null;
+        this._setCapabilityState('session-failed', err && err.message ? err.message : 'Session creation failed', 0);
     });
 };
 
@@ -152,6 +151,21 @@ AssistantController.prototype._seedSession = function () {
 };
 
 /**
+ * Call the injected `getConsoleErrors`. A missing or throwing accessor returns [] so a broken
+ * wiring doesn't break the send.
+ * @private
+ * @returns {Array}
+ */
+AssistantController.prototype._safeGetConsoleErrors = function () {
+    try {
+        const snapshot = this._getConsoleErrors();
+        return Array.isArray(snapshot) ? snapshot : [];
+    } catch (e) {
+        return [];
+    }
+};
+
+/**
  * Send a user message: build the prompt, stream the response, persist both turns, and emit stream
  * events. The current Inspection Context is injected — see `updateInspectionContext` for its
  * lifecycle.
@@ -160,15 +174,26 @@ AssistantController.prototype._seedSession = function () {
  * @returns {Promise<{content: string}>}
  */
 AssistantController.prototype.sendUserMessage = function (userMessage) {
-    const formatted = this._promptBuilder.buildUserPrompt(userMessage, this._inspectionContext);
+    const consoleErrors = this._safeGetConsoleErrors();
+    const formatted = this._promptBuilder.buildUserPrompt(userMessage, this._inspectionContext, consoleErrors);
 
     this._isStreaming = true;
 
-    // Wait for any in-flight reseed so a Send during the destroy-then-reseed window does not race
-    // the Prompt Client's "No active session" guard. If the reseed rejects, reject the send with
-    // the same error and leave `session-failed` in place — do not overwrite it with
-    // `streaming-failed`.
-    return this._pendingReseed.then(() => {
+    // Idle recovery: Chrome may have killed the extension's background service worker while
+    // the panel was idle, tearing down the Prompt API session without the controller knowing.
+    // If no reseed is already in flight, kick one off so the Send transparently reseeds
+    // instead of tripping the Prompt Client's "No active session" guard. If another reseed
+    // origin (setUrl/clearConversation/downloadModel) is already running, `_pendingReseed`
+    // is non-null and the Send simply awaits the existing reseed — same invariant as before.
+    if (!this._promptClient.hasActiveSession() && this._pendingReseed === null) {
+        this._trackReseed(this._seedSession());
+    }
+
+    // Await any in-flight reseed (idle-recovery just above, or an earlier
+    // setUrl/clearConversation/downloadModel) so a Send during a reseed window does not race
+    // the Prompt Client's "No active session" guard. Falls through to a resolved sentinel
+    // when nothing is pending.
+    return (this._pendingReseed || Promise.resolve()).then(() => {
         return this._promptClient.promptStreaming(formatted).then((stream) => {
             return this._consumeStream(stream);
         }).then((fullText) => {
@@ -255,6 +280,9 @@ AssistantController.prototype.setUrl = function (url) {
         this._emit('inspection-context-cleared');
     }
 
+    // Buffered errors belong to the old page.
+    this._safeClearConsoleErrors();
+
     if (this._capabilityState.status !== 'ready') {
         return Promise.resolve();
     }
@@ -263,19 +291,13 @@ AssistantController.prototype.setUrl = function (url) {
         this._promptClient.destroy();
         return this._seedSession();
     });
-    return this._trackReseedAndAnnounceReady(rawSeed);
+    return this._trackReseed(rawSeed, { announceReady: true });
 };
 
 /**
- * Set the Inspection Context for subsequent prompts. It is sticky — reused on every
- * `sendUserMessage` until:
- *   1. A different snapshot replaces it (`updateInspectionContext(ctx2)`).
- *   2. The developer detaches it (`updateInspectionContext(null)`).
- *   3. The inspected page navigates (`setUrl(differentUrl)`).
- *
- * `updateInspectionContext(null)` emits `inspection-context-cleared` if a snapshot was attached;
- * replacement does not. Never persisted. Clearing Conversation Memory is orthogonal —
- * see `clearConversation`.
+ * Set the Inspection Context for subsequent prompts. Sticky — reused on every `sendUserMessage`
+ * until replaced, cleared with `null`, or dropped by `setUrl`. Clearing with `null` emits
+ * `inspection-context-cleared`; replacement does not. Never persisted.
  *
  * @param {Object} [context] - Inspection context with optional `control` snapshot.
  */
@@ -289,19 +311,31 @@ AssistantController.prototype.updateInspectionContext = function (context) {
 };
 
 /**
- * Clear conversation memory, destroy the session, and reseed. Re-emits `ready` so the view can
- * refresh the token counter — otherwise it keeps the pre-clear usage over a fresh session.
+ * Clear conversation memory, destroy the session, and reseed. Also clears the console-errors
+ * buffer so both reset together. Re-emits `ready` so the view refreshes the token counter.
  *
  * @returns {Promise<void>}
  */
 AssistantController.prototype.clearConversation = function () {
     const rawSeed = this._conversationStore.clear(this._currentUrl).then(() => {
         this._conversationMemory = [];
+        this._safeClearConsoleErrors();
         this._promptClient.destroy();
         this._emit('conversation-cleared');
         return this._seedSession();
     });
-    return this._trackReseedAndAnnounceReady(rawSeed);
+    return this._trackReseed(rawSeed, { announceReady: true });
+};
+
+/**
+ * @private
+ */
+AssistantController.prototype._safeClearConsoleErrors = function () {
+    try {
+        this._clearConsoleErrors();
+    } catch (e) {
+        // See _safeGetConsoleErrors.
+    }
 };
 
 /**

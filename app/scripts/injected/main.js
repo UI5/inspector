@@ -6,6 +6,7 @@ sap.ui.require(['ToolsAPI'], function (ToolsAPI) {
     var controlUtils = require('../modules/injected/controlUtils.js');
     var rightClickHandler = require('../modules/injected/rightClickHandler.js');
     var applicationUtils = require('../modules/injected/applicationUtils');
+    var consoleErrorCapture = require('../modules/injected/consoleErrorCapture.js');
 
     var ui5TempName = 'ui5$temp';
 	var ui5Temp = window[ui5TempName] = {}; // Container for all temp. variables
@@ -15,6 +16,17 @@ sap.ui.require(['ToolsAPI'], function (ToolsAPI) {
 
     // Create global reference for the extension.
     ui5inspector.createReferences();
+
+    // Capture console errors. `onRecord` pushes a snapshot to the panel on every event so its
+    // cache stays in sync with the page-side buffer.
+    var consoleErrorHandle = consoleErrorCapture.install(window, {
+        onRecord: function () {
+            message.send({
+                action: 'on-console-errors-updated',
+                consoleErrors: consoleErrorHandle.buffer.snapshot()
+            });
+        }
+    });
 
     /**
      * Mutation observer for DOM elements
@@ -365,6 +377,17 @@ sap.ui.require(['ToolsAPI'], function (ToolsAPI) {
             } else {
                 log(`No Control with id ${sControlId} exists`);
             }
+        },
+
+        /**
+         * Clear the console-errors buffer. Called from the panel's Clear Conversation flow.
+         */
+        'do-clear-console-errors': function () {
+            consoleErrorHandle.buffer.clear();
+            message.send({
+                action: 'on-console-errors-updated',
+                consoleErrors: []
+            });
         }
     };
 

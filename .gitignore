@@ -34,3 +34,9 @@ docs/adr/
 docs/agents/
 CONTEXT.md
 prompt.md
+
+# Installed agent skills (managed via `npx skills@latest`)
+.agents/
+.claude/
+agent/
+skills-lock.json

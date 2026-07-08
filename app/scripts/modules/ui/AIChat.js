@@ -15,6 +15,11 @@ const AssistantTranscript = require('../ai/AssistantTranscript.js');
  * @param {string} containerId
  * @param {Object} [options]
  * @param {Function} [options.getAppInfo] - Returns the UI5 metadata snapshot for PromptBuilder.
+ * @param {Function} [options.getConsoleErrors] - Returns the recent-console-errors snapshot
+ *     captured from the inspected page. Forwarded to the controller so it reaches
+ *     {@link PromptBuilder#buildUserPrompt} on each send.
+ * @param {Function} [options.clearConsoleErrors] - Clears the recent-console-errors buffer for the
+ *     current URL. Called by the controller on Clear Conversation and URL change.
  * @param {AssistantController} [options.controller] - Pre-built controller for tests. Defaults to a
  *                                                     fresh AssistantController.
  * @param {Function} [options.transcriptFactory] - Test seam: `(container, options) => AssistantTranscript`.
@@ -24,6 +29,8 @@ const AssistantTranscript = require('../ai/AssistantTranscript.js');
  */
 function AIChat(containerId, {
     getAppInfo = null,
+    getConsoleErrors = null,
+    clearConsoleErrors = null,
     controller = null,
     transcriptFactory = function (host, options) {
         return new AssistantTranscript(host, options);
@@ -32,8 +39,12 @@ function AIChat(containerId, {
     this._container = document.getElementById(containerId);
 
     this._getAppInfo = getAppInfo;
+    this._getConsoleErrors = getConsoleErrors;
+    this._clearConsoleErrors = clearConsoleErrors;
     this._controller = controller || new AssistantController({
-        getAppInfo: this._getAppInfo || function () { return null; }
+        getAppInfo: this._getAppInfo || function () { return null; },
+        getConsoleErrors: this._getConsoleErrors || function () { return []; },
+        clearConsoleErrors: this._clearConsoleErrors || function () {}
     });
     this._transcriptFactory = transcriptFactory;
 
