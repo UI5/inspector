@@ -275,10 +275,13 @@ var controlProperties = (function () {
             });
 
             parent.types = {};
+            parent.typeNames = {};
+            parent.meta = { controlName: title };
 
             for (var key in props) {
                 formatedProps[key] = Object.create(null);
                 parent.types[key]  =  props[key].type ? _formatTypes (props[key].type) : '';
+                parent.typeNames[key] = props[key].type ? props[key].type : '';
                 formatedProps[key].value = props[key].value;
                 formatedProps[key].isDefault = props[key].isDefault && props[key].value !== '';
                 parent.data[key] = formatedProps[key];
@@ -381,6 +384,7 @@ var controlProperties = (function () {
         var title = properties[OWN].meta.controlName;
         var props = properties[OWN].properties;
         var types = {};
+        var typeNames = {};
         var formatedProps = {};
 
         for (var key in props) {
@@ -391,6 +395,7 @@ var controlProperties = (function () {
             }
 
             types[key] = props[key].type ? _formatTypes (props[key].type) : '';
+            typeNames[key] = props[key].type ? props[key].type : '';
             formatedProps[key].value = props[key].value;
             formatedProps[key].isDefault = props[key].isDefault && props[key].value !== '';
         }
@@ -402,6 +407,7 @@ var controlProperties = (function () {
         });
         properties[OWN].data = formatedProps;
         properties[OWN].types = types;
+        properties[OWN].typeNames = typeNames;
         properties[OWN].options.title = '#<span class="controlId" data-control-id="' + controlId + '" title="Click to copy control to console">' + controlId + '</span><span gray>(' + title + ')</span>';
 
         _formatInheritedProperties(controlId, properties);

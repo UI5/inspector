@@ -27,7 +27,7 @@ function _extractSection(prompt, header) {
 }
 
 function _extractPropertiesSection(prompt) {
-    return _extractSection(prompt, 'Properties:');
+    return _extractSection(prompt, 'Properties (own):');
 }
 
 function _extractBindingsSection(prompt) {
@@ -491,16 +491,21 @@ describe('PromptBuilder', function () {
         });
 
         describe('properties rendering', function () {
-            it('should render properties as key: value lines with no JSON braces on the happy path', function () {
+            it('should render each own property as `- <name>: <TypeName> = <value>` with no JSON wrapper', function () {
                 const inspectionContext = {
                     control: {
                         type: 'sap.m.Button',
                         properties: {
                             own: {
                                 data: {
-                                    text: 'Save',
-                                    enabled: true,
-                                    width: '100px'
+                                    text: { value: 'Save', isDefault: false },
+                                    enabled: { value: true, isDefault: false },
+                                    width: { value: '100px', isDefault: false }
+                                },
+                                typeNames: {
+                                    text: 'string',
+                                    enabled: 'boolean',
+                                    width: 'sap.ui.core.CSSSize'
                                 }
                             }
                         }
@@ -508,46 +513,321 @@ describe('PromptBuilder', function () {
                 };
 
                 const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
-                const propsSection = _extractPropertiesSection(result);
 
-                propsSection.should.contain('text: Save');
-                propsSection.should.contain('enabled: true');
-                propsSection.should.contain('width: 100px');
-                propsSection.should.not.contain('{');
-                propsSection.should.not.contain('}');
+                result.should.contain('Properties (own):');
+                result.should.contain('- text: string = "Save"');
+                result.should.contain('- enabled: boolean = true');
+                result.should.contain('- width: sap.ui.core.CSSSize = "100px"');
+                result.should.not.contain('{"value"');
+                result.should.not.contain('isDefault');
             });
 
-            it('should omit the Properties section entirely when own properties are empty', function () {
+            it('should append `(default)` when a property entry is marked default', function () {
                 const inspectionContext = {
                     control: {
                         type: 'sap.m.Button',
-                        properties: { own: { data: {} } }
+                        properties: {
+                            own: {
+                                data: {
+                                    text: { value: '', isDefault: true },
+                                    enabled: { value: true, isDefault: false }
+                                },
+                                typeNames: { text: 'string', enabled: 'boolean' }
+                            }
+                        }
                     }
                 };
 
                 const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
 
-                result.should.not.contain('Properties:');
+                result.should.contain('- text: string = "" (default)');
+                result.should.contain('- enabled: boolean = true');
+                result.should.not.contain('- enabled: boolean = true (default)');
             });
 
-            it('should truncate the properties section to its cap with a [truncated] marker on adversarial input', function () {
-                const largeData = {};
-                for (let i = 0; i < 5000; i++) {
-                    largeData['property' + i] = 'value'.repeat(20);
+            it('should omit the type slot when `typeNames[key]` is missing or empty', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Custom',
+                        properties: {
+                            own: {
+                                data: {
+                                    exotic: { value: 42, isDefault: false },
+                                    plain: { value: 'x', isDefault: false }
+                                },
+                                typeNames: {
+                                    exotic: '',
+                                    plain: 'string'
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('- exotic = 42');
+                result.should.contain('- plain: string = "x"');
+            });
+
+            it('should render a nested-object property as `- <name>: object = <capped JSON>`', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Custom',
+                        properties: {
+                            own: {
+                                data: {
+                                    layoutData: { value: { rowSpan: 2, colSpan: 3 }, isDefault: false }
+                                },
+                                typeNames: { layoutData: 'object' }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('- layoutData: object = {"rowSpan":2,"colSpan":3}');
+            });
+
+            it('should cap an oversized object/array value at 500 characters and append `...`', function () {
+                const bigArray = [];
+                for (let i = 0; i < 200; i++) {
+                    bigArray.push('item-with-some-length-' + i);
                 }
                 const inspectionContext = {
                     control: {
-                        type: 'sap.m.Button',
-                        properties: { own: { data: largeData } }
+                        type: 'sap.m.Custom',
+                        properties: {
+                            own: {
+                                data: {
+                                    data: { value: bigArray, isDefault: false }
+                                },
+                                typeNames: { data: 'object' }
+                            }
+                        }
                     }
                 };
 
                 const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
-                const propsSection = _extractPropertiesSection(result);
 
-                propsSection.should.contain('[truncated]');
-                // 8000-char cap plus the "... [truncated]" tail, plus the "Properties:\n" header line.
-                propsSection.length.should.be.lessThan(8200);
+                const line = result.split('\n').filter(function (l) { return l.indexOf('- data:') === 0; })[0];
+                (typeof line).should.equal('string');
+                line.substring(line.length - 3).should.equal('...');
+                // Line = `- data: object = ` (17 chars) + capped-value (500) + `...` (3).
+                line.length.should.equal(17 + 500 + 3);
+            });
+
+            it('should render null and undefined values literally', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Custom',
+                        properties: {
+                            own: {
+                                data: {
+                                    a: { value: null, isDefault: false },
+                                    b: { value: undefined, isDefault: false }
+                                },
+                                typeNames: { a: 'string', b: 'string' }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('- a: string = null');
+                result.should.contain('- b: string = undefined');
+            });
+
+            it('should render the enum type name on the property line without listing enum members (enum members land in issue 02)', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: {
+                            own: {
+                                data: {
+                                    type: { value: 'Emphasized', isDefault: false }
+                                },
+                                typeNames: { type: 'sap.m.ButtonType' }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('- type: sap.m.ButtonType = "Emphasized"');
+                result.should.not.contain('Enums used:');
+            });
+
+            it('should render `Properties (own):` only when no inherited groups are present', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: {
+                            own: {
+                                data: { text: { value: 'Hi', isDefault: false } },
+                                typeNames: { text: 'string' }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('Properties (own):');
+                result.should.not.contain('Properties (inherited from');
+            });
+
+            it('should render `Properties (inherited from <controlName>):` for each inherited group in nearest-first order', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: {
+                            own: {
+                                data: { text: { value: 'Save', isDefault: false } },
+                                typeNames: { text: 'string' }
+                            },
+                            inherited0: {
+                                meta: { controlName: 'sap.ui.core.Control' },
+                                data: { visible: { value: true, isDefault: true } },
+                                typeNames: { visible: 'boolean' }
+                            },
+                            inherited1: {
+                                meta: { controlName: 'sap.ui.core.Element' },
+                                data: { tooltip: { value: '', isDefault: true } },
+                                typeNames: { tooltip: 'string' }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                const ownIdx = result.indexOf('Properties (own):');
+                const parent1Idx = result.indexOf('Properties (inherited from sap.ui.core.Control):');
+                const parent2Idx = result.indexOf('Properties (inherited from sap.ui.core.Element):');
+
+                ownIdx.should.be.greaterThan(-1);
+                parent1Idx.should.be.greaterThan(ownIdx);
+                parent2Idx.should.be.greaterThan(parent1Idx);
+
+                result.should.contain('- visible: boolean = true (default)');
+                result.should.contain('- tooltip: string = "" (default)');
+            });
+
+            it('should omit an inherited group when its data is empty', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: {
+                            own: {
+                                data: { text: { value: 'Save', isDefault: false } },
+                                typeNames: { text: 'string' }
+                            },
+                            inherited0: {
+                                meta: { controlName: 'sap.ui.core.Control' },
+                                data: {},
+                                typeNames: {}
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('Properties (own):');
+                result.should.not.contain('Properties (inherited from sap.ui.core.Control):');
+            });
+
+            it('should omit the property section entirely when own properties are empty and there are no inherited groups', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: { own: { data: {}, typeNames: {} } }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.not.contain('Properties (own):');
+                result.should.not.contain('Properties (inherited from');
+            });
+
+            it('should render the rest of the control block even when the selected control has no properties', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        id: 'btn',
+                        properties: { own: { data: {}, typeNames: {} } },
+                        aggregations: {
+                            own: {
+                                data: { content: [{ id: 'x', type: 'sap.m.Text' }] }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('- Type: sap.m.Button');
+                result.should.contain('- ID: btn');
+                result.should.contain('Aggregations:');
+                result.should.not.contain('Properties');
+            });
+
+            it('should drop the deepest inherited group when the combined property section would exceed the cap', function () {
+                function makeGroup(controlName, keyPrefix, keyCount, valueSize) {
+                    const data = {};
+                    const typeNames = {};
+                    for (let i = 0; i < keyCount; i++) {
+                        data[keyPrefix + i] = { value: 'v'.repeat(valueSize), isDefault: false };
+                        typeNames[keyPrefix + i] = 'string';
+                    }
+                    return { meta: { controlName: controlName }, data: data, typeNames: typeNames };
+                }
+
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Custom',
+                        properties: {
+                            own: makeGroup('sap.m.Custom', 'own', 40, 50),
+                            inherited0: makeGroup('sap.ui.core.Control', 'ctrl', 40, 50),
+                            inherited1: makeGroup('sap.ui.core.Element', 'elem', 200, 50),
+                            inherited2: makeGroup('sap.ui.base.ManagedObject', 'mo', 200, 50)
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                // Nearest-first groups survive; deepest ancestor is dropped whole.
+                result.should.contain('Properties (own):');
+                result.should.contain('Properties (inherited from sap.ui.core.Control):');
+                result.should.not.contain('Properties (inherited from sap.ui.base.ManagedObject):');
+            });
+
+            it('should truncate own with `... [truncated]` when own alone exceeds the combined budget', function () {
+                const data = {};
+                const typeNames = {};
+                for (let i = 0; i < 5000; i++) {
+                    data['p' + i] = { value: 'value-with-length-' + i, isDefault: false };
+                    typeNames['p' + i] = 'string';
+                }
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Custom',
+                        properties: {
+                            own: { data: data, typeNames: typeNames }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('Properties (own):');
+                result.should.contain('... [truncated]');
             });
         });
 
@@ -890,8 +1170,12 @@ describe('PromptBuilder', function () {
                         properties: {
                             own: {
                                 data: {
-                                    text: 'Save',
-                                    enabled: true
+                                    text: { value: 'Save', isDefault: false },
+                                    enabled: { value: true, isDefault: false }
+                                },
+                                typeNames: {
+                                    text: 'string',
+                                    enabled: 'boolean'
                                 }
                             }
                         }
@@ -903,9 +1187,46 @@ describe('PromptBuilder', function () {
                     'Current UI5 Control Context:\n' +
                     '- Type: sap.m.Button\n' +
                     '- ID: saveBtn\n' +
-                    'Properties:\n' +
-                    '- text: Save\n' +
-                    '- enabled: true\n\n' +
+                    'Properties (own):\n' +
+                    '- text: string = "Save"\n' +
+                    '- enabled: boolean = true\n\n' +
+                    'Now answer: Hi';
+
+                promptBuilder.buildUserPrompt('Hi', inspectionContext).should.equal(expected);
+            });
+
+            it('golden: control + own properties + one inherited group', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        id: 'saveBtn',
+                        properties: {
+                            own: {
+                                data: { text: { value: 'Save', isDefault: false } },
+                                typeNames: { text: 'string' }
+                            },
+                            inherited0: {
+                                meta: { controlName: 'sap.ui.core.Control' },
+                                data: {
+                                    visible: { value: false, isDefault: false },
+                                    busy: { value: false, isDefault: true }
+                                },
+                                typeNames: { visible: 'boolean', busy: 'boolean' }
+                            }
+                        }
+                    }
+                };
+
+                const expected =
+                    'User asked: Hi\n\n' +
+                    'Current UI5 Control Context:\n' +
+                    '- Type: sap.m.Button\n' +
+                    '- ID: saveBtn\n' +
+                    'Properties (own):\n' +
+                    '- text: string = "Save"\n' +
+                    'Properties (inherited from sap.ui.core.Control):\n' +
+                    '- visible: boolean = false\n' +
+                    '- busy: boolean = false (default)\n\n' +
                     'Now answer: Hi';
 
                 promptBuilder.buildUserPrompt('Hi', inspectionContext).should.equal(expected);
