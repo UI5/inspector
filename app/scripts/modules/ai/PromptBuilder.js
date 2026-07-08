@@ -6,6 +6,7 @@ const BINDINGS_CAP = 8000;
 const AGGREGATIONS_CAP = 8000;
 const CONSOLE_ERRORS_CAP = 8000;
 const BINDING_VALUE_CAP = 1200;
+const PROPERTY_VALUE_CAP = 500;
 
 const UNSERIALIZABLE_PLACEHOLDER = '(Data available but cannot serialize)';
 
@@ -42,6 +43,65 @@ function _stringifyBindingValue(value) {
         return rendered.substring(0, BINDING_VALUE_CAP) + '...';
     }
     return rendered;
+}
+
+/**
+ * @private
+ * @param {*} value
+ * @returns {string}
+ */
+function _stringifyPropertyValue(value) {
+    if (value === null) {
+        return 'null';
+    }
+    if (typeof value === 'undefined') {
+        return 'undefined';
+    }
+    if (typeof value === 'string') {
+        // Quote with JSON to escape embedded `"` and `\` so a value string like `he said "hi"`
+        // stays distinguishable from a real quote in the prompt.
+        return JSON.stringify(value);
+    }
+    if (typeof value === 'boolean' || typeof value === 'number') {
+        return String(value);
+    }
+    let rendered;
+    try {
+        rendered = JSON.stringify(value);
+    } catch (e) {
+        return UNSERIALIZABLE_PLACEHOLDER;
+    }
+    return rendered.length > PROPERTY_VALUE_CAP ? rendered.substring(0, PROPERTY_VALUE_CAP) + '...' : rendered;
+}
+
+/**
+ * @private
+ */
+function _renderPropertyLine(name, entry, typeName) {
+    const rawValue = entry && Object.prototype.hasOwnProperty.call(entry, 'value') ? entry.value : undefined;
+    const value = _stringifyPropertyValue(rawValue);
+    const typeSlot = typeName ? ': ' + typeName : '';
+    const defaultMark = entry && entry.isDefault ? ' (default)' : '';
+    return '- ' + name + typeSlot + ' = ' + value + defaultMark;
+}
+
+/**
+ * @private
+ */
+function _renderPropertyGroup(heading, group) {
+    if (!group || !group.data) {
+        return null;
+    }
+    const data = group.data;
+    const keys = Object.keys(data);
+    if (keys.length === 0) {
+        return null;
+    }
+    const typeNames = group.typeNames || {};
+    const lines = keys.map(function (key) {
+        return _renderPropertyLine(key, data[key], typeNames[key]);
+    });
+    return heading + '\n' + lines.join('\n');
 }
 
 /**
@@ -274,25 +334,61 @@ PromptBuilder.prototype._capSection = function (header, body, maxLength) {
 };
 
 /**
+ * Render the property section as `Properties (own):` followed by
+ * `Properties (inherited from <controlName>):` per inherited group, in nearest-first order.
+ * Combined output is bounded by PROPERTIES_CAP with outer-first truncation: deepest inherited
+ * group is dropped whole when the running total would exceed the budget. If own alone exceeds
+ * the budget, own is rendered up to the cap with `... [truncated]`.
  * @private
  * @param {Object} properties
  * @returns {string}
  */
 PromptBuilder.prototype._renderPropertiesSection = function (properties) {
-    if (!properties || !properties.own || !properties.own.data) {
-        return '';
-    }
-    const data = properties.own.data;
-    const keys = Object.keys(data);
-    if (keys.length === 0) {
+    if (!properties) {
         return '';
     }
 
-    const lines = keys.map(function (key) {
-        return '- ' + key + ': ' + _stringifyValue(data[key]);
-    });
+    const groupBlocks = [];
 
-    return this._capSection('Properties:', lines.join('\n'), PROPERTIES_CAP);
+    const ownBlock = _renderPropertyGroup('Properties (own):', properties.own);
+    if (ownBlock) {
+        groupBlocks.push(ownBlock);
+    }
+
+    let i = 0;
+    while (Object.prototype.hasOwnProperty.call(properties, 'inherited' + i)) {
+        const group = properties['inherited' + i];
+        const controlName = (group && group.meta && group.meta.controlName) || '';
+        const heading = 'Properties (inherited from ' + controlName + '):';
+        const block = _renderPropertyGroup(heading, group);
+        if (block) {
+            groupBlocks.push(block);
+        }
+        i++;
+    }
+
+    if (groupBlocks.length === 0) {
+        return '';
+    }
+
+    const joiner = '\n';
+    const kept = [];
+    let running = 0;
+    for (let j = 0; j < groupBlocks.length; j++) {
+        const addedLen = (kept.length === 0 ? 0 : joiner.length) + groupBlocks[j].length;
+        if (running + addedLen > PROPERTIES_CAP) {
+            break;
+        }
+        kept.push(groupBlocks[j]);
+        running += addedLen;
+    }
+
+    if (kept.length === 0) {
+        // Own alone exceeds the budget — render it truncated instead of skipping the section.
+        return groupBlocks[0].substring(0, PROPERTIES_CAP) + '... [truncated]';
+    }
+
+    return kept.join(joiner);
 };
 
 /**
