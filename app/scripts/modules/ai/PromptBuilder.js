@@ -273,6 +273,63 @@ PromptBuilder.prototype._capSection = function (header, body, maxLength) {
 };
 
 /**
+ * Render one property line.
+ * String type entry → "- <key> (type: X): <value>"
+ * Object type entry (enum) → "- <key> (enum: A, B, C): <value>"
+ * No type entry → "- <key>: <value>"
+ * @private
+ */
+function _renderPropertyLine(key, value, typeEntry) {
+    let typeSuffix = '';
+    if (typeEntry) {
+        if (typeof typeEntry === 'object') {
+            const enumKeys = Object.keys(typeEntry);
+            if (enumKeys.length > 0) {
+                typeSuffix = ' (enum: ' + enumKeys.join(', ') + ')';
+            }
+        } else if (typeof typeEntry === 'string' && typeEntry.length > 0) {
+            typeSuffix = ' (type: ' + typeEntry + ')';
+        }
+    }
+    return '- ' + key + typeSuffix + ': ' + _stringifyValue(value);
+}
+
+/**
+ * Extract the class name from an inherited group's options.title.
+ * Title format: "<span gray>Inherits from</span> (ClassName)" — pull the parenthesised part.
+ * @private
+ */
+function _ancestorNameFromGroup(group, fallback) {
+    const rawTitle = (group.options && group.options.title) ? group.options.title : '';
+    const parenMatch = rawTitle.match(/\(([^)]+)\)/);
+    if (parenMatch) {
+        return parenMatch[1];
+    }
+    return rawTitle.replace(/<[^>]+>/g, '').trim() || fallback;
+}
+
+/**
+ * Render one inherited property group as a capped section string, or '' if empty.
+ * @private
+ */
+PromptBuilder.prototype._renderInheritedGroup = function (group, fallbackKey) {
+    if (!group || !group.data) {
+        return '';
+    }
+    const ancestorName = _ancestorNameFromGroup(group, fallbackKey);
+    const groupTypes = group.types || {};
+    const groupLines = Object.keys(group.data).map(function (key) {
+        const entry = group.data[key];
+        const val = (entry && entry.value !== undefined) ? entry.value : entry;
+        return _renderPropertyLine(key, val, groupTypes[key]);
+    });
+    if (groupLines.length === 0) {
+        return '';
+    }
+    return this._capSection('Inherited from ' + ancestorName + ':', groupLines.join('\n'), PROPERTIES_CAP);
+};
+
+/**
  * @private
  * @param {Object} properties
  * @returns {string}
@@ -287,16 +344,36 @@ PromptBuilder.prototype._renderPropertiesSection = function (properties) {
         return '';
     }
 
-    const lines = keys.map(function (key) {
-        return '- ' + key + ': ' + _stringifyValue(data[key]);
+    const types = (properties.own && properties.own.types) || {};
+    const ownLines = keys.map(function (key) {
+        const entry = data[key];
+        const val = (entry && entry.value !== undefined) ? entry.value : entry;
+        return _renderPropertyLine(key, val, types[key]);
     });
 
-    return this._capSection('Properties:', lines.join('\n'), PROPERTIES_CAP);
+    const sections = [this._capSection('Properties:', ownLines.join('\n'), PROPERTIES_CAP)];
+
+    // Inherited groups are stored as inherited0, inherited1, … after formatControlProperties runs.
+    // Sort numerically so the ancestor order matches the inheritance chain.
+    const self = this;
+    const inheritedKeys = Object.keys(properties).filter(function (k) {
+        return /^inherited\d+$/.test(k);
+    }).sort(function (a, b) {
+        return parseInt(a.slice(9), 10) - parseInt(b.slice(9), 10);
+    });
+    inheritedKeys.forEach(function (k) {
+        const rendered = self._renderInheritedGroup(properties[k], k);
+        if (rendered) {
+            sections.push(rendered);
+        }
+    });
+
+    return sections.join('\n');
 };
 
 /**
- * Render each binding as one line. Composite bindings (with a `parts` array) collapse to
- * `<prop> ← <composite>`. Circular graphs fall back to the placeholder.
+ * Render each binding as one line. Composite bindings (with a `parts` array) expand each part
+ * with its path and resolved value. Circular graphs fall back to the placeholder.
  * @private
  * @param {Object} bindings
  * @returns {string}
@@ -331,9 +408,24 @@ PromptBuilder.prototype._renderBindingLine = function (propertyName, binding) {
         return '- ' + propertyName + ' ← <invalid>';
     }
 
-    // Composite bindings not handled yet.
     if (Array.isArray(binding.parts)) {
-        return '- ' + propertyName + ' ← <composite>';
+        if (binding.parts.length === 0) {
+            return '- ' + propertyName + ' ← <composite: empty>';
+        }
+        const partStrings = binding.parts.map(function (part) {
+            if (!part || typeof part !== 'object') {
+                return '{<invalid>}';
+            }
+            let s = '"' + (part.path || '') + '"';
+            if (Object.prototype.hasOwnProperty.call(part, 'value')) {
+                s += ' = ' + _stringifyBindingValue(part.value);
+            }
+            if (part.model) {
+                s += ' (model: ' + part.model + ')';
+            }
+            return s;
+        });
+        return '- ' + propertyName + ' ← [' + partStrings.join(', ') + ']';
     }
 
     let line = '- ' + propertyName + ' ← "' + (binding.path || '') + '"';
