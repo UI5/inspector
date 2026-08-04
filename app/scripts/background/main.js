@@ -90,11 +90,21 @@
                     if (frameId !== undefined) {
                         target.frameIds = [message.frameId];
                     }
+                    // 1. Inject the isolated-world message bridge (mirrors
+                    //    content/main.js for classic UI5).
                     chrome.scripting.executeScript({
                         target,
-                        files: ['/vendor/WebComponentsToolsAPI.js'],
-                        world: 'MAIN'
+                        files: ['/scripts/content/webcMain.js']
                     }).then(() => {
+                        // 2. Inject the tools API into the page's MAIN world so
+                        //    it can see the framework classes / isUI5Element.
+                        return chrome.scripting.executeScript({
+                            target,
+                            files: ['/vendor/WebComponentsToolsAPI.js'],
+                            world: 'MAIN'
+                        });
+                    }).then(() => {
+                        // 3. Inject the MAIN-world handler script.
                         return chrome.scripting.executeScript({
                             target,
                             files: ['/scripts/injected/webcMain.js'],

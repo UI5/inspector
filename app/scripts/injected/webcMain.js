@@ -9,10 +9,10 @@
  * Communication
  * -------------
  * Page <-> DevTools panel messages are bridged via CustomEvents on
- * `document`, forwarded by content/detectWebComponents.js (isolated world):
+ * `document`, forwarded by content/webcMain.js (isolated world):
  *
  *   panel  -- port.postMessage -->  background
- *   background  -- chrome.tabs.sendMessage -->  content/detectWebComponents.js
+ *   background  -- chrome.tabs.sendMessage -->  content/webcMain.js
  *   content  -- CustomEvent('ui5-communication-with-injected-script') -->  this script
  *   this script  -- CustomEvent('ui5-communication-with-content-script') -->  content
  *   content  -- port.postMessage -->  background  -->  panel
