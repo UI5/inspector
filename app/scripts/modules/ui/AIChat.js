@@ -2,9 +2,10 @@
 
 const AssistantController = require('../ai/AssistantController.js');
 const AssistantTranscript = require('../ai/AssistantTranscript.js');
+const MemoryIndicator = require('./MemoryIndicator.js');
 
 /**
- * Thin view over the assistant. Owns the banner, input area, confirm dialog, token counter, and
+ * Thin view over the assistant. Owns the banner, input area, confirm dialog, memory indicator, and
  * subscription to {@link AssistantController}. Markdown parsing, JSON / code viewers, scroll
  * bookkeeping, the streaming debounce, and clipboard helpers live in {@link AssistantTranscript}.
  *
@@ -51,7 +52,7 @@ function AIChat(containerId, {
     this._isStreaming = false;
     this._streamingHandle = null;
     this._hasShownUsageWarning = false;
-    // Both the token counter and Clear History button are hidden while no messages exist.
+    // Both the memory indicator and Clear History button are hidden while no messages exist.
     this._hasMessages = false;
 
     this.init();
@@ -61,6 +62,9 @@ AIChat.prototype.init = function () {
     this._render();
     this._transcript = this._transcriptFactory(document.getElementById('ai-messages-container'), {
         onCopyFailed: () => { this._showError('Failed to copy to clipboard'); }
+    });
+    this._memoryIndicator = new MemoryIndicator('ai-memory-indicator', {
+        onClear: () => { this._handleClearHistory(); }
     });
     this._attachEventListeners();
     this._attachControllerListeners();
@@ -100,6 +104,7 @@ AIChat.prototype._render = function () {
                 </div>
                 <div class="ai-error-slot" id="ai-error-slot" role="status" aria-live="polite" hidden></div>
                 <div class="input-wrapper">
+                    <div id="ai-memory-indicator" class="memory-indicator-host"></div>
                     <input
                         type="text"
                         class="ai-input"
@@ -110,9 +115,6 @@ AIChat.prototype._render = function () {
                     <button class="ai-send-button" id="ai-send-button" disabled aria-label="Send message">
                         Send
                     </button>
-                </div>
-                <div class="input-footer">
-                    <span class="token-counter" id="ai-token-counter" role="status" aria-live="polite" hidden></span>
                 </div>
             </div>
 
@@ -230,7 +232,7 @@ AIChat.prototype._attachControllerListeners = function () {
         }
         this._isStreaming = false;
         this._hasMessages = true;
-        this._updateTokenCounter();
+        this._updateMemoryIndicator();
     });
 
     this._controller.on('stream-failed', (err) => {
@@ -247,7 +249,7 @@ AIChat.prototype._attachControllerListeners = function () {
         if (clearButton) {
             clearButton.style.display = 'none';
         }
-        this._updateTokenCounter();
+        this._updateMemoryIndicator();
     });
 
     this._controller.on('inspection-context-cleared', () => {
@@ -258,7 +260,7 @@ AIChat.prototype._attachControllerListeners = function () {
 /**
  * Canonical capability state config. The banner CSS class is `status-<key>` for every key.
  * `skip: true` means no banner update. `showClearButton: true` makes the clear-history button
- * visible. `updateTokens: true` refreshes the token counter. Unknown statuses route to `unavailable`.
+ * visible. `updateMemory: true` refreshes the memory indicator. Unknown statuses route to `unavailable`.
  * @private
  */
 AIChat._CAPABILITY_CONFIG = {
@@ -266,7 +268,7 @@ AIChat._CAPABILITY_CONFIG = {
     'unavailable':      {},
     'downloadable':     {},
     'downloading':      {},
-    'ready':            { showClearButton: true, updateTokens: true },
+    'ready':            { showClearButton: true, updateMemory: true },
     // Recovery: clearConversation destroys the broken session and reseeds.
     'session-failed':   { showClearButton: true },
     // Keep the prior banner; recovery clears on the next successful send. Error surfaces via `_showError`.
@@ -301,8 +303,8 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
             clearButton.style.display = 'inline-block';
         }
     }
-    if (config.updateTokens) {
-        this._updateTokenCounter();
+    if (config.updateMemory) {
+        this._updateMemoryIndicator();
     }
 };
 
@@ -428,47 +430,63 @@ AIChat.prototype._renderCapabilityBanner = function (status, state) {
     }
 };
 
-AIChat.prototype._updateTokenCounter = function () {
-    const counter = document.getElementById('ai-token-counter');
-    const input = document.getElementById('ai-input');
-    const sendButton = document.getElementById('ai-send-button');
-
-    if (!counter) {
+AIChat.prototype._updateMemoryIndicator = function () {
+    if (!this._memoryIndicator) {
         return;
     }
 
     if (!this._hasMessages) {
-        counter.textContent = '';
-        counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
-        counter.hidden = true;
+        this._memoryIndicator.update({ hasMessages: false });
+        this._reenableInput();
         return;
     }
 
     this._controller.getUsageInfo().then((usageInfo) => {
+        if (!this._memoryIndicator) {
+            return;
+        }
         if (usageInfo) {
-            counter.textContent = 'Tokens: ' + usageInfo.inputUsage + '/' + usageInfo.inputQuota + ' (' + usageInfo.percentUsed + '%)';
-
-            counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
+            this._memoryIndicator.update({
+                hasMessages: true,
+                inputUsage: usageInfo.inputUsage,
+                inputQuota: usageInfo.inputQuota,
+                percentUsed: usageInfo.percentUsed
+            });
+            this._checkTokenUsageWarning(usageInfo.percentUsed);
 
             if (usageInfo.percentUsed >= 100) {
-                counter.classList.add('quota-exhausted');
-                input.disabled = true;
-                sendButton.disabled = true;
-                input.placeholder = 'Token quota exhausted. Clear history to continue.';
-            } else if (usageInfo.percentUsed >= 90) {
-                counter.classList.add('warning-critical');
-            } else if (usageInfo.percentUsed >= 70) {
-                counter.classList.add('warning');
+                const input = document.getElementById('ai-input');
+                const sendButton = document.getElementById('ai-send-button');
+                if (input) {
+                    input.disabled = true;
+                    input.placeholder = 'Memory full. Start Fresh to continue.';
+                }
+                if (sendButton) {
+                    sendButton.disabled = true;
+                }
+            } else {
+                this._reenableInput();
             }
-
-            counter.hidden = false;
-            this._checkTokenUsageWarning(usageInfo.percentUsed);
+        } else {
+            // Null usage info is a transient no-data response; re-enable input so a prior
+            // quota-exhausted disable doesn't permanently lock the UI.
+            this._reenableInput();
         }
-        // Null usage: leave the pill's last valid text and state class in place so it does not
-        // flicker off between messages.
-    }, () => {
-        // Rejected usage: same no-op as null.
+    }).catch(() => {
+        // Non-fatal: leave the indicator in its last valid state.
     });
+};
+
+AIChat.prototype._reenableInput = function () {
+    const input = document.getElementById('ai-input');
+    const sendButton = document.getElementById('ai-send-button');
+    if (input) {
+        input.disabled = false;
+        input.placeholder = 'Ask me anything about UI5...';
+    }
+    if (sendButton) {
+        sendButton.disabled = !(input && input.value.trim().length > 0 && !this._isStreaming);
+    }
 };
 
 /**
@@ -479,9 +497,8 @@ AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
     if (percentUsed >= 70 && !this._hasShownUsageWarning) {
         this._hasShownUsageWarning = true;
 
-        const warningMessage = '💡 Your conversation is getting long (' + percentUsed + '% of token limit used). ' +
-            'For faster responses and better performance, consider clearing the chat history to start fresh. ' +
-            'Click "Clear History" button above.';
+        const warningMessage = 'Your conversation memory is getting full (' + percentUsed + '% used). ' +
+            'Click the memory indicator below and choose "Start Fresh" to free up space.';
 
         this._transcript.appendSystemMessage(warningMessage);
     }
@@ -563,6 +580,10 @@ AIChat.prototype.destroy = function () {
     if (this._transcript && typeof this._transcript.destroy === 'function') {
         this._transcript.destroy();
     }
+    if (this._memoryIndicator && typeof this._memoryIndicator.destroy === 'function') {
+        this._memoryIndicator.destroy();
+    }
+    this._memoryIndicator = null;
 };
 
 module.exports = AIChat;

@@ -499,18 +499,22 @@ describe('AIChat', function () {
         });
     });
 
-    describe('Token counter', function () {
-        it('should leave the token counter empty when the controller reports no usage info, so a non-ready or quota-unaware session does not paint stale numbers', function () {
+    describe('Memory indicator', function () {
+        it('should not call the memory indicator with usage data when the controller reports no usage info, so a non-ready session does not paint stale numbers', function () {
+            let updateArgs = null;
+            const orig = aiChat._memoryIndicator.update.bind(aiChat._memoryIndicator);
+            aiChat._memoryIndicator.update = function (info) { updateArgs = info; orig(info); };
+
+            // getUsageInfo resolves to null by default in fakeController
             fakeController.fire('capability-state-changed', {
                 status: 'ready', message: 'ready', progress: 0
             });
 
-            // getUsageInfo resolves to null; drain the microtask.
             return Promise.resolve().then(function () {
                 return Promise.resolve();
             }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                counter.textContent.should.equal('');
+                updateArgs.should.not.equal(null);
+                updateArgs.hasMessages.should.be.false;
             });
         });
 
@@ -536,34 +540,36 @@ describe('AIChat', function () {
 
             return new Promise(function (resolve) { setTimeout(resolve, 20); }).then(function () {
                 const warnings = fakeTranscript.calls.filter(function (c) {
-                    return c.type === 'appendSystemMessage' && c.message.indexOf('token limit') !== -1;
+                    return c.type === 'appendSystemMessage' && c.message.indexOf('conversation memory') !== -1;
                 });
                 warnings.length.should.equal(1);
             });
         });
     });
 
-    describe('Empty-conversation gating for token counter and Clear History button', function () {
-        it('should render the token counter with the semantic hidden attribute on a fresh load, so the pill is absent from the input footer until there is a message to account for', function () {
-            const counter = document.getElementById('ai-token-counter');
-            counter.hasAttribute('hidden').should.be.true;
+    describe('Empty-conversation gating for memory indicator and Clear History button', function () {
+        it('should hide the memory indicator on a fresh load before any messages exist', function () {
+            const host = document.getElementById('ai-memory-indicator');
+            host.should.exist;
+            const btn = host.querySelector('.memory-indicator-btn');
+            btn.hasAttribute('hidden').should.be.true;
         });
 
-        it('should preserve the token counter\'s role and aria-live attributes so screen-reader announcement behaviour is not regressed by the hide gate', function () {
-            const counter = document.getElementById('ai-token-counter');
-            counter.getAttribute('role').should.equal('status');
-            counter.getAttribute('aria-live').should.equal('polite');
+        it('should render the memory indicator host with an accessible button so screen-reader users can identify the widget', function () {
+            const btn = document.querySelector('.memory-indicator-btn');
+            btn.should.exist;
+            btn.getAttribute('aria-label').should.be.a('string');
+            btn.getAttribute('aria-label').length.should.be.above(0);
         });
 
-        it('should keep the token counter hidden after a ready capability state with null usage info in an empty conversation, so a pristine panel does not paint an empty pill', function () {
+        it('should keep the memory indicator hidden after a ready capability state with null usage info in an empty conversation', function () {
             fakeController.fire('capability-state-changed', {
                 status: 'ready', message: 'ready', progress: 0
             });
 
             return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                counter.hasAttribute('hidden').should.be.true;
-                counter.textContent.should.equal('');
+                const btn = document.querySelector('.memory-indicator-btn');
+                btn.hasAttribute('hidden').should.be.true;
             });
         });
 
@@ -579,39 +585,48 @@ describe('AIChat', function () {
             clearButton.style.display.should.not.equal('none');
         });
 
-        it('should reveal the token counter after the assistant stream completes for the first user turn, so the developer sees usage numbers alongside the first response', function () {
+        it('should reveal the memory indicator after the assistant stream completes for the first user turn', function () {
             fakeController.getUsageInfo = function () {
                 return Promise.resolve({inputUsage: 100, inputQuota: 1000, percentUsed: 10});
             };
+
+            let updateArgs = null;
+            const orig = aiChat._memoryIndicator.update.bind(aiChat._memoryIndicator);
+            aiChat._memoryIndicator.update = function (info) { updateArgs = info; orig(info); };
 
             const input = document.getElementById('ai-input');
             input.value = 'hi';
             input.dispatchEvent(new Event('input'));
             document.getElementById('ai-send-button').click();
-
             fakeController.fire('stream-complete', {content: 'hello'});
 
             return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                counter.hasAttribute('hidden').should.be.false;
-                counter.textContent.should.contain('100');
+                updateArgs.should.exist;
+                updateArgs.hasMessages.should.be.true;
+                updateArgs.inputUsage.should.equal(100);
             });
         });
 
-        it('should hide the token counter and the Clear History button on conversation-cleared, so the post-clear state matches the fresh-load state', function () {
+        it('should hide the memory indicator and the Clear History button on conversation-cleared', function () {
             // Seed a non-empty conversation with visible pill and clear button.
             fakeController.getUsageInfo = function () {
                 return Promise.resolve({inputUsage: 100, inputQuota: 1000, percentUsed: 10});
             };
+
+            let lastUpdateArgs = null;
+            const orig = aiChat._memoryIndicator.update.bind(aiChat._memoryIndicator);
+            aiChat._memoryIndicator.update = function (info) { lastUpdateArgs = info; orig(info); };
+
             fakeController.fire('conversation-loaded', [{role: 'user', content: 'hi'}]);
             fakeController.fire('capability-state-changed', {
                 status: 'ready', message: 'ready', progress: 0
             });
 
             return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
+                lastUpdateArgs.should.exist;
+                lastUpdateArgs.hasMessages.should.be.true;
+
                 const clearButton = document.getElementById('ai-clear-history-button');
-                counter.hasAttribute('hidden').should.be.false;
                 clearButton.style.display.should.not.equal('none');
 
                 // Now clear. Post-clear a capability-state ready may still arrive due to reseed;
@@ -623,18 +638,20 @@ describe('AIChat', function () {
 
                 return new Promise(function (resolve) { setTimeout(resolve, 10); });
             }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
+                lastUpdateArgs.hasMessages.should.be.false;
                 const clearButton = document.getElementById('ai-clear-history-button');
-                counter.hasAttribute('hidden').should.be.true;
-                counter.textContent.should.equal('');
                 clearButton.style.display.should.equal('none');
             });
         });
 
-        it('should reveal the token counter and Clear History button again when a new message is sent after a clear, so the panel recovers to the active-conversation state', function () {
+        it('should reveal the memory indicator and Clear History button again when a new message is sent after a clear', function () {
             fakeController.getUsageInfo = function () {
                 return Promise.resolve({inputUsage: 50, inputQuota: 1000, percentUsed: 5});
             };
+
+            let lastUpdateArgs = null;
+            const orig = aiChat._memoryIndicator.update.bind(aiChat._memoryIndicator);
+            aiChat._memoryIndicator.update = function (info) { lastUpdateArgs = info; orig(info); };
 
             fakeController.fire('conversation-cleared');
 
@@ -650,17 +667,21 @@ describe('AIChat', function () {
             });
 
             return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
+                lastUpdateArgs.should.exist;
+                lastUpdateArgs.hasMessages.should.be.true;
                 const clearButton = document.getElementById('ai-clear-history-button');
-                counter.hasAttribute('hidden').should.be.false;
                 clearButton.style.display.should.not.equal('none');
             });
         });
 
-        it('should reveal the token counter once usage info resolves for a restored non-empty conversation, so a warm start shows the same widgets as a live session', function () {
+        it('should reveal the memory indicator once usage info resolves for a restored non-empty conversation', function () {
             fakeController.getUsageInfo = function () {
                 return Promise.resolve({inputUsage: 200, inputQuota: 1000, percentUsed: 20});
             };
+
+            let updateArgs = null;
+            const orig = aiChat._memoryIndicator.update.bind(aiChat._memoryIndicator);
+            aiChat._memoryIndicator.update = function (info) { updateArgs = info; orig(info); };
 
             fakeController.fire('conversation-loaded', [
                 {role: 'user', content: 'q'},
@@ -671,27 +692,31 @@ describe('AIChat', function () {
             });
 
             return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                counter.hasAttribute('hidden').should.be.false;
-                counter.textContent.should.contain('200');
+                updateArgs.should.exist;
+                updateArgs.hasMessages.should.be.true;
+                updateArgs.inputUsage.should.equal(200);
             });
         });
 
-        it('should leave the token counter and Clear History button hidden when a restored conversation is empty, so warm-starting an empty store looks identical to a fresh load', function () {
+        it('should leave the memory indicator and Clear History button hidden when a restored conversation is empty', function () {
             fakeController.fire('conversation-loaded', []);
             fakeController.fire('capability-state-changed', {
                 status: 'ready', message: 'ready', progress: 0
             });
 
             return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
+                const btn = document.querySelector('.memory-indicator-btn');
+                btn.hasAttribute('hidden').should.be.true;
                 const clearButton = document.getElementById('ai-clear-history-button');
-                counter.hasAttribute('hidden').should.be.true;
                 clearButton.style.display.should.equal('none');
             });
         });
 
-        it('should not flicker the token counter off mid-stream when a usage-info refresh briefly returns null, so the last valid pill stays visible until the next successful update', function () {
+        it('should not call the memory indicator with hasMessages false when a usage-info refresh briefly returns null mid-conversation', function () {
+            let updateCalls = [];
+            const orig = aiChat._memoryIndicator.update.bind(aiChat._memoryIndicator);
+            aiChat._memoryIndicator.update = function (info) { updateCalls.push(info); orig(info); };
+
             let usageQueue = [
                 {inputUsage: 100, inputQuota: 1000, percentUsed: 10},
                 null
@@ -707,26 +732,25 @@ describe('AIChat', function () {
             fakeController.fire('stream-complete', {content: 'a'});
 
             return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                counter.hasAttribute('hidden').should.be.false;
-                counter.textContent.should.contain('100');
+                // First update: should have hasMessages true
+                updateCalls.filter(function (c) { return c.hasMessages === true; }).length.should.be.above(0);
 
-                // Second refresh: usage briefly null (stale/unavailable). Pill must not flicker off.
+                // Second refresh: usage briefly null — _updateMemoryIndicator should not call update with hasMessages false
                 fakeController.fire('capability-state-changed', {
                     status: 'ready', message: 'ready', progress: 0
                 });
 
                 return new Promise(function (resolve) { setTimeout(resolve, 10); });
             }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                counter.hasAttribute('hidden').should.be.false;
-                counter.textContent.should.contain('100');
+                const falseCalls = updateCalls.filter(function (c) { return c.hasMessages === false; });
+                falseCalls.length.should.equal(0);
             });
         });
     });
 
     describe('Inline error slot', function () {
         it('should render an inline error slot inside the input area, hidden by default with role=status and aria-live=polite, so screen readers announce errors non-interruptively when they appear', function () {
+
             const slot = document.getElementById('ai-error-slot');
             slot.should.exist;
             slot.getAttribute('role').should.equal('status');
@@ -827,5 +851,216 @@ describe('AIChat', function () {
             slot.textContent.should.contain('second');
             slot.textContent.should.not.contain('first');
         });
+    });
+});
+
+describe('MemoryIndicator integration', function () {
+    const fixtures = document.getElementById('fixtures');
+    let aiChat;
+    let fakeController;
+
+    beforeEach(function () {
+        fixtures.innerHTML = '<div id="ai-chat"></div>';
+        fakeController = createFakeController();
+        const fakeTranscript = createFakeTranscript();
+        aiChat = new AIChat('ai-chat', {
+            getAppInfo: function () { return null; },
+            controller: fakeController,
+            transcriptFactory: function (host, options) {
+                if (options && typeof options.onCopyFailed === 'function') {
+                    fakeTranscript.onCopyFailed = options.onCopyFailed;
+                }
+                return fakeTranscript;
+            }
+        });
+    });
+
+    afterEach(function () {
+        aiChat = null;
+        fakeController = null;
+        fixtures.innerHTML = '';
+    });
+
+    it('should render the memory indicator host div inside the input footer', function () {
+        const host = document.getElementById('ai-memory-indicator');
+        host.should.exist;
+    });
+
+    it('should call update on the indicator after stream-complete with usage data', function (done) {
+        let updateArgs = null;
+        const orig = aiChat._memoryIndicator.update.bind(aiChat._memoryIndicator);
+        aiChat._memoryIndicator.update = function (info) {
+            updateArgs = info;
+            orig(info);
+        };
+
+        fakeController.getUsageInfo = function () {
+            return Promise.resolve({ inputUsage: 1000, inputQuota: 6144, percentUsed: 16 });
+        };
+
+        const input = document.getElementById('ai-input');
+        input.value = 'hi';
+        input.dispatchEvent(new Event('input'));
+        document.getElementById('ai-send-button').click();
+        fakeController.fire('stream-complete', { content: 'response' });
+
+        setTimeout(function () {
+            updateArgs.should.exist;
+            updateArgs.percentUsed.should.equal(16);
+            done();
+        }, 50);
+    });
+
+    it('should call update with hasMessages false after conversation-cleared', function (done) {
+        let updateArgs = null;
+        const orig = aiChat._memoryIndicator.update.bind(aiChat._memoryIndicator);
+        aiChat._memoryIndicator.update = function (info) {
+            updateArgs = info;
+            orig(info);
+        };
+
+        fakeController.fire('conversation-cleared');
+
+        setTimeout(function () {
+            updateArgs.should.exist;
+            updateArgs.hasMessages.should.be.false;
+            done();
+        }, 50);
+    });
+
+    it('should re-enable the input and restore its placeholder after conversation-cleared when the input was disabled due to quota exhaustion', function (done) {
+        fakeController.getUsageInfo = function () {
+            return Promise.resolve({ inputUsage: 6144, inputQuota: 6144, percentUsed: 100 });
+        };
+
+        const input = document.getElementById('ai-input');
+        input.value = 'hi';
+        input.dispatchEvent(new Event('input'));
+        document.getElementById('ai-send-button').click();
+        fakeController.fire('stream-complete', { content: 'response' });
+
+        setTimeout(function () {
+            input.disabled.should.be.true;
+
+            fakeController.fire('conversation-cleared');
+
+            setTimeout(function () {
+                input.disabled.should.be.false;
+                input.placeholder.should.not.contain('full');
+                done();
+            }, 50);
+        }, 50);
+    });
+
+    it('should not call memoryIndicator.update after destroy is called while a getUsageInfo promise is in flight', function (done) {
+        var resolveFn;
+        fakeController.getUsageInfo = function () {
+            return new Promise(function (resolve) { resolveFn = resolve; });
+        };
+
+        const input = document.getElementById('ai-input');
+        input.value = 'hi';
+        input.dispatchEvent(new Event('input'));
+        document.getElementById('ai-send-button').click();
+        fakeController.fire('stream-complete', { content: 'response' });
+
+        var updateCalledAfterDestroy = false;
+        var indicator = aiChat._memoryIndicator;
+        var origUpdate = indicator.update.bind(indicator);
+        indicator.update = function (info) {
+            updateCalledAfterDestroy = true;
+            origUpdate(info);
+        };
+
+        aiChat.destroy();
+        aiChat = null;
+
+        resolveFn({ inputUsage: 100, inputQuota: 1000, percentUsed: 10 });
+
+        setTimeout(function () {
+            updateCalledAfterDestroy.should.be.false;
+            done();
+        }, 20);
+    });
+
+    it('should re-enable the input when percentUsed drops below 100 on a subsequent update with messages present', function (done) {
+        var callCount = 0;
+        fakeController.getUsageInfo = function () {
+            callCount++;
+            if (callCount === 1) {
+                return Promise.resolve({ inputUsage: 6144, inputQuota: 6144, percentUsed: 100 });
+            }
+            return Promise.resolve({ inputUsage: 100, inputQuota: 6144, percentUsed: 2 });
+        };
+
+        const input = document.getElementById('ai-input');
+        input.value = 'hi';
+        input.dispatchEvent(new Event('input'));
+        document.getElementById('ai-send-button').click();
+        fakeController.fire('stream-complete', { content: 'response' });
+
+        setTimeout(function () {
+            input.disabled.should.be.true;
+
+            fakeController.fire('capability-state-changed', { status: 'ready', message: 'ready', progress: 0 });
+
+            setTimeout(function () {
+                input.disabled.should.be.false;
+                done();
+            }, 50);
+        }, 50);
+    });
+
+    it('should not re-enable the send button if the input field is empty after clearing a quota-exhausted conversation', function (done) {
+        fakeController.getUsageInfo = function () {
+            return Promise.resolve({ inputUsage: 6144, inputQuota: 6144, percentUsed: 100 });
+        };
+
+        const input = document.getElementById('ai-input');
+        input.value = 'hi';
+        input.dispatchEvent(new Event('input'));
+        document.getElementById('ai-send-button').click();
+        fakeController.fire('stream-complete', { content: 'response' });
+
+        setTimeout(function () {
+            input.disabled.should.be.true;
+
+            input.value = '';
+            fakeController.fire('conversation-cleared');
+
+            setTimeout(function () {
+                const sendButton = document.getElementById('ai-send-button');
+                sendButton.disabled.should.be.true;
+                done();
+            }, 50);
+        }, 50);
+    });
+
+    it('should re-enable the input when a null usageInfo response follows a quota-exhausted state, so a transient null does not permanently lock the UI', function (done) {
+        var callCount = 0;
+        fakeController.getUsageInfo = function () {
+            callCount++;
+            if (callCount === 1) {
+                return Promise.resolve({ inputUsage: 6144, inputQuota: 6144, percentUsed: 100 });
+            }
+            return Promise.resolve(null);
+        };
+
+        const input = document.getElementById('ai-input');
+        input.value = 'hi';
+        input.dispatchEvent(new Event('input'));
+        document.getElementById('ai-send-button').click();
+        fakeController.fire('stream-complete', { content: 'response' });
+
+        setTimeout(function () {
+            input.disabled.should.be.true;
+
+            fakeController.fire('capability-state-changed', { status: 'ready', message: 'ready', progress: 0 });
+
+            setTimeout(function () {
+                input.disabled.should.be.false;
+                done();
+            }, 50);
+        }, 50);
     });
 });
