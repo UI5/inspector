@@ -111,7 +111,8 @@ sap.ui.require(['ToolsAPI'], function (ToolsAPI) {
                     action: 'on-receiving-initial-data',
                     applicationInformation: applicationUtils.getApplicationInfo(frameworkInformation),
                     controlTree: controlUtils.getControlTreeModel(controlTreeModel, frameworkInformation.commonInformation),
-                    elementRegistry: ToolsAPI.getRegisteredElements()
+                    elementRegistry: ToolsAPI.getRegisteredElements(),
+                    flexibilityInformation: ToolsAPI.getFlexibilityInformation()
                 });
             });
         },
@@ -239,6 +240,12 @@ sap.ui.require(['ToolsAPI'], function (ToolsAPI) {
                 return;
             }
 
+            this['do-control-flexibility-property-change']({
+                detail: {
+                    data: oData
+                }
+            });
+
             _setControlProperties(oControl, oData);
 
             // Update the DevTools with the actual property value of the control
@@ -305,6 +312,49 @@ sap.ui.require(['ToolsAPI'], function (ToolsAPI) {
         },
 
         /**
+         * Change control property, based on editing in the DataView.
+         * @param {Object} event
+         */
+        'do-control-flexibility-property-change': function (event) {
+            var oData = event.detail.data;
+            var sControlId = oData.controlId;
+            var sProperty = oData.property;
+            var vNewValue = oData.value;
+            var oControl = controlUtils.getElementById(sControlId);
+
+            if (!oControl) {
+                return;
+            }
+
+            var sControlClass = oControl.getMetadata().getName();
+            var sChangeType = 'propertyChange';
+            var sStateKey = [sControlId, sChangeType, sProperty].join('_');
+            var vInitialValue;
+
+            oData.controlClass = sControlClass;
+            oData.type = sChangeType;
+
+            if (ToolsAPI.isStateExists(sStateKey)) {
+                oData.initial = ToolsAPI.getStateValue(sStateKey) === vNewValue;
+            } else {
+                try {
+                    vInitialValue = oControl['get' + sProperty]();
+                    ToolsAPI.setStateValue(sStateKey, vInitialValue);
+                } catch (error) {
+                    // The control may not expose a getter for this property; ignore gracefully.
+                }
+                oData.initial = false;
+            }
+
+            ToolsAPI.addFlexibilityInformation(oData);
+
+            message.send({
+                action: 'on-control-flexibility-property-change',
+                flexibilityInformation: ToolsAPI.getFlexibilityInformation()
+            });
+        },
+
+        /**
          * Selects Control with context menu click.
          * @param {Object} event
          */
@@ -314,6 +364,13 @@ sap.ui.require(['ToolsAPI'], function (ToolsAPI) {
                 target: event.detail.target,
                 frameId: event.detail.frameId
             });
+        },
+
+        /**
+         * Download the registered flexibility changes.
+         */
+        'do-flexibility-download': function () {
+            ToolsAPI.downloadFlexibilityInformation();
         },
 
         /**
