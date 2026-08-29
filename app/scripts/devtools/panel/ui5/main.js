@@ -1,4 +1,5 @@
 
+// jshint maxstatements:70
 (function () {
     'use strict';
 
@@ -23,8 +24,9 @@
     var XMLDetailView = require('../../../modules/ui/XMLDetailView.js');
     var ControllerDetailView = require('../../../modules/ui/ControllerDetailView.js');
     var OElementsRegistryMasterView = require('../../../modules/ui/OElementsRegistryMasterView.js');
+    var FlexibilityRegistryDetailView = require('../../../modules/ui/FlexibilityRegistryDetailView.js');
+    var FlexibilityRegistryMasterView = require('../../../modules/ui/FlexibilityRegistryMasterView.js');
     var AIChat = require('../../../modules/ui/AIChat.js');
-
 
     // Apply theme
     // ================================================================================
@@ -53,6 +55,10 @@
     var framesSelect;
     var displayFrameData;
     var updateSupportabilityOverlay;
+    var oFlexibilityHorizontalSplitter;
+    var oFlexibilityDetailView;
+    var oFlexibilityRegistryMasterView;
+
     // Synthetic root inserted under the merged tree (mixed pages) to group all
     // WebC controls under one expandable header. Its id ('__webc_root__') is
     // reserved: selecting or hovering it in the tree must be a no-op since it
@@ -438,6 +444,7 @@
             UI5Data.selectedElementId && controlTree.setSelectedElement(UI5Data.selectedElementId);
             appInfo.setData(UI5Data.applicationInformation);
             UI5Data.elementRegistry && oElementsRegistryMasterView.setData(UI5Data.elementRegistry);
+            UI5Data.flexibilityInformation && oFlexibilityRegistryMasterView.setData(UI5Data.flexibilityInformation);
 
             controlProperties.setData(UI5Data.controlProperties || {});
             controlBindingInfoLeftDataView.setData(UI5Data.controlBindings || {});
@@ -543,6 +550,45 @@
     }
 
     // ================================================================================
+    // 'Flexibility information' tab
+    // ================================================================================
+
+    oFlexibilityHorizontalSplitter = new Splitter('flexibility-horizontal-splitter', {
+        endContainerWidth: '50%',
+        isEndContainerClosable: true,
+        hideEndContainer: true
+    });
+
+    oFlexibilityDetailView = new FlexibilityRegistryDetailView('flexibility-tab-detail');
+    oFlexibilityRegistryMasterView = new FlexibilityRegistryMasterView('flexibility-tab-master', {
+        /**
+         * Method fired when a flexibility entry is selected.
+         * @param {Object} data
+         */
+        onSelectItem: function (data) {
+            oFlexibilityHorizontalSplitter.showEndContainer();
+            oFlexibilityDetailView.update(data._original);
+        },
+
+        /**
+         * Clears all flexibility entry log items.
+         */
+        onClearItems: function () {
+            oFlexibilityDetailView.clear();
+            oFlexibilityHorizontalSplitter.hideEndContainer();
+        },
+
+        /**
+         * Downloads the registered flexibility changes.
+         */
+        onDownloadItems: function () {
+            port.postMessage({
+                action: 'do-flexibility-download'
+            });
+        }
+    });
+
+    // ================================================================================
     // Communication
     // ================================================================================
 
@@ -594,6 +640,7 @@
             frameData[frameId].controlTreeUI5 = message.controlTree;
             frameData[frameId].applicationInformation = message.applicationInformation;
             frameData[frameId].elementRegistry = message.elementRegistry;
+            frameData[frameId].flexibilityInformation = message.flexibilityInformation;
 
             if (framesSelect.getSelectedId() === frameId) {
                 controlTree.setData(_getMergedControlTree(frameId));
@@ -602,6 +649,7 @@
                 aiChat.setUrl(frameData[frameId].url);
                 appInfo.setData(message.applicationInformation);
                 oElementsRegistryMasterView.setData(message.elementRegistry);
+                oFlexibilityRegistryMasterView.setData(message.flexibilityInformation);
             }
         },
 
@@ -847,6 +895,21 @@
 
             if (bFrameUpdate) {
                 framesSelect.setData(frameData);
+            }
+        },
+
+        /**
+         * Updates the Flexibility Registry with the registered flexibility changes.
+         * @param {Object} message
+         */
+        'on-control-flexibility-property-change': function (message, messageSender) {
+            var frameId = messageSender.frameId;
+            if (!frameData[frameId]) {
+                return;
+            }
+            frameData[frameId].flexibilityInformation = message.flexibilityInformation;
+            if (framesSelect.getSelectedId() === frameId) {
+                oFlexibilityRegistryMasterView.setData(message.flexibilityInformation);
             }
         },
 

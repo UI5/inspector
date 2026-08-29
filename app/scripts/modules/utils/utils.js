@@ -18,11 +18,11 @@ function _resolveMessage(options) {
         return;
     }
 
-    var message = options.message;
-    var messageSender = options.messageSender;
-    var sendResponse = options.sendResponse;
-    var actions = options.actions;
-    var messageHandlerFunction = actions[message.action];
+    const message = options.message;
+    const messageSender = options.messageSender;
+    const sendResponse = options.sendResponse;
+    const actions = options.actions;
+    const messageHandlerFunction = actions[message.action];
 
     if (messageHandlerFunction) {
         messageHandlerFunction(message, messageSender, sendResponse);
@@ -36,7 +36,7 @@ function _resolveMessage(options) {
  * @private
  */
 function _convertUI5TimeStampToHumanReadableFormat(timeStamp) {
-    var formattedTime = '';
+    let formattedTime = '';
 
     if (!timeStamp) {
         return;
@@ -67,7 +67,7 @@ function _convertUI5TimeStampToHumanReadableFormat(timeStamp) {
  */
 function _setOSClassNameToBody() {
     // Set a body attribute for detecting and styling according the OS
-    var osName = '';
+    let osName = '';
     if (navigator.appVersion.indexOf('Win') !== -1) {
         osName = 'windows';
     }
@@ -86,10 +86,10 @@ function _setOSClassNameToBody() {
  * @private
  */
 function _applyTheme(theme) {
-    var oldLink = document.getElementById('ui5inspector-theme');
-    var head = document.getElementsByTagName('head')[0];
-    var link = document.createElement('link');
-    var url = '/styles/themes/light/light.css';
+    let oldLink = document.getElementById('ui5inspector-theme');
+    let head = document.getElementsByTagName('head')[0];
+    let link = document.createElement('link');
+    let url = '/styles/themes/light/light.css';
 
     if (oldLink) {
         oldLink.remove();
@@ -128,8 +128,8 @@ function _getPort () {
  * @param {Object} message
  */
 function _sendToAll(message, callback) {
-    var frameId = message.frameId;
-    var options;
+    const frameId = message.frameId;
+    let options;
     chrome.windows.getCurrent().then(w => {
         chrome.tabs.query({ active: true, windowId: w.id }).then(tabs => {
             // options.frameId allows to send the message to

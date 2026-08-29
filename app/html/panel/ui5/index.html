@@ -17,6 +17,7 @@
                 <tab id="app-info-tab">Application Information</tab>
                 <tab id="odata-tab">OData Requests</tab>
                 <tab id="elements-registry-tab">Elements Registry</tab>
+                <tab id="flexibility-registry-tab">Flexibility Registry</tab>
                 <tab id="ai-tab">AI Assistant</tab>
             </tabs>
             <contents>
@@ -157,6 +158,24 @@
                     </splitter>
                 </content>
                 <!-- Elements registry /ends-->
+
+                <!-- Flexibility /start-->
+                <content for="flexibility-registry-tab" class="flexibilityTab">
+                    <splitter id="flexibility-horizontal-splitter">
+                        <!-- SplitContainer begin side /start-->
+                        <start>
+                            <flexibility-master-view id="flexibility-tab-master"/>
+                        </start>
+                        <!-- SplitContainer begin side /ends-->
+
+                        <!-- SplitContainer end side /start-->
+                        <end>
+                            <flexibility-detail-view id="flexibility-tab-detail"/>
+                        </end>
+                        <!-- SplitContainer end side /ends-->
+                    </splitter>
+                </content>
+                <!-- Flexibility /ends-->
 
                 <!-- AI Chat /start-->
                 <content for="ai-tab">

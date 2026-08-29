@@ -1,5 +1,5 @@
-sap.ui.define(["sap/ui/core/Core", "sap/ui/core/Element", "sap/ui/core/ElementMetadata"],
-    function (Core, Element, ElementMetadata) {
+sap.ui.define(["sap/ui/core/Core", "sap/ui/core/Element", "sap/ui/core/ElementMetadata", "sap/ui/core/util/File", "sap/ui/thirdparty/jszip"],
+    function (Core, Element, ElementMetadata, File, JSZip) {
         "use strict";
 
         var BaseConfig = sap.ui.require('sap/base/config/_Configuration');
@@ -1088,6 +1088,316 @@ sap.ui.define(["sap/ui/core/Core", "sap/ui/core/Element", "sap/ui/core/ElementMe
             }
         }
 
+        var stateRegistry = {
+            states: {},
+
+            /**
+             * Checks whether a state with the given key is registered.
+             * @param {string} sStateKey
+             * @returns {boolean}
+             */
+            isStateExists: function (sStateKey) {
+                return stateRegistry.states.hasOwnProperty(sStateKey);
+            },
+
+            /**
+             * Stores a state value under the given key.
+             * @param {string} sStateKey
+             * @param {*} sStateValue
+             */
+            setStateValue: function (sStateKey, sStateValue) {
+                stateRegistry.states[sStateKey] = sStateValue;
+            },
+
+            /**
+             * Returns the state value stored under the given key.
+             * @param {string} sStateKey
+             * @returns {*}
+             */
+            getStateValue: function (sStateKey) {
+                return stateRegistry.states[sStateKey];
+            }
+        };
+
+        var flexibilityRegistry = {
+            changes: [],
+
+            /**
+             * Flattens the nested structure of a change object into a flat key-value map.
+             * @param {Object} currentNode
+             * @param {Object} target
+             * @param {string} [flattenedKey]
+             */
+            traverseAndFlatten: function traverseAndFlatten(currentNode, target, flattenedKey) {
+                for (var key in currentNode) {
+                    if (currentNode.hasOwnProperty(key)) {
+                        var newKey;
+                        if (flattenedKey === undefined) {
+                            newKey = key;
+                        } else {
+                            newKey = flattenedKey + '.' + key;
+                        }
+
+                        var value = currentNode[key];
+                        if (typeof value === "object") {
+                            flexibilityRegistry.traverseAndFlatten(value, target, newKey);
+                        } else {
+                            target[newKey] = value;
+                        }
+                    }
+                }
+            },
+
+            /**
+             * Returns all registered flexibility changes.
+             * @returns {Array}
+             */
+            getRegisteredChanges: function () {
+                return flexibilityRegistry.changes;
+            },
+
+            /**
+             * Returns the registered flexibility changes, flattened for the DataGrid.
+             * @returns {Array}
+             */
+            getFlexibilityInformation: function () {
+                var aChanges = flexibilityRegistry.getRegisteredChanges();
+
+                return aChanges.map(function (oFileContent) {
+                    var oFlattedFileContent = {};
+                    flexibilityRegistry.traverseAndFlatten(oFileContent, oFlattedFileContent);
+                    oFlattedFileContent["content.newValue"] = String(oFlattedFileContent["content.newValue"]);
+                    oFlattedFileContent._original = jQuery.extend(true, {}, oFileContent);
+                    return oFlattedFileContent;
+                });
+            },
+
+            /**
+             * Finds a registered change by file name.
+             * @param {Object} oFileContent
+             * @returns {Object|undefined}
+             */
+            findByFileName: function (oFileContent) {
+                return flexibilityRegistry.getRegisteredChanges().find(function (oChange) {
+                    return oChange.fileName === oFileContent.fileName;
+                });
+            },
+
+            /**
+             * Finds a registered change by selector and property.
+             * @param {Object} oFileContent
+             * @returns {Object|undefined}
+             */
+            findBySelectorProperty: function (oFileContent) {
+                return flexibilityRegistry.getRegisteredChanges().find(function (oChange) {
+                    return oChange.selector.id === oFileContent.selector.id &&
+                        oChange.content.property === oFileContent.content.property;
+                });
+            },
+            createFileContent: function (data) {
+                var creationDate = new Date();
+                var creationDateISO = creationDate.toISOString();
+                var creationDateTime = creationDate.getTime();
+                var oFileContent = {};
+
+                var getAppLifeCycleService = function () {
+                    var oUShellContainer = jQuery.sap.getObject("sap.ushell.Container");
+                    var oAppLifeCycle;
+
+                    if (oUShellContainer) {
+                        oAppLifeCycle = oUShellContainer.getService("AppLifeCycle");
+                    }
+                    return oAppLifeCycle;
+                };
+
+                var getComponentName = function () {
+                    var oAppLifeCycle = getAppLifeCycleService();
+                    var oCurrentApplication;
+                    var oComponentInstance;
+                    var sComponentName = "";
+
+                    if (oAppLifeCycle) {
+                        oCurrentApplication = oAppLifeCycle.getCurrentApplication();
+                    }
+                    if (oCurrentApplication) {
+                        oComponentInstance = oCurrentApplication.componentInstance;
+                    }
+                    if (oComponentInstance) {
+                        sComponentName = oComponentInstance.getMetadata().getName();
+                    }
+                    return sComponentName;
+                };
+
+                var getChangeType = function () {
+                    return data.type;
+                };
+
+                var getReference = function () {
+                    return getComponentName();
+                };
+
+                var getProjectId = function () {
+                    var sComponentName = getComponentName();
+
+                    return sComponentName.split(".").slice(0, -1).join(".");
+                };
+
+                var getNamespace = function () {
+                    return "apps/" + getProjectId() + "/changes/";
+                };
+
+                var getProperty = function () {
+                    var sProperty = String(data.property);
+
+                    return sProperty.charAt(0).toLowerCase() + sProperty.substring(1);
+                };
+
+                var getOriginalLanguage = function () {
+                    var sLanguage = _getLanguage();
+
+                    return sLanguage ? String(sLanguage).toUpperCase() : "EN";
+                };
+
+                var getSapUi5Version = function () {
+                    var vVersion = _getVersion();
+
+                    return vVersion ? String(vVersion) : "";
+                };
+
+                var getFileName = function () {
+                    return "id_" + creationDateTime + "_" + getChangeType();
+                };
+
+                switch (getChangeType()) {
+                    case "propertyChange":
+                    case "propertyBindingChange":
+                        jQuery.extend(true, oFileContent, {
+                            "fileName": getFileName(),
+                            "fileType": "change",
+                            "changeType": getChangeType(),
+                            "moduleName": "",
+                            "reference": getReference(),
+                            "packageName": "$TMP",
+                            "content": {
+                                "property": getProperty(),
+                                "newValue": data.value
+                            },
+                            "selector": {
+                                "id": data.controlId,
+                                "type": data.controlClass,
+                                "idIsLocal": false
+                            },
+                            "layer": "VENDOR",
+                            "texts": {},
+                            "namespace": getNamespace(),
+                            "projectId": getProjectId(),
+                            "creation": creationDateISO,
+                            "originalLanguage": getOriginalLanguage(),
+                            "conditions": {},
+                            "context": "",
+                            "support": {
+                                "generator": "Change.createInitialFileContent",
+                                "service": "",
+                                "user": "",
+                                "sapui5Version": getSapUi5Version(),
+                                "sourceChangeFileName": "",
+                                "compositeCommand": ""
+                            },
+                            "oDataInformation": {},
+                            "dependentSelector": {},
+                            "validAppVersions": {
+                                "creation": "1.0.0",
+                                "from": "1.0.0",
+                                "to": "1.0.0"
+                            },
+                            "jsOnly": false,
+                            "variantReference": "",
+                            "appDescriptorChange": false
+                        });
+                        break;
+
+                    default:
+                        break;
+                }
+                return oFileContent;
+            },
+
+            /**
+             * Registers a flexibility change.
+             * @param {Object} data - change data from the DataView
+             */
+            addFlexibilityInformation: function (data) {
+                var aChanges = flexibilityRegistry.getRegisteredChanges();
+                var oNewFile = flexibilityRegistry.createFileContent(data);
+                var oOldFile = flexibilityRegistry.findBySelectorProperty(oNewFile);
+
+                if (oOldFile) {
+                    flexibilityRegistry.removeFlexibilityInformation(oOldFile);
+                }
+
+                if (data.initial) {
+                    return;
+                }
+
+                aChanges.push(oNewFile);
+            },
+
+            /**
+             * Removes a registered flexibility change.
+             * @param {Object} oFileContent
+             */
+            removeFlexibilityInformation: function (oFileContent) {
+                if (!oFileContent) {
+                    return;
+                }
+                var aChanges = flexibilityRegistry.getRegisteredChanges();
+                var oChange = flexibilityRegistry.findByFileName(oFileContent);
+                var iIndex = aChanges.indexOf(oChange);
+
+                if (iIndex !== -1) {
+                    aChanges.splice(iIndex, 1);
+                }
+            },
+
+            /**
+             * Downloads all registered flexibility changes as a zip archive.
+             */
+            downloadFlexibilityInformation: function () {
+                var aChanges = flexibilityRegistry.getRegisteredChanges();
+                var JSZipConstructor = JSZip || window.JSZip;
+                var oZipFile = new JSZipConstructor();
+
+                aChanges.forEach(function (oFileContent) {
+                    var sFullFileName = oFileContent.fileName + ".change";
+
+                    oZipFile.file(sFullFileName, JSON.stringify(oFileContent, null, "\t"));
+                });
+
+                var fnSaveZip = function (oZipBlob) {
+                    // Save the zip archive
+                    var oFileInfo = {
+                        blob: oZipBlob,
+                        name: "FlexibilityRegistry",
+                        extension: "zip",
+                        mimeType: "application/zip"
+                    };
+
+                    File.save(oFileInfo.blob, oFileInfo.name, oFileInfo.extension, oFileInfo.mimeType);
+                };
+
+                var fnGenerateZip = function () {
+                    if (oZipFile.generateAsync) {
+                        return oZipFile.generateAsync({type: "blob"});
+                    }
+                    return oZipFile.generate({type: "blob"});
+                };
+
+                Promise.resolve()
+                    .then(fnGenerateZip)
+                    .then(fnSaveZip);
+            }
+        }
+
         // ================================================================================
         // Public API
         // ================================================================================
@@ -1174,6 +1484,52 @@ sap.ui.define(["sap/ui/core/Core", "sap/ui/core/Element", "sap/ui/core/ElementMe
                 return controlInformation._getEvents(controlId);
             },
 
+            getRegisteredElements: elementRegistry.getRegisteredElements,
+
+            /**
+             * Returns the registered flexibility changes, flattened for the DataGrid.
+             * @returns {Array}
+             */
+            getFlexibilityInformation: flexibilityRegistry.getFlexibilityInformation,
+
+            /**
+             * Registers a flexibility change.
+             * @param {Object} data - change data from the DataView
+             */
+            addFlexibilityInformation: flexibilityRegistry.addFlexibilityInformation,
+
+            /**
+             * Removes a registered flexibility change.
+             * @param {Object} oFileContent
+             */
+            removeFlexibilityInformation: flexibilityRegistry.removeFlexibilityInformation,
+
+            /**
+             * Downloads all registered flexibility changes as a zip archive.
+             */
+            downloadFlexibilityInformation: flexibilityRegistry.downloadFlexibilityInformation,
+
+            /**
+             * Checks whether a state with the given key is registered.
+             * @param {string} sStateKey
+             * @returns {boolean}
+             */
+            isStateExists: stateRegistry.isStateExists,
+
+            /**
+             * Stores a state value under the given key.
+             * @param {string} sStateKey
+             * @param {*} sStateValue
+             */
+            setStateValue: stateRegistry.setStateValue,
+
+            /**
+             * Returns the state value stored under the given key.
+             * @param {string} sStateKey
+             * @returns {*}
+             */
+            getStateValue: stateRegistry.getStateValue,
+
             /**
              * Removes event listeners from the controls.
              * @param {string} controlId
@@ -1197,9 +1553,7 @@ sap.ui.define(["sap/ui/core/Core", "sap/ui/core/Element", "sap/ui/core/ElementMe
              */
             clearEvents: function(controlId) {
                 return controlInformation._clearEvents(controlId);
-            },
-
-            getRegisteredElements: elementRegistry.getRegisteredElements
+            }
         };
 
     });
