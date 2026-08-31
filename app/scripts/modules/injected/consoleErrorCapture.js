@@ -10,7 +10,7 @@ const consoleErrorBuffer = require('./consoleErrorBuffer.js');
  * @param {Window} win - The inspected page's window.
  * @param {Object} [options]
  * @param {Function} [options.onRecord] - Called after every recorded event.
- * @returns {{buffer: Object, uninstall: Function}}
+ * @returns {{buffer: Object}}
  */
 function install(win, options) {
     options = options || {};
@@ -148,14 +148,7 @@ function install(win, options) {
     };
 
     const handle = {
-        buffer: buffer,
-        uninstall: function () {
-            win.console.error = originalError;
-            win.console.warn = originalWarn;
-            win.onerror = originalOnError;
-            win.onunhandledrejection = originalOnUnhandled;
-            delete win.__ui5InspectorConsoleErrorCaptureInstalled;
-        }
+        buffer: buffer
     };
     win.__ui5InspectorConsoleErrorCaptureInstalled = handle;
     return handle;

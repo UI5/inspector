@@ -47,7 +47,6 @@
         border-radius: 4px;
         cursor: pointer;
         font-size: 12px;
-        margin-left: 8px;
 
         &:hover:not(:disabled) {
             background-color: darken(@lighter-blue, 10%);
@@ -59,12 +58,50 @@
         }
     }
 
+    .banner-action-button {
+        padding: 6px 12px;
+        border: 1px solid @lighter-blue;
+        background-color: transparent;
+        color: @lighter-blue;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+
+        &:hover {
+            background-color: fade(@lighter-blue, 10%);
+        }
+    }
+
+    .banner-actions {
+        display: flex;
+        align-items: center;
+
+        > button + button {
+            margin-left: 8px;
+        }
+    }
+
     .clear-history-button {
         background-color: @gray;
         border-color: @gray;
 
         &:hover:not(:disabled) {
             background-color: @gray-dark;
+        }
+    }
+
+    .settings-button {
+        padding: 4px 8px;
+        border: 1px solid @border-gray-lighter;
+        background-color: transparent;
+        color: @text-color;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+
+        &:hover {
+            background-color: @bg-gray-lightest;
         }
     }
 
@@ -99,10 +136,9 @@
         }
     }
 
-    // Recoverable session failure: framed as a warning, not a terminal
+    // Recoverable failure: framed as a warning, not a terminal
     // error, because the developer can recover via clear-history or a
     // controller-driven reseed on the next clearConversation()/setUrl().
-    &.status-session-failed,
     &.status-streaming-failed {
         background-color: fade(@red, 15%);
         border-color: @border-gray-lighter;
@@ -871,5 +907,128 @@
     }
     80%, 100% {
         content: '...';
+    }
+}
+
+// Settings modal
+.ai-settings-modal-root {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    .ai-settings-backdrop {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(2px);
+    }
+
+    .ai-settings-modal {
+        position: relative;
+        background: @bg-white;
+        border-radius: 8px;
+        padding: 24px;
+        max-width: 480px;
+        width: 90%;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        z-index: 1;
+        animation: confirmSlideIn 0.2s ease-out;
+    }
+
+    .ai-settings-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: @text-color;
+        margin-bottom: 16px;
+    }
+
+    .ai-settings-body {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-bottom: 20px;
+    }
+
+    .ai-settings-provider-row,
+    .ai-settings-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+
+        label {
+            font-size: 12px;
+            font-weight: 600;
+            color: @gray-dark;
+        }
+
+        select,
+        input {
+            padding: 6px 8px;
+            border: 1px solid @border-gray-lighter;
+            border-radius: 4px;
+            font-size: 13px;
+            color: @text-color;
+            background-color: @bg-white;
+
+            &:focus {
+                outline: none;
+                border-color: @lighter-blue;
+            }
+        }
+    }
+
+    .ai-settings-fields {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .ai-settings-buttons {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+    }
+
+    .ai-settings-cancel,
+    .ai-settings-save {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        transition: background-color 0.2s;
+    }
+
+    .ai-settings-cancel {
+        background-color: @bg-gray-lightest;
+        color: @text-color;
+
+        &:hover {
+            background-color: darken(@bg-gray-lightest, 10%);
+        }
+    }
+
+    .ai-settings-save {
+        background-color: @lighter-blue;
+        color: @white;
+
+        &:hover:not(:disabled) {
+            background-color: darken(@lighter-blue, 10%);
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
     }
 }

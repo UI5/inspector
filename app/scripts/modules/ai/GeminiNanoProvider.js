@@ -63,20 +63,15 @@ GeminiNanoProvider.prototype._send = function (message) {
     this._port.postMessage(message);
 };
 
+const CAPABILITY_STATE_BY_PORT_STATUS = {
+    'ready': 'ready',
+    'needs-download': 'downloadable',
+    'downloading': 'downloading',
+    'unsupported': 'unsupported'
+};
+
 function toCanonicalCapabilityState(portStatus) {
-    if (portStatus === 'ready') {
-        return 'ready';
-    }
-    if (portStatus === 'needs-download') {
-        return 'downloadable';
-    }
-    if (portStatus === 'downloading') {
-        return 'downloading';
-    }
-    if (portStatus === 'unsupported') {
-        return 'unsupported';
-    }
-    return 'unavailable';
+    return CAPABILITY_STATE_BY_PORT_STATUS[portStatus] || 'unavailable';
 }
 
 function abortError() {
@@ -92,12 +87,7 @@ function messagesEqual(a, b) {
     if (!a || !b || a.length !== b.length) {
         return false;
     }
-    for (let i = 0; i < a.length; i++) {
-        if (a[i].role !== b[i].role || a[i].content !== b[i].content) {
-            return false;
-        }
-    }
-    return true;
+    return a.every((m, i) => m.role === b[i].role && m.content === b[i].content);
 }
 
 /**
@@ -131,25 +121,19 @@ GeminiNanoProvider.prototype.downloadModel = function (onProgress) {
     return new Promise((resolve, reject) => {
         this._connect();
 
+        const cleanup = () => {
+            this._off('download-progress');
+            this._off('download-complete');
+            this._off('error');
+        };
+
         this._on('download-progress', (message) => {
             if (typeof onProgress === 'function') {
                 onProgress(message.progress);
             }
         });
-
-        this._on('download-complete', () => {
-            this._off('download-progress');
-            this._off('download-complete');
-            this._off('error');
-            resolve();
-        });
-
-        this._on('error', (message) => {
-            this._off('download-progress');
-            this._off('download-complete');
-            this._off('error');
-            reject(new Error(message.message));
-        });
+        this._on('download-complete', () => { cleanup(); resolve(); });
+        this._on('error', (message) => { cleanup(); reject(new Error(message.message)); });
 
         this._send({ type: 'download-model' });
     });
@@ -164,18 +148,17 @@ GeminiNanoProvider.prototype._createSession = function (prefix) {
     return new Promise((resolve, reject) => {
         this._connect();
 
-        this._on('session-created', () => {
+        const cleanup = () => {
             this._off('session-created');
             this._off('error');
+        };
+
+        this._on('session-created', () => {
+            cleanup();
             this._sessionPrefix = prefix.slice();
             resolve();
         });
-
-        this._on('error', (message) => {
-            this._off('session-created');
-            this._off('error');
-            reject(new Error(message.message));
-        });
+        this._on('error', (message) => { cleanup(); reject(new Error(message.message)); });
 
         this._send({
             type: 'create-session',

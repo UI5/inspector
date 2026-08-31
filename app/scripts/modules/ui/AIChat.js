@@ -2,6 +2,33 @@
 
 const AssistantController = require('../ai/AssistantController.js');
 const AssistantTranscript = require('../ai/AssistantTranscript.js');
+const AISettingsModal = require('./AISettingsModal.js');
+const providersRegistryDefault = require('../ai/providers/index.js');
+
+/**
+ * Promise-adapted view of `chrome.storage.local`. Kept private so unit tests don't need `chrome`
+ * — the constructor accepts an injected `storage`.
+ */
+function defaultStorage() {
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+        return {
+            get: function () { return Promise.resolve({}); },
+            set: function () { return Promise.resolve(); }
+        };
+    }
+    return {
+        get: function (keys) {
+            return new Promise(function (resolve) {
+                chrome.storage.local.get(keys, function (data) { resolve(data || {}); });
+            });
+        },
+        set: function (obj) {
+            return new Promise(function (resolve) {
+                chrome.storage.local.set(obj, function () { resolve(); });
+            });
+        }
+    };
+}
 
 /**
  * Thin view over the assistant. Owns the banner, input area, confirm dialog, token counter, and
@@ -20,20 +47,39 @@ const AssistantTranscript = require('../ai/AssistantTranscript.js');
  *     {@link PromptBuilder#buildUserPrompt} on each send.
  * @param {Function} [options.clearConsoleErrors] - Clears the recent-console-errors buffer for the
  *     current URL. Called by the controller on Clear Conversation and URL change.
+ * @param {string} [options.providerName] - Registry key of the provider to construct. Defaults to
+ *     `'gemini-nano'`. Ignored when `controller` is provided.
+ * @param {Object} [options.providerConfig] - Config object passed to the provider constructor.
+ *     Ignored when `controller` is provided.
  * @param {AssistantController} [options.controller] - Pre-built controller for tests. Defaults to a
  *                                                     fresh AssistantController.
  * @param {Function} [options.transcriptFactory] - Test seam: `(container, options) => AssistantTranscript`.
  *                                                 Wired with `{ onCopyFailed }` so the transcript
  *                                                 can report clipboard failures back to the view.
+ * @param {Object} [options.providersRegistry] - Registry of providers keyed by name. Defaults to
+ *     the app's built-in registry. The settings modal reads `displayName` and `configSchema` from
+ *     each entry.
+ * @param {Object} [options.storage] - `chrome.storage.local`-compatible surface used to persist
+ *     provider selection and per-provider config. Must expose `get(keys) => Promise<Object>` and
+ *     `set(obj) => Promise<void>`. Defaults to a promise-adapted `chrome.storage.local`.
+ * @param {Function} [options.settingsModalFactory] - Test seam: `(options) => AISettingsModal`.
+ *                                                    Defaults to constructing an `AISettingsModal`.
  * @constructor
  */
 function AIChat(containerId, {
     getAppInfo = null,
     getConsoleErrors = null,
     clearConsoleErrors = null,
+    providerName = 'gemini-nano',
+    providerConfig = {},
     controller = null,
     transcriptFactory = function (host, options) {
         return new AssistantTranscript(host, options);
+    },
+    providersRegistry = providersRegistryDefault.PROVIDERS,
+    storage = null,
+    settingsModalFactory = function (options) {
+        return new AISettingsModal(options);
     }
 } = {}) {
     this._container = document.getElementById(containerId);
@@ -42,13 +88,17 @@ function AIChat(containerId, {
     this._getConsoleErrors = getConsoleErrors;
     this._clearConsoleErrors = clearConsoleErrors;
     this._controller = controller || new AssistantController({
-        providerName: 'gemini-nano',
-        providerConfig: {},
+        providerName: providerName,
+        providerConfig: providerConfig,
         getAppInfo: this._getAppInfo || function () { return null; },
         getConsoleErrors: this._getConsoleErrors || function () { return []; },
         clearConsoleErrors: this._clearConsoleErrors || function () {}
     });
     this._transcriptFactory = transcriptFactory;
+    this._providersRegistry = providersRegistry;
+    this._storage = storage || defaultStorage();
+    this._settingsModalFactory = settingsModalFactory;
+    this._settingsModal = null;
 
     this._isStreaming = false;
     this._streamingHandle = null;
@@ -66,13 +116,10 @@ AIChat.prototype.init = function () {
     });
     this._attachEventListeners();
     this._attachControllerListeners();
-    this._checkModelAvailability();
+    this._controller.initialize();
 };
 
-/**
- * The messages container is created here but its contents are owned by {@link AssistantTranscript}.
- * @private
- */
+/** Renders the shell HTML. The messages container's contents are owned by {@link AssistantTranscript}. */
 AIChat.prototype._render = function () {
     this._container.innerHTML = `
         <div class="ai-chat-wrapper" role="region" aria-label="AI Chat">
@@ -81,12 +128,18 @@ AIChat.prototype._render = function () {
                     <span class="status-indicator"></span>
                     <span class="status-text">Checking model status...</span>
                 </div>
-                <button class="download-button" id="ai-download-button" style="display: none;" aria-label="Download AI model">
-                    Download Model
-                </button>
-                <button class="clear-history-button" id="ai-clear-history-button" style="display: none;" aria-label="Clear chat history">
-                    Clear History
-                </button>
+                <div class="banner-actions">
+                    <button class="download-button" id="ai-download-button" style="display: none;" aria-label="Download AI model">
+                        Download Model
+                    </button>
+                    <button class="banner-action-button" id="ai-banner-action" hidden aria-label="Open settings">
+                        Open settings
+                    </button>
+                    <button class="clear-history-button" id="ai-clear-history-button" style="display: none;" aria-label="Clear chat history">
+                        Clear History
+                    </button>
+                    <button class="settings-button" id="ai-settings-button" aria-label="Settings" title="Settings">⚙</button>
+                </div>
             </div>
 
             <div class="ai-messages-wrapper">
@@ -167,6 +220,13 @@ AIChat.prototype._attachEventListeners = function () {
         this._handleClearHistory();
     });
 
+    ['ai-settings-button', 'ai-banner-action'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('click', () => { this._openSettings(); });
+        }
+    });
+
     contextClearButton.addEventListener('click', () => {
         this._clearContext();
     });
@@ -212,10 +272,7 @@ AIChat.prototype._attachControllerListeners = function () {
         this._transcript.reset(turns || []);
         if (turns && turns.length > 0) {
             this._hasMessages = true;
-            const clearButton = document.getElementById('ai-clear-history-button');
-            if (clearButton) {
-                clearButton.style.display = 'inline-block';
-            }
+            this._setClearHistoryVisible(true);
         }
     });
 
@@ -245,10 +302,7 @@ AIChat.prototype._attachControllerListeners = function () {
         this._transcript.clear();
         this._hasShownUsageWarning = false;
         this._hasMessages = false;
-        const clearButton = document.getElementById('ai-clear-history-button');
-        if (clearButton) {
-            clearButton.style.display = 'none';
-        }
+        this._setClearHistoryVisible(false);
         this._updateTokenCounter();
     });
 
@@ -257,20 +311,13 @@ AIChat.prototype._attachControllerListeners = function () {
     });
 };
 
-/**
- * Canonical capability state config. The banner CSS class is `status-<key>` for every key.
- * `skip: true` means no banner update. `showClearButton: true` makes the clear-history button
- * visible. `updateTokens: true` refreshes the token counter. Unknown statuses route to `unavailable`.
- * @private
- */
+/** Capability status → view flags. Banner class is `status-<key>`. Unknown statuses route to `unavailable`. */
 AIChat._CAPABILITY_CONFIG = {
-    'unsupported':      {},
-    'unavailable':      {},
+    'unsupported':      { disableInput: true },
+    'unavailable':      { disableInput: true },
     'downloadable':     {},
     'downloading':      {},
-    'ready':            { showClearButton: true, updateTokens: true },
-    // Recovery: clearConversation destroys the broken session and reseeds.
-    'session-failed':   { showClearButton: true },
+    'ready':            { showClearButton: true },
     // Keep the prior banner; recovery clears on the next successful send. Error surfaces via `_showError`.
     'streaming-failed': { skip: true }
 };
@@ -278,7 +325,7 @@ AIChat._CAPABILITY_CONFIG = {
 /**
  * React to a capability state change.
  * @private
- * @param {{status: string, message: string, progress: number}} state
+ * @param {{status: string, message: string, progress: number, reason: (string|null)}} state
  */
 AIChat.prototype._onCapabilityStateChanged = function (state) {
     let config = AIChat._CAPABILITY_CONFIG[state.status];
@@ -294,23 +341,47 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
     }
 
     this._renderCapabilityBanner(status, state);
+    this._renderBannerAction(state);
+    this._applyInputDisabledState(!!config.disableInput);
+    this._updateTokenCounter();
 
     if (config.showClearButton) {
         // `ready` is gated on `_hasMessages` so a post-clear reseed does not re-reveal the button.
-        // `session-failed` still forces it visible — clearing is the recovery path.
-        const clearButton = document.getElementById('ai-clear-history-button');
-        if (clearButton && (status !== 'ready' || this._hasMessages)) {
-            clearButton.style.display = 'inline-block';
+        if (this._hasMessages) {
+            this._setClearHistoryVisible(true);
         }
     }
-    if (config.updateTokens) {
-        this._updateTokenCounter();
+};
+
+AIChat.prototype._renderBannerAction = function (state) {
+    const action = document.getElementById('ai-banner-action');
+    if (!action) {
+        return;
+    }
+    action.hidden = state.reason !== 'not-configured';
+};
+
+AIChat.prototype._applyInputDisabledState = function (disabled) {
+    const input = document.getElementById('ai-input');
+    const sendButton = document.getElementById('ai-send-button');
+    if (!input || !sendButton) {
+        return;
+    }
+    if (disabled) {
+        input.disabled = true;
+        sendButton.disabled = true;
+    } else {
+        input.disabled = false;
+        sendButton.disabled = !input.value.trim().length;
     }
 };
 
 /** @private */
-AIChat.prototype._checkModelAvailability = function () {
-    this._controller.initialize();
+AIChat.prototype._setClearHistoryVisible = function (visible) {
+    const clearButton = document.getElementById('ai-clear-history-button');
+    if (clearButton) {
+        clearButton.style.display = visible ? 'inline-block' : 'none';
+    }
 };
 
 /**
@@ -352,10 +423,7 @@ AIChat.prototype._handleSendMessage = function () {
 
     this._transcript.appendUserTurn(userMessage);
     this._hasMessages = true;
-    const clearButton = document.getElementById('ai-clear-history-button');
-    if (clearButton) {
-        clearButton.style.display = 'inline-block';
-    }
+    this._setClearHistoryVisible(true);
 
     this._isStreaming = true;
     this._streamingHandle = this._transcript.beginAssistantTurn();
@@ -367,6 +435,40 @@ AIChat.prototype._handleSendMessage = function () {
 
 AIChat.prototype._handleClearHistory = function () {
     this._showConfirmDialog();
+};
+
+AIChat.prototype._openSettings = function () {
+    const wrapper = this._container.querySelector('.ai-chat-wrapper') || this._container;
+    /* jshint camelcase:false */
+    this._storage.get(['ai_provider_name', 'ai_provider_config']).then((stored) => {
+        const currentName = typeof stored.ai_provider_name === 'string' ? stored.ai_provider_name : 'gemini-nano';
+        const perProvider = stored.ai_provider_config && typeof stored.ai_provider_config === 'object' ? stored.ai_provider_config : {};
+        this._settingsModal = this._settingsModalFactory({
+            host: wrapper,
+            providers: this._providersRegistry,
+            initialProviderName: currentName,
+            initialConfigByProvider: perProvider,
+            onSave: (name, config) => { this._onSettingsSave(name, config); },
+            onCancel: () => {}
+        });
+        this._settingsModal.open();
+    });
+};
+
+AIChat.prototype._onSettingsSave = function (name, config) {
+    /* jshint camelcase:false */
+    this._storage.get(['ai_provider_config']).then((stored) => {
+        const perProvider = stored.ai_provider_config && typeof stored.ai_provider_config === 'object' ? stored.ai_provider_config : {};
+        perProvider[name] = config;
+        return this._storage.set({
+            ai_provider_name: name,
+            ai_provider_config: perProvider
+        });
+    }).then(() => {
+        return this._controller.setProvider(name, config);
+    }).catch((err) => {
+        this._showError('Failed to save settings: ' + (err && err.message ? err.message : err));
+    });
 };
 
 AIChat.prototype._showConfirmDialog = function () {
@@ -419,6 +521,11 @@ AIChat.prototype._renderCapabilityBanner = function (status, state) {
     }
     statusText.textContent = message;
 
+    if (!this._controller.getProviderCapabilities().hasDownloadModel) {
+        downloadButton.style.display = 'none';
+        return;
+    }
+
     if (status === 'downloadable') {
         downloadButton.style.display = 'inline-block';
         downloadButton.disabled = false;
@@ -439,7 +546,8 @@ AIChat.prototype._updateTokenCounter = function () {
         return;
     }
 
-    if (!this._hasMessages) {
+    const capabilities = this._controller.getProviderCapabilities();
+    if (!capabilities.hasUsageInfo || !this._hasMessages) {
         counter.textContent = '';
         counter.classList.remove('warning', 'warning-critical', 'quota-exhausted');
         counter.hidden = true;
@@ -473,10 +581,7 @@ AIChat.prototype._updateTokenCounter = function () {
     });
 };
 
-/**
- * @private
- * @param {number} percentUsed
- */
+/** @private */
 AIChat.prototype._checkTokenUsageWarning = function (percentUsed) {
     if (percentUsed >= 70 && !this._hasShownUsageWarning) {
         this._hasShownUsageWarning = true;
@@ -494,11 +599,7 @@ AIChat.prototype._clearContext = function () {
     this._controller.updateInspectionContext(null);
 };
 
-/**
- * Hide the Context pill in response to `inspection-context-cleared`. The show path
- * (`updateContext`) writes the pill directly — the controller does not re-emit its data.
- * @private
- */
+/** Hide the Context pill on `inspection-context-cleared`. Show path is `updateContext`, not a controller re-emit. */
 AIChat.prototype._hideContextPill = function () {
     const contextInfo = document.getElementById('ai-context-info');
     if (contextInfo) {
@@ -512,14 +613,13 @@ AIChat.prototype._hideContextPill = function () {
 AIChat.prototype.updateContext = function (context) {
     this._controller.updateInspectionContext(context);
 
-    const contextInfo = document.getElementById('ai-context-info');
-    const contextText = contextInfo.querySelector('.context-text');
-
     if (context && context.control) {
+        const contextInfo = document.getElementById('ai-context-info');
+        const contextText = contextInfo.querySelector('.context-text');
         contextInfo.style.display = 'flex';
         contextText.textContent = 'Context: ' + (context.control.type || 'Control') + ' (' + (context.control.id || 'no ID') + ')';
     } else {
-        contextInfo.style.display = 'none';
+        this._hideContextPill();
     }
 };
 
@@ -532,32 +632,18 @@ AIChat.prototype.setUrl = function (url) {
     this._controller.setUrl(url);
 };
 
-/**
- * Show a transient error in the inline slot above the input. Replaces any current message.
- * Auto-clears on the next input activity.
- * @private
- * @param {string} message
- */
+/** Show a transient error in the inline slot; auto-clears on next input activity. */
 AIChat.prototype._showError = function (message) {
     const slot = document.getElementById('ai-error-slot');
     if (!slot) {
         return;
     }
-    slot.textContent = message;
-    slot.hidden = false;
+    slot.textContent = message || '';
+    slot.hidden = !message;
 };
 
-/**
- * Empty and hide the inline error slot.
- * @private
- */
 AIChat.prototype._clearError = function () {
-    const slot = document.getElementById('ai-error-slot');
-    if (!slot) {
-        return;
-    }
-    slot.textContent = '';
-    slot.hidden = true;
+    this._showError('');
 };
 
 AIChat.prototype.destroy = function () {

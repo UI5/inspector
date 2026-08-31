@@ -26,9 +26,13 @@ function createFakeController() {
         getUsageInfo: function () { return Promise.resolve(null); },
         updateInspectionContext: function () {},
         setUrl: function () {},
+        setProvider: function () { return Promise.resolve(); },
         downloadModel: function () { return Promise.resolve(); },
         sendUserMessage: function () { return Promise.resolve(); },
         clearConversation: function () { return Promise.resolve(); },
+        getProviderCapabilities: function () {
+            return { hasDownloadModel: true, hasUsageInfo: true };
+        },
         destroy: function () {}
     };
 }
@@ -69,11 +73,39 @@ describe('AIChat', function () {
     let aiChat;
     let fakeController;
     let fakeTranscript;
+    let fakeSettingsModal;
+    let settingsModalCallCount;
+    let fakeStorage;
+    let fakeProviders;
 
     beforeEach(function () {
         fixtures.innerHTML = '<div id="ai-chat"></div>';
         fakeController = createFakeController();
         fakeTranscript = createFakeTranscript();
+        settingsModalCallCount = 0;
+        fakeSettingsModal = null;
+        fakeStorage = {
+            _data: {},
+            get: function (keys) {
+                const out = {};
+                (keys || []).forEach(function (k) {
+                    if (fakeStorage._data[k] !== undefined) { out[k] = fakeStorage._data[k]; }
+                });
+                return Promise.resolve(out);
+            },
+            set: function (obj) {
+                Object.keys(obj).forEach(function (k) { fakeStorage._data[k] = obj[k]; });
+                return Promise.resolve();
+            }
+        };
+        fakeProviders = {
+            'gemini-nano': { displayName: 'Gemini Nano', configSchema: [] },
+            'openai': { displayName: 'OpenAI', configSchema: [
+                { key: 'baseUrl', label: 'Base URL', type: 'text', required: true },
+                { key: 'apiKey', label: 'API Key', type: 'password', required: true },
+                { key: 'model', label: 'Model', type: 'text', required: true }
+            ] }
+        };
         aiChat = new AIChat('ai-chat', {
             getAppInfo: function () { return null; },
             controller: fakeController,
@@ -82,6 +114,19 @@ describe('AIChat', function () {
                     fakeTranscript.onCopyFailed = options.onCopyFailed;
                 }
                 return fakeTranscript;
+            },
+            providersRegistry: fakeProviders,
+            storage: fakeStorage,
+            settingsModalFactory: function (opts) {
+                settingsModalCallCount++;
+                fakeSettingsModal = {
+                    opened: false,
+                    closed: false,
+                    options: opts,
+                    open: function () { this.opened = true; },
+                    close: function () { this.closed = true; }
+                };
+                return fakeSettingsModal;
             }
         });
     });
@@ -382,102 +427,63 @@ describe('AIChat', function () {
             banner.querySelector('.status-text').textContent.should.equal('something happened');
         });
 
-        it('should apply a CSS class derived directly from the canonical ready Assistant Capability State, with no view-private status name translation', function () {
+        it('should apply a status-<X> CSS class derived directly from the canonical Assistant Capability State and surface the controller\'s message verbatim, so the view\'s class vocabulary and copy match the controller with no view-private translation', function () {
+            // `downloading` is excluded here: its message goes through a percent-format branch
+            // (`Downloading: XX%`) that a class-name-only test would either bypass with a
+            // fragile `progress: 0` argument or misassert. Its class-name is covered indirectly
+            // by the download-button visibility test below, and its progress-format branch has
+            // a dedicated test.
+            const states = ['ready', 'downloadable', 'unsupported', 'unavailable'];
+            states.forEach(function (status) {
+                fakeController.fire('capability-state-changed', {
+                    status: status, message: 'message for ' + status, progress: 0
+                });
+
+                const banner = document.getElementById('ai-status-banner');
+                banner.className.should.equal('ai-status-banner status-' + status);
+                banner.querySelector('.status-text').textContent.should.equal('message for ' + status);
+            });
+        });
+
+        it('should apply status-downloading as the banner CSS class when the Assistant Capability State is downloading, so the view\'s class vocabulary matches the controller', function () {
             fakeController.fire('capability-state-changed', {
-                status: 'ready', message: 'Gemini Nano is ready', progress: 0
+                status: 'downloading', message: 'Downloading model', progress: 0
             });
 
             const banner = document.getElementById('ai-status-banner');
-            banner.className.should.contain('status-ready');
-            banner.querySelector('.status-text').textContent.should.equal('Gemini Nano is ready');
+            banner.className.should.equal('ai-status-banner status-downloading');
         });
 
-        it('should apply a status-downloadable CSS class (not a translated status-needs-download) when the Assistant Capability State is downloadable, so the view\'s class vocabulary matches the controller', function () {
-            fakeController.fire('capability-state-changed', {
-                status: 'downloadable', message: 'Model can be downloaded', progress: 0
+        it('should show the download button on downloadable/downloading and hide it on every other banner-painting state, so the developer is not invited to re-download a ready model', function () {
+            const rows = [
+                {status: 'downloadable', hidden: false, disabled: false},
+                {status: 'downloading', hidden: false, disabled: true, progress: 0.4},
+                {status: 'ready', hidden: true},
+                {status: 'unsupported', hidden: true},
+                {status: 'unavailable', hidden: true}
+            ];
+            rows.forEach(function (row) {
+                fakeController.fire('capability-state-changed', {
+                    status: row.status, message: row.status, progress: row.progress || 0
+                });
+
+                const downloadButton = document.getElementById('ai-download-button');
+                if (row.hidden) {
+                    downloadButton.style.display.should.equal('none');
+                } else {
+                    downloadButton.style.display.should.not.equal('none');
+                    downloadButton.disabled.should.equal(row.disabled);
+                }
             });
-
-            const banner = document.getElementById('ai-status-banner');
-            banner.className.should.contain('status-downloadable');
-            banner.className.should.not.contain('status-needs-download');
         });
 
-        it('should show the download button when the Assistant Capability State is downloadable', function () {
-            fakeController.fire('capability-state-changed', {
-                status: 'downloadable', message: 'Model can be downloaded', progress: 0
-            });
-
-            const downloadButton = document.getElementById('ai-download-button');
-            downloadButton.style.display.should.not.equal('none');
-            downloadButton.disabled.should.be.false;
-        });
-
-        it('should apply status-downloading and surface the progress percent message when the Assistant Capability State is downloading', function () {
+        it('should surface the progress percent message when the Assistant Capability State is downloading, so download progress is visible in the banner text', function () {
             fakeController.fire('capability-state-changed', {
                 status: 'downloading', message: 'Downloading model', progress: 0.42
             });
 
             const banner = document.getElementById('ai-status-banner');
-            banner.className.should.contain('status-downloading');
             banner.querySelector('.status-text').textContent.should.contain('42');
-            const downloadButton = document.getElementById('ai-download-button');
-            downloadButton.style.display.should.not.equal('none');
-            downloadButton.disabled.should.be.true;
-        });
-
-        it('should apply a status-session-failed CSS class (not a translated status-error) when the controller reports session-failed', function () {
-            fakeController.fire('capability-state-changed', {
-                status: 'session-failed', message: 'unable to create local AI session', progress: 0
-            });
-
-            const banner = document.getElementById('ai-status-banner');
-            banner.className.should.contain('status-session-failed');
-            banner.className.should.not.contain('status-error');
-            banner.querySelector('.status-text').textContent.should.contain('unable to create local AI session');
-        });
-
-        it('should apply a status-unsupported CSS class when the controller reports an unsupported browser', function () {
-            fakeController.fire('capability-state-changed', {
-                status: 'unsupported', message: 'Browser unsupported', progress: 0
-            });
-
-            const banner = document.getElementById('ai-status-banner');
-            banner.className.should.contain('status-unsupported');
-            banner.querySelector('.status-text').textContent.should.equal('Browser unsupported');
-        });
-
-        it('should apply a status-unavailable CSS class when the controller reports unavailable', function () {
-            fakeController.fire('capability-state-changed', {
-                status: 'unavailable', message: 'Local AI cannot run on this device', progress: 0
-            });
-
-            const banner = document.getElementById('ai-status-banner');
-            banner.className.should.contain('status-unavailable');
-            banner.querySelector('.status-text').textContent.should.equal('Local AI cannot run on this device');
-        });
-
-        it('should hide the download button for every non-download Assistant Capability State that paints a banner, so the developer is not invited to re-download a ready model', function () {
-            const nonDownloadStates = ['ready', 'unsupported', 'unavailable', 'session-failed'];
-            nonDownloadStates.forEach(function (status) {
-                fakeController.fire('capability-state-changed', {
-                    status: status, message: status, progress: 0
-                });
-                const downloadButton = document.getElementById('ai-download-button');
-                downloadButton.style.display.should.equal('none');
-            });
-        });
-
-        it('should expose the clear-history affordance when the controller reports session-failed, so the developer has a user-facing recovery action that destroys the broken session and reseeds a fresh one', function () {
-            // Start from ready so clear-history is offered before session-failed arrives. Assert session-failed keeps it offered.
-            fakeController.fire('capability-state-changed', {
-                status: 'ready', message: 'ready', progress: 0
-            });
-            fakeController.fire('capability-state-changed', {
-                status: 'session-failed', message: 'session creation failed', progress: 0
-            });
-
-            const clearButton = document.getElementById('ai-clear-history-button');
-            clearButton.style.display.should.not.equal('none');
         });
 
         it('should leave the existing banner untouched when streaming-failed arrives — recovery is offered implicitly via the next sendUserMessage, not via a new banner — per PRD user story 8', function () {
@@ -544,30 +550,60 @@ describe('AIChat', function () {
     });
 
     describe('Empty-conversation gating for token counter and Clear History button', function () {
-        it('should render the token counter with the semantic hidden attribute on a fresh load, so the pill is absent from the input footer until there is a message to account for', function () {
+        const READY = {status: 'ready', message: 'ready', progress: 0};
+        const USAGE = {inputUsage: 100, inputQuota: 1000, percentUsed: 10};
+
+        function runScenario(events) {
+            events.forEach(function (evt) {
+                if (evt.type === 'send') {
+                    const input = document.getElementById('ai-input');
+                    input.value = evt.text;
+                    input.dispatchEvent(new Event('input'));
+                    document.getElementById('ai-send-button').click();
+                } else if (evt.type === 'stream-complete') {
+                    fakeController.fire('stream-complete', {content: evt.content || 'a'});
+                } else if (evt.type === 'conversation-loaded') {
+                    fakeController.fire('conversation-loaded', evt.turns);
+                } else if (evt.type === 'conversation-cleared') {
+                    fakeController.fire('conversation-cleared');
+                } else if (evt.type === 'capability-state-changed') {
+                    fakeController.fire('capability-state-changed', evt.state || READY);
+                }
+            });
+            // Wait 10ms for the usage-info microtask ladder to settle; subsequent `.then` chains
+            // need a real tick even though `getUsageInfo` returns an already-resolved promise.
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                const counter = document.getElementById('ai-token-counter');
+                const clearButton = document.getElementById('ai-clear-history-button');
+                return {
+                    counterHidden: counter.hasAttribute('hidden'),
+                    counterText: counter.textContent,
+                    clearButtonDisplay: clearButton.style.display
+                };
+            });
+        }
+
+        function rebuild(usageInfo) {
+            fixtures.innerHTML = '<div id="ai-chat"></div>';
+            fakeController = createFakeController();
+            fakeTranscript = createFakeTranscript();
+            fakeController.getUsageInfo = function () { return Promise.resolve(usageInfo); };
+            aiChat = new AIChat('ai-chat', {
+                controller: fakeController,
+                transcriptFactory: function () { return fakeTranscript; },
+                providersRegistry: fakeProviders,
+                storage: fakeStorage
+            });
+        }
+
+        it('should render the token counter hidden on a fresh load and preserve its role=status / aria-live=polite attributes, so a pristine panel has no pill and the hide gate does not regress screen-reader announcement behaviour', function () {
             const counter = document.getElementById('ai-token-counter');
             counter.hasAttribute('hidden').should.be.true;
-        });
-
-        it('should preserve the token counter\'s role and aria-live attributes so screen-reader announcement behaviour is not regressed by the hide gate', function () {
-            const counter = document.getElementById('ai-token-counter');
             counter.getAttribute('role').should.equal('status');
             counter.getAttribute('aria-live').should.equal('polite');
         });
 
-        it('should keep the token counter hidden after a ready capability state with null usage info in an empty conversation, so a pristine panel does not paint an empty pill', function () {
-            fakeController.fire('capability-state-changed', {
-                status: 'ready', message: 'ready', progress: 0
-            });
-
-            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                counter.hasAttribute('hidden').should.be.true;
-                counter.textContent.should.equal('');
-            });
-        });
-
-        it('should reveal the Clear History button as soon as the user sends the first message, so it is available alongside the assistant response rather than only after the reseed', function () {
+        it('should reveal the Clear History button synchronously on the first send, so it is available alongside the assistant response rather than only after the reseed', function () {
             const clearButton = document.getElementById('ai-clear-history-button');
             clearButton.style.display.should.equal('none');
 
@@ -579,148 +615,77 @@ describe('AIChat', function () {
             clearButton.style.display.should.not.equal('none');
         });
 
-        it('should reveal the token counter after the assistant stream completes for the first user turn, so the developer sees usage numbers alongside the first response', function () {
-            fakeController.getUsageInfo = function () {
-                return Promise.resolve({inputUsage: 100, inputQuota: 1000, percentUsed: 10});
-            };
+        it('should apply the empty-conversation gate to every terminal-state scenario: keep both widgets hidden when the conversation is empty; reveal them once the conversation is non-empty and usage info has resolved', function () {
+            const rows = [
+                {usage: null, events: [{type: 'capability-state-changed'}],
+                 counterHidden: true, counterText: '', clearButtonDisplay: 'none'},
+                {usage: USAGE, events: [{type: 'send', text: 'hi'}, {type: 'stream-complete'}],
+                 counterHidden: false, counterContains: '100'},
+                {usage: {inputUsage: 200, inputQuota: 1000, percentUsed: 20},
+                 events: [
+                     {type: 'conversation-loaded', turns: [{role: 'user', content: 'q'}, {role: 'assistant', content: 'a'}]},
+                     {type: 'capability-state-changed'}
+                 ], counterHidden: false, counterContains: '200'},
+                {usage: USAGE, events: [{type: 'conversation-loaded', turns: []}, {type: 'capability-state-changed'}],
+                 counterHidden: true, clearButtonDisplay: 'none'}
+            ];
 
-            const input = document.getElementById('ai-input');
-            input.value = 'hi';
-            input.dispatchEvent(new Event('input'));
-            document.getElementById('ai-send-button').click();
-
-            fakeController.fire('stream-complete', {content: 'hello'});
-
-            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                counter.hasAttribute('hidden').should.be.false;
-                counter.textContent.should.contain('100');
-            });
-        });
-
-        it('should hide the token counter and the Clear History button on conversation-cleared, so the post-clear state matches the fresh-load state', function () {
-            // Seed a non-empty conversation with visible pill and clear button.
-            fakeController.getUsageInfo = function () {
-                return Promise.resolve({inputUsage: 100, inputQuota: 1000, percentUsed: 10});
-            };
-            fakeController.fire('conversation-loaded', [{role: 'user', content: 'hi'}]);
-            fakeController.fire('capability-state-changed', {
-                status: 'ready', message: 'ready', progress: 0
-            });
-
-            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                const clearButton = document.getElementById('ai-clear-history-button');
-                counter.hasAttribute('hidden').should.be.false;
-                clearButton.style.display.should.not.equal('none');
-
-                // Now clear. Post-clear a capability-state ready may still arrive due to reseed;
-                // include one to prove the ready path is a no-op for an empty conversation.
-                fakeController.fire('conversation-cleared');
-                fakeController.fire('capability-state-changed', {
-                    status: 'ready', message: 'ready', progress: 0
+            return rows.reduce(function (chain, row) {
+                return chain.then(function () {
+                    rebuild(row.usage);
+                    return runScenario(row.events).then(function (snap) {
+                        snap.counterHidden.should.equal(row.counterHidden);
+                        if (row.counterText !== undefined) { snap.counterText.should.equal(row.counterText); }
+                        if (row.counterContains !== undefined) { snap.counterText.should.contain(row.counterContains); }
+                        if (row.clearButtonDisplay !== undefined) { snap.clearButtonDisplay.should.equal(row.clearButtonDisplay); }
+                    });
                 });
-
-                return new Promise(function (resolve) { setTimeout(resolve, 10); });
-            }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                const clearButton = document.getElementById('ai-clear-history-button');
-                counter.hasAttribute('hidden').should.be.true;
-                counter.textContent.should.equal('');
-                clearButton.style.display.should.equal('none');
-            });
+            }, Promise.resolve());
         });
 
-        it('should reveal the token counter and Clear History button again when a new message is sent after a clear, so the panel recovers to the active-conversation state', function () {
-            fakeController.getUsageInfo = function () {
-                return Promise.resolve({inputUsage: 50, inputQuota: 1000, percentUsed: 5});
-            };
+        it('should hide both widgets on conversation-cleared (post-clear reseed ready stays hidden), then reveal them again once a new message is sent, so the panel cycles: pre-clear active → cleared/fresh → post-send active', function () {
+            fakeController.getUsageInfo = function () { return Promise.resolve(USAGE); };
 
-            fakeController.fire('conversation-cleared');
+            return runScenario([
+                {type: 'conversation-loaded', turns: [{role: 'user', content: 'hi'}]},
+                {type: 'capability-state-changed'}
+            ]).then(function (before) {
+                before.counterHidden.should.be.false;
+                before.clearButtonDisplay.should.not.equal('none');
 
-            const input = document.getElementById('ai-input');
-            input.value = 'again';
-            input.dispatchEvent(new Event('input'));
-            document.getElementById('ai-send-button').click();
-            fakeController.fire('stream-complete', {content: 'ok'});
-            // After clear + reseed, the controller re-broadcasts `ready`; that is the existing
-            // show point for the Clear History button. Firing it here matches the runtime flow.
-            fakeController.fire('capability-state-changed', {
-                status: 'ready', message: 'ready', progress: 0
-            });
+                // Post-clear a capability-state ready may still arrive due to reseed; include one
+                // to prove the ready path is a no-op for an empty conversation.
+                return runScenario([{type: 'conversation-cleared'}, {type: 'capability-state-changed'}]);
+            }).then(function (afterClear) {
+                afterClear.counterHidden.should.be.true;
+                afterClear.counterText.should.equal('');
+                afterClear.clearButtonDisplay.should.equal('none');
 
-            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                const clearButton = document.getElementById('ai-clear-history-button');
-                counter.hasAttribute('hidden').should.be.false;
-                clearButton.style.display.should.not.equal('none');
-            });
-        });
-
-        it('should reveal the token counter once usage info resolves for a restored non-empty conversation, so a warm start shows the same widgets as a live session', function () {
-            fakeController.getUsageInfo = function () {
-                return Promise.resolve({inputUsage: 200, inputQuota: 1000, percentUsed: 20});
-            };
-
-            fakeController.fire('conversation-loaded', [
-                {role: 'user', content: 'q'},
-                {role: 'assistant', content: 'a'}
-            ]);
-            fakeController.fire('capability-state-changed', {
-                status: 'ready', message: 'ready', progress: 0
-            });
-
-            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                counter.hasAttribute('hidden').should.be.false;
-                counter.textContent.should.contain('200');
-            });
-        });
-
-        it('should leave the token counter and Clear History button hidden when a restored conversation is empty, so warm-starting an empty store looks identical to a fresh load', function () {
-            fakeController.fire('conversation-loaded', []);
-            fakeController.fire('capability-state-changed', {
-                status: 'ready', message: 'ready', progress: 0
-            });
-
-            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                const clearButton = document.getElementById('ai-clear-history-button');
-                counter.hasAttribute('hidden').should.be.true;
-                clearButton.style.display.should.equal('none');
+                return runScenario([
+                    {type: 'send', text: 'again'},
+                    {type: 'stream-complete', content: 'ok'},
+                    {type: 'capability-state-changed'}
+                ]);
+            }).then(function (afterResend) {
+                afterResend.counterHidden.should.be.false;
+                afterResend.clearButtonDisplay.should.not.equal('none');
             });
         });
 
         it('should not flicker the token counter off mid-stream when a usage-info refresh briefly returns null, so the last valid pill stays visible until the next successful update', function () {
-            let usageQueue = [
-                {inputUsage: 100, inputQuota: 1000, percentUsed: 10},
-                null
-            ];
-            fakeController.getUsageInfo = function () {
-                return Promise.resolve(usageQueue.shift());
-            };
+            let usageQueue = [USAGE, null];
+            fakeController.getUsageInfo = function () { return Promise.resolve(usageQueue.shift()); };
 
-            const input = document.getElementById('ai-input');
-            input.value = 'q';
-            input.dispatchEvent(new Event('input'));
-            document.getElementById('ai-send-button').click();
-            fakeController.fire('stream-complete', {content: 'a'});
-
-            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                counter.hasAttribute('hidden').should.be.false;
-                counter.textContent.should.contain('100');
-
-                // Second refresh: usage briefly null (stale/unavailable). Pill must not flicker off.
-                fakeController.fire('capability-state-changed', {
-                    status: 'ready', message: 'ready', progress: 0
-                });
-
-                return new Promise(function (resolve) { setTimeout(resolve, 10); });
-            }).then(function () {
-                const counter = document.getElementById('ai-token-counter');
-                counter.hasAttribute('hidden').should.be.false;
-                counter.textContent.should.contain('100');
+            return runScenario([
+                {type: 'send', text: 'q'},
+                {type: 'stream-complete'}
+            ]).then(function (first) {
+                first.counterHidden.should.be.false;
+                first.counterText.should.contain('100');
+                return runScenario([{type: 'capability-state-changed'}]);
+            }).then(function (second) {
+                second.counterHidden.should.be.false;
+                second.counterText.should.contain('100');
             });
         });
     });
@@ -778,30 +743,21 @@ describe('AIChat', function () {
             slot.textContent.should.contain('Failed to copy');
         });
 
-        it('should clear a visible inline error when the developer resumes typing into the send input, so a stale error does not linger during the next action', function () {
-            fakeController.fire('stream-failed', new Error('boom'));
-            const slot = document.getElementById('ai-error-slot');
-            slot.hasAttribute('hidden').should.be.false;
-
+        it('should clear a visible inline error on every keydown regardless of key, so any letter, modifier, navigation key, or Enter dismisses the stale error before the next action', function () {
             const input = document.getElementById('ai-input');
-            input.value = 'x';
-            input.dispatchEvent(new Event('input'));
-
-            slot.hasAttribute('hidden').should.be.true;
-            slot.textContent.should.equal('');
-        });
-
-        it('should clear a visible inline error on any keydown in the send input, so pressing modifier or navigation keys also dismisses the stale error', function () {
-            fakeController.fire('stream-failed', new Error('boom'));
             const slot = document.getElementById('ai-error-slot');
-            slot.hasAttribute('hidden').should.be.false;
 
-            const input = document.getElementById('ai-input');
-            const evt = new Event('keydown');
-            evt.key = 'a';
-            input.dispatchEvent(evt);
+            ['a', 'Control', 'Enter', 'ArrowLeft'].forEach(function (key) {
+                fakeController.fire('stream-failed', new Error('boom'));
+                slot.hasAttribute('hidden').should.be.false;
 
-            slot.hasAttribute('hidden').should.be.true;
+                const evt = new Event('keydown');
+                evt.key = key;
+                input.dispatchEvent(evt);
+
+                slot.hasAttribute('hidden').should.be.true;
+                slot.textContent.should.equal('');
+            });
         });
 
         it('should clear a visible inline error when the developer sends a new message, so retrying via Send starts from a clean state', function () {
@@ -826,6 +782,296 @@ describe('AIChat', function () {
 
             slot.textContent.should.contain('second');
             slot.textContent.should.not.contain('first');
+        });
+    });
+
+    // Real-modal rendering, dropdown, form and Save behaviour is covered in AISettingsModal.spec.js.
+    // The tests below cover the view's wiring to the modal via a fake modal factory.
+    describe('Settings modal', function () {
+        /* jshint camelcase:false */
+        it('should render a gear icon button in the header with an accessible label', function () {
+            const gear = document.getElementById('ai-settings-button');
+            gear.should.exist;
+            gear.getAttribute('aria-label').should.equal('Settings');
+        });
+
+        it('should open the settings modal when the gear icon is clicked, passing the registry, the currently-selected provider name, and per-provider config from storage', function () {
+            fakeStorage._data.ai_provider_name = 'openai';
+            fakeStorage._data.ai_provider_config = { openai: { baseUrl: 'https://x', apiKey: 'k', model: 'm' } };
+
+            document.getElementById('ai-settings-button').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                settingsModalCallCount.should.equal(1);
+                fakeSettingsModal.opened.should.be.true;
+                fakeSettingsModal.options.providers.should.equal(fakeProviders);
+                fakeSettingsModal.options.initialProviderName.should.equal('openai');
+                fakeSettingsModal.options.initialConfigByProvider.should.deep.equal({
+                    openai: { baseUrl: 'https://x', apiKey: 'k', model: 'm' }
+                });
+            });
+        });
+
+        it('should default the modal\'s initial provider name to gemini-nano when storage is empty', function () {
+            document.getElementById('ai-settings-button').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                fakeSettingsModal.options.initialProviderName.should.equal('gemini-nano');
+                fakeSettingsModal.options.initialConfigByProvider.should.deep.equal({});
+            });
+        });
+
+        it('should persist the new provider name and per-provider config to storage on Save', function () {
+            document.getElementById('ai-settings-button').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                fakeSettingsModal.options.onSave('openai', { baseUrl: 'https://api', apiKey: 'sk', model: 'gpt-4' });
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                fakeStorage._data.ai_provider_name.should.equal('openai');
+                fakeStorage._data.ai_provider_config.should.deep.equal({
+                    openai: { baseUrl: 'https://api', apiKey: 'sk', model: 'gpt-4' }
+                });
+            });
+        });
+
+        it('should merge the saved config into any pre-existing per-provider config so other providers\' credentials survive a save', function () {
+            fakeStorage._data.ai_provider_config = { openai: { baseUrl: 'old', apiKey: 'old', model: 'old' } };
+
+            document.getElementById('ai-settings-button').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                fakeSettingsModal.options.onSave('gemini-nano', {});
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                fakeStorage._data.ai_provider_name.should.equal('gemini-nano');
+                fakeStorage._data.ai_provider_config.openai.should.deep.equal({ baseUrl: 'old', apiKey: 'old', model: 'old' });
+                fakeStorage._data.ai_provider_config['gemini-nano'].should.deep.equal({});
+            });
+        });
+
+        it('should call controller.setProvider with the new name and config on Save', function () {
+            const calls = [];
+            fakeController.setProvider = function (name, config) {
+                calls.push({ name: name, config: config });
+                return Promise.resolve();
+            };
+
+            document.getElementById('ai-settings-button').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                fakeSettingsModal.options.onSave('openai', { baseUrl: 'u', apiKey: 'k', model: 'm' });
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                calls.length.should.equal(1);
+                calls[0].name.should.equal('openai');
+                calls[0].config.should.deep.equal({ baseUrl: 'u', apiKey: 'k', model: 'm' });
+            });
+        });
+
+        it('should not persist or call controller.setProvider when Cancel fires onCancel', function () {
+            const providerCalls = [];
+            fakeController.setProvider = function () { providerCalls.push(1); return Promise.resolve(); };
+
+            document.getElementById('ai-settings-button').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                fakeSettingsModal.options.onCancel();
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                providerCalls.length.should.equal(0);
+                (fakeStorage._data.ai_provider_name === undefined).should.be.true;
+            });
+        });
+    });
+
+    describe('Per-provider feature detection', function () {
+        it('should hide the token counter when the active provider does not implement getUsageInfo, even after messages exist and the counter would otherwise be visible', function () {
+            fakeController.getProviderCapabilities = function () {
+                return { hasDownloadModel: true, hasUsageInfo: false };
+            };
+            fakeController.getUsageInfo = function () {
+                return Promise.resolve({inputUsage: 100, inputQuota: 1000, percentUsed: 10});
+            };
+
+            fixtures.innerHTML = '<div id="ai-chat"></div>';
+            aiChat = new AIChat('ai-chat', {
+                controller: fakeController,
+                transcriptFactory: function () { return fakeTranscript; },
+                providersRegistry: fakeProviders,
+                storage: fakeStorage
+            });
+
+            const input = document.getElementById('ai-input');
+            input.value = 'q';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+            fakeController.fire('stream-complete', {content: 'a'});
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                const counter = document.getElementById('ai-token-counter');
+                counter.hasAttribute('hidden').should.be.true;
+            });
+        });
+
+        it('should hide the download button on downloadable/downloading capability states when the active provider does not implement downloadModel, so a provider without a download flow never shows the button', function () {
+            fakeController.getProviderCapabilities = function () {
+                return { hasDownloadModel: false, hasUsageInfo: false };
+            };
+            fixtures.innerHTML = '<div id="ai-chat"></div>';
+            aiChat = new AIChat('ai-chat', {
+                controller: fakeController,
+                transcriptFactory: function () { return fakeTranscript; },
+                providersRegistry: fakeProviders,
+                storage: fakeStorage
+            });
+
+            fakeController.fire('capability-state-changed', {
+                status: 'downloadable', message: 'x', progress: 0
+            });
+            document.getElementById('ai-download-button').style.display.should.equal('none');
+
+            fakeController.fire('capability-state-changed', {
+                status: 'downloading', message: 'x', progress: 0.4
+            });
+            document.getElementById('ai-download-button').style.display.should.equal('none');
+        });
+
+        it('should re-run feature detection on the next capability-state-changed after a provider swap, so the token counter and download button reflect the new provider\'s capability set immediately', function () {
+            // Start with a provider that has both capabilities.
+            fakeController.getUsageInfo = function () {
+                return Promise.resolve({inputUsage: 100, inputQuota: 1000, percentUsed: 10});
+            };
+
+            const input = document.getElementById('ai-input');
+            input.value = 'q';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+            fakeController.fire('stream-complete', {content: 'a'});
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'Gemini Nano is ready', progress: 0
+            });
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                document.getElementById('ai-token-counter').hasAttribute('hidden').should.be.false;
+
+                // Simulate provider swap: capabilities change, then the new provider re-emits ready.
+                fakeController.getProviderCapabilities = function () {
+                    return { hasDownloadModel: false, hasUsageInfo: false };
+                };
+                fakeController.fire('capability-state-changed', {
+                    status: 'ready', message: 'OpenAI ready', progress: 0
+                });
+
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                document.getElementById('ai-token-counter').hasAttribute('hidden').should.be.true;
+            });
+        });
+
+        it('should hide the token counter after a provider swap that lands on an unavailable state, so switching from a healthy Gemini session to a not-configured OpenAI leaves no stale token pill', function () {
+            fakeController.getUsageInfo = function () {
+                return Promise.resolve({inputUsage: 100, inputQuota: 1000, percentUsed: 10});
+            };
+
+            const input = document.getElementById('ai-input');
+            input.value = 'q';
+            input.dispatchEvent(new Event('input'));
+            document.getElementById('ai-send-button').click();
+            fakeController.fire('stream-complete', {content: 'a'});
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                document.getElementById('ai-token-counter').hasAttribute('hidden').should.be.false;
+
+                fakeController.getProviderCapabilities = function () {
+                    return { hasDownloadModel: false, hasUsageInfo: false };
+                };
+                fakeController.fire('capability-state-changed', {
+                    status: 'unavailable',
+                    reason: 'not-configured',
+                    message: 'OpenAI is not configured. Open settings to configure.',
+                    progress: 0
+                });
+
+                return new Promise(function (resolve) { setTimeout(resolve, 10); });
+            }).then(function () {
+                document.getElementById('ai-token-counter').hasAttribute('hidden').should.be.true;
+            });
+        });
+    });
+
+    describe('"Not configured" banner action', function () {
+        it('should render a settings-link action button in the banner when the capability state includes reason=not-configured, so the user has a one-click path to fix it', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unavailable',
+                reason: 'not-configured',
+                message: 'OpenAI is not configured. Open settings to configure.',
+                progress: 0
+            });
+
+            const action = document.getElementById('ai-banner-action');
+            action.should.exist;
+            action.hidden.should.be.false;
+            action.textContent.should.contain('Open settings');
+        });
+
+        it('should keep the banner action hidden for a plain unavailable state without reason=not-configured, so unrelated unavailable copy is not overloaded with a settings link', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unavailable', message: 'Local AI cannot run on this device', progress: 0
+            });
+
+            const action = document.getElementById('ai-banner-action');
+            action.hidden.should.be.true;
+        });
+
+        it('should open the settings modal when the not-configured banner action is clicked', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unavailable',
+                reason: 'not-configured',
+                message: 'OpenAI is not configured. Open settings to configure.',
+                progress: 0
+            });
+
+            document.getElementById('ai-banner-action').click();
+
+            return new Promise(function (resolve) { setTimeout(resolve, 10); }).then(function () {
+                settingsModalCallCount.should.equal(1);
+                fakeSettingsModal.opened.should.be.true;
+            });
+        });
+    });
+
+    describe('Input disabled for unavailable / unsupported states', function () {
+        it('should disable the input and send button while the capability state is unavailable, so the user does not type into a dead chat', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unavailable', message: 'nope', progress: 0
+            });
+            document.getElementById('ai-input').disabled.should.be.true;
+            document.getElementById('ai-send-button').disabled.should.be.true;
+        });
+
+        it('should disable the input and send button while the capability state is unsupported', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unsupported', message: 'Browser unsupported', progress: 0
+            });
+            document.getElementById('ai-input').disabled.should.be.true;
+            document.getElementById('ai-send-button').disabled.should.be.true;
+        });
+
+        it('should re-enable the input when the capability state transitions to ready', function () {
+            fakeController.fire('capability-state-changed', {
+                status: 'unavailable', message: 'nope', progress: 0
+            });
+            fakeController.fire('capability-state-changed', {
+                status: 'ready', message: 'ready', progress: 0
+            });
+            document.getElementById('ai-input').disabled.should.be.false;
         });
     });
 });

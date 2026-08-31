@@ -4,6 +4,10 @@ const PromptBuilder = require('./PromptBuilder.js');
 const providersRegistry = require('./providers/index.js');
 const ConversationStore = require('./ConversationStore.js');
 
+function _msg(err, fallback) {
+    return (err && err.message) || fallback;
+}
+
 /**
  * Coordinates the AI Assistant: capability state, per-URL conversation memory, inspection context,
  * streaming, and persistence. Delegates all provider-specific concerns (session lifecycle, prefix
@@ -34,6 +38,7 @@ function AssistantController({
     clearConsoleErrors = () => {}
 } = {}) {
     this._promptBuilder = promptBuilder;
+    this._createProvider = createProvider;
     this._provider = createProvider(providerName, providerConfig);
     this._conversationStore = conversationStore;
     this._getAppInfo = getAppInfo;
@@ -41,11 +46,12 @@ function AssistantController({
     this._clearConsoleErrors = clearConsoleErrors;
 
     this._capabilityState = { status: 'unavailable', message: 'Checking model status...', progress: 0 };
+    this._lastReadyMessage = 'Ready';
     this._listeners = {};
     this._currentUrl = null;
     this._conversationMemory = [];
     this._inspectionContext = null;
-    this._isStreaming = false;
+    this._activeAbortController = null;
 }
 
 /**
@@ -84,13 +90,18 @@ AssistantController.prototype._emit = function (event, payload) {
  * @param {string} status
  * @param {string} [message]
  * @param {number} [progress]
+ * @param {string} [reason]
  */
-AssistantController.prototype._setCapabilityState = function (status, message, progress) {
+AssistantController.prototype._setCapabilityState = function (status, message, progress, reason) {
     this._capabilityState = {
         status: status,
         message: message || '',
-        progress: typeof progress === 'number' ? progress : 0
+        progress: typeof progress === 'number' ? progress : 0,
+        reason: reason || null
     };
+    if (status === 'ready' && message) {
+        this._lastReadyMessage = message;
+    }
     this._emit('capability-state-changed', this._capabilityState);
 };
 
@@ -102,26 +113,11 @@ AssistantController.prototype._setCapabilityState = function (status, message, p
  */
 AssistantController.prototype.initialize = function () {
     return this._provider.checkAvailability().then((capability) => {
-        this._setCapabilityState(capability.status, capability.message, 0);
+        this._setCapabilityState(capability.status, capability.message, 0, capability.reason);
         return this._loadConversationMemory();
     }, (err) => {
-        this._setCapabilityState('unavailable', err && err.message ? err.message : 'Local AI is unavailable', 0);
+        this._setCapabilityState('unavailable', _msg(err, 'Local AI is unavailable'), 0);
     });
-};
-
-/**
- * Call the injected `getConsoleErrors`. A missing or throwing accessor returns [] so a broken
- * wiring doesn't break the send.
- * @private
- * @returns {Array}
- */
-AssistantController.prototype._safeGetConsoleErrors = function () {
-    try {
-        const snapshot = this._getConsoleErrors();
-        return Array.isArray(snapshot) ? snapshot : [];
-    } catch (e) {
-        return [];
-    }
 };
 
 /**
@@ -129,10 +125,10 @@ AssistantController.prototype._safeGetConsoleErrors = function () {
  * persist both turns, and emit stream events. The current Inspection Context is injected.
  *
  * @param {string} userMessage
- * @returns {Promise<{content: string}>}
+ * @returns {Promise<void>}
  */
 AssistantController.prototype.sendUserMessage = function (userMessage) {
-    const consoleErrors = this._safeGetConsoleErrors();
+    const consoleErrors = this._getConsoleErrors();
     const messages = this._promptBuilder.buildMessages({
         appInfo: this._getAppInfo(),
         history: this._conversationMemory,
@@ -141,13 +137,17 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
         consoleErrors: consoleErrors
     });
 
-    this._isStreaming = true;
+    const abortController = new AbortController();
+    this._activeAbortController = abortController;
 
     const onChunk = (textDelta) => {
         this._emit('stream-chunk', textDelta);
     };
 
-    return this._provider.sendMessage(messages, { onChunk: onChunk }).then((fullText) => {
+    return this._provider.sendMessage(messages, {
+        onChunk: onChunk,
+        signal: abortController.signal
+    }).then((fullText) => {
         return this._conversationStore.append(this._currentUrl, {
             role: 'user',
             content: userMessage
@@ -157,18 +157,26 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
                 content: fullText
             });
         }).then(() => {
-            this._conversationMemory.push({ role: 'user', content: userMessage });
-            this._conversationMemory.push({ role: 'assistant', content: fullText });
-            this._isStreaming = false;
+            this._conversationMemory.push(
+                { role: 'user', content: userMessage },
+                { role: 'assistant', content: fullText }
+            );
+            if (this._activeAbortController === abortController) {
+                this._activeAbortController = null;
+            }
             if (this._capabilityState.status === 'streaming-failed') {
-                this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
+                this._setCapabilityState('ready', this._lastReadyMessage, 0);
             }
             this._emit('stream-complete', { content: fullText });
-            return { content: fullText };
         });
     }, (err) => {
-        this._isStreaming = false;
-        this._setCapabilityState('streaming-failed', err && err.message ? err.message : 'Streaming failed', 0);
+        if (this._activeAbortController === abortController) {
+            this._activeAbortController = null;
+        }
+        if (err && err.name === 'AbortError') {
+            throw err;
+        }
+        this._setCapabilityState('streaming-failed', _msg(err, 'Streaming failed'), 0);
         this._emit('stream-failed', err);
         throw err;
     });
@@ -195,7 +203,7 @@ AssistantController.prototype.setUrl = function (url) {
         this._emit('inspection-context-cleared');
     }
 
-    this._safeClearConsoleErrors();
+    this._clearConsoleErrors();
 
     if (this._capabilityState.status !== 'ready') {
         return Promise.resolve();
@@ -203,7 +211,7 @@ AssistantController.prototype.setUrl = function (url) {
 
     return this._loadConversationMemory().then(() => {
         this._provider.destroy();
-        this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
+        this._setCapabilityState('ready', this._lastReadyMessage, 0);
     });
 };
 
@@ -233,24 +241,13 @@ AssistantController.prototype.updateInspectionContext = function (context) {
 AssistantController.prototype.clearConversation = function () {
     return this._conversationStore.clear(this._currentUrl).then(() => {
         this._conversationMemory = [];
-        this._safeClearConsoleErrors();
+        this._clearConsoleErrors();
         this._provider.destroy();
         this._emit('conversation-cleared');
         if (this._capabilityState.status === 'ready') {
-            this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
+            this._setCapabilityState('ready', this._lastReadyMessage, 0);
         }
     });
-};
-
-/**
- * @private
- */
-AssistantController.prototype._safeClearConsoleErrors = function () {
-    try {
-        this._clearConsoleErrors();
-    } catch (e) {
-        // See _safeGetConsoleErrors.
-    }
 };
 
 /**
@@ -266,7 +263,7 @@ AssistantController.prototype.downloadModel = function () {
     }).then(() => {
         this._setCapabilityState('ready', 'Model ready', 1);
     }, (err) => {
-        this._setCapabilityState('unavailable', err && err.message ? err.message : 'Download failed', 0);
+        this._setCapabilityState('unavailable', _msg(err, 'Download failed'), 0);
         throw err;
     });
 };
@@ -275,7 +272,47 @@ AssistantController.prototype.downloadModel = function () {
  * @returns {Promise<Object|null>}
  */
 AssistantController.prototype.getUsageInfo = function () {
-    return this._provider.getUsageInfo();
+    return typeof this._provider.getUsageInfo === 'function' ?
+        this._provider.getUsageInfo() :
+        Promise.resolve(null);
+};
+
+/**
+ * Report which optional Provider methods the currently-installed provider implements, so the view
+ * can hide widgets tied to those methods (token counter, download button) after a provider swap.
+ *
+ * @returns {{hasDownloadModel: boolean, hasUsageInfo: boolean}}
+ */
+AssistantController.prototype.getProviderCapabilities = function () {
+    return {
+        hasDownloadModel: typeof this._provider.downloadModel === 'function',
+        hasUsageInfo: typeof this._provider.getUsageInfo === 'function'
+    };
+};
+
+/**
+ * Swap the active provider. Aborts any in-flight stream, destroys the current provider, and
+ * constructs the replacement via the registry factory. Conversation memory is preserved.
+ * `capability-state-changed` is emitted from the new provider's `checkAvailability`.
+ *
+ * @param {string} name - Registry key of the new provider.
+ * @param {Object} [config] - Config passed to the new provider's constructor.
+ * @returns {Promise<void>}
+ */
+AssistantController.prototype.setProvider = function (name, config) {
+    if (this._activeAbortController) {
+        this._activeAbortController.abort();
+        this._activeAbortController = null;
+    }
+
+    this._provider.destroy();
+    this._provider = this._createProvider(name, config || {});
+
+    return this._provider.checkAvailability().then((capability) => {
+        this._setCapabilityState(capability.status, capability.message, 0, capability.reason);
+    }, (err) => {
+        this._setCapabilityState('unavailable', _msg(err, 'Provider unavailable'), 0);
+    });
 };
 
 AssistantController.prototype.destroy = function () {

@@ -43,18 +43,16 @@ AssistantTranscript.prototype._renderEmptyState = function () {
 
 /**
  * @param {string} content - Raw user input, escaped before insertion.
- * @returns {HTMLElement}
  */
 AssistantTranscript.prototype.appendUserTurn = function (content) {
-    return this._appendMessage('user', content);
+    this._appendMessage('user', content);
 };
 
 /**
  * @param {string} message - Plain text, escaped before insertion.
- * @returns {HTMLElement}
  */
 AssistantTranscript.prototype.appendSystemMessage = function (message) {
-    return this._appendMessage('system', message);
+    this._appendMessage('system', message);
 };
 
 /**
@@ -163,9 +161,6 @@ AssistantTranscript.prototype.reset = function (turns) {
  */
 AssistantTranscript.prototype.scrollToBottom = function (force) {
     const container = this._container;
-    if (!container || container.scrollHeight === undefined) {
-        return;
-    }
     if (force || this._isScrolledToBottom()) {
         container.scrollTop = container.scrollHeight;
     }
@@ -198,7 +193,7 @@ AssistantTranscript.prototype._appendMessage = function (role, content, showCopy
     messageElement.className = 'ai-message message-' + role;
 
     const formattedContent = role === 'assistant' ? this._parseMarkdown(content) : this._escapeHtml(content);
-    const shouldShowCopyButton = role === 'assistant' && (showCopyButton === undefined || showCopyButton === true);
+    const shouldShowCopyButton = role === 'assistant' && showCopyButton !== false;
     const roleLabel = role === 'user' ? 'You' : role === 'assistant' ? 'AI' : 'System';
 
     // Safe innerHTML: roleLabel is from a fixed set, formattedContent is either escaped or markdown-parsed (which itself escapes anything it does not turn into a known formatting tag).
