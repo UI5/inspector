@@ -1,11 +1,13 @@
 'use strict';
 
 // Per-section size caps. Truncation appends `... [truncated]`.
-const PROPERTIES_CAP = 800;
-const BINDINGS_CAP = 800;
-const AGGREGATIONS_CAP = 400;
-const CONSOLE_ERRORS_CAP = 400;
-const BINDING_VALUE_CAP = 100;
+const PROPERTIES_CAP = 8000;
+const ENUMS_CAP = 2000;
+const BINDINGS_CAP = 8000;
+const AGGREGATIONS_CAP = 8000;
+const CONSOLE_ERRORS_CAP = 8000;
+const BINDING_VALUE_CAP = 1200;
+const PROPERTY_VALUE_CAP = 500;
 
 const UNSERIALIZABLE_PLACEHOLDER = '(Data available but cannot serialize)';
 
@@ -42,6 +44,65 @@ function _stringifyBindingValue(value) {
         return rendered.substring(0, BINDING_VALUE_CAP) + '...';
     }
     return rendered;
+}
+
+/**
+ * @private
+ * @param {*} value
+ * @returns {string}
+ */
+function _stringifyPropertyValue(value) {
+    if (value === null) {
+        return 'null';
+    }
+    if (typeof value === 'undefined') {
+        return 'undefined';
+    }
+    if (typeof value === 'string') {
+        // Quote with JSON to escape embedded `"` and `\` so a value string like `he said "hi"`
+        // stays distinguishable from a real quote in the prompt.
+        return JSON.stringify(value);
+    }
+    if (typeof value === 'boolean' || typeof value === 'number') {
+        return String(value);
+    }
+    let rendered;
+    try {
+        rendered = JSON.stringify(value);
+    } catch (e) {
+        return UNSERIALIZABLE_PLACEHOLDER;
+    }
+    return rendered.length > PROPERTY_VALUE_CAP ? rendered.substring(0, PROPERTY_VALUE_CAP) + '...' : rendered;
+}
+
+/**
+ * @private
+ */
+function _renderPropertyLine(name, entry, typeName) {
+    const rawValue = entry && Object.prototype.hasOwnProperty.call(entry, 'value') ? entry.value : undefined;
+    const value = _stringifyPropertyValue(rawValue);
+    const typeSlot = typeName ? ': ' + typeName : '';
+    const defaultMark = entry && entry.isDefault ? ' (default)' : '';
+    return '- ' + name + typeSlot + ' = ' + value + defaultMark;
+}
+
+/**
+ * @private
+ */
+function _renderPropertyGroup(heading, group) {
+    if (!group || !group.data) {
+        return null;
+    }
+    const data = group.data;
+    const keys = Object.keys(data);
+    if (keys.length === 0) {
+        return null;
+    }
+    const typeNames = group.typeNames || {};
+    const lines = keys.map(function (key) {
+        return _renderPropertyLine(key, data[key], typeNames[key]);
+    });
+    return heading + '\n' + lines.join('\n');
 }
 
 /**
@@ -222,19 +283,12 @@ PromptBuilder.prototype._buildControlContextBlock = function (control) {
         '- ID: ' + (control.id || 'None')
     ];
 
-    const sections = [];
-    const propertiesSection = this._renderPropertiesSection(control.properties);
-    if (propertiesSection) {
-        sections.push(propertiesSection);
-    }
-    const bindingsSection = this._renderBindingsSection(control.bindings);
-    if (bindingsSection) {
-        sections.push(bindingsSection);
-    }
-    const aggregationsSection = this._renderAggregationsSection(control.aggregations);
-    if (aggregationsSection) {
-        sections.push(aggregationsSection);
-    }
+    const sections = [
+        this._renderPropertiesSection(control.properties),
+        this._renderEnumsSection(control.properties),
+        this._renderBindingsSection(control.bindings),
+        this._renderAggregationsSection(control.aggregations)
+    ].filter(Boolean);
 
     const contextBody = identityLines.concat(sections).join('\n');
     return 'Current UI5 Control Context:\n' + contextBody;
@@ -274,25 +328,120 @@ PromptBuilder.prototype._capSection = function (header, body, maxLength) {
 };
 
 /**
+ * Render the property section as `Properties (own):` followed by
+ * `Properties (inherited from <controlName>):` per inherited group, in nearest-first order.
+ * Combined output is bounded by PROPERTIES_CAP with outer-first truncation: deepest inherited
+ * group is dropped whole when the running total would exceed the budget. If own alone exceeds
+ * the budget, own is rendered up to the cap with `... [truncated]`.
  * @private
  * @param {Object} properties
  * @returns {string}
  */
 PromptBuilder.prototype._renderPropertiesSection = function (properties) {
-    if (!properties || !properties.own || !properties.own.data) {
-        return '';
-    }
-    const data = properties.own.data;
-    const keys = Object.keys(data);
-    if (keys.length === 0) {
+    if (!properties) {
         return '';
     }
 
-    const lines = keys.map(function (key) {
-        return '- ' + key + ': ' + _stringifyValue(data[key]);
-    });
+    const groupBlocks = [];
 
-    return this._capSection('Properties:', lines.join('\n'), PROPERTIES_CAP);
+    const ownBlock = _renderPropertyGroup('Properties (own):', properties.own);
+    if (ownBlock) {
+        groupBlocks.push(ownBlock);
+    }
+
+    let i = 0;
+    while (Object.prototype.hasOwnProperty.call(properties, 'inherited' + i)) {
+        const group = properties['inherited' + i];
+        const controlName = (group && group.meta && group.meta.controlName) || '';
+        const heading = 'Properties (inherited from ' + controlName + '):';
+        const block = _renderPropertyGroup(heading, group);
+        if (block) {
+            groupBlocks.push(block);
+        }
+        i++;
+    }
+
+    if (groupBlocks.length === 0) {
+        return '';
+    }
+
+    const joiner = '\n';
+    const kept = [];
+    let running = 0;
+    for (let j = 0; j < groupBlocks.length; j++) {
+        const addedLen = (kept.length === 0 ? 0 : joiner.length) + groupBlocks[j].length;
+        if (running + addedLen > PROPERTIES_CAP) {
+            break;
+        }
+        kept.push(groupBlocks[j]);
+        running += addedLen;
+    }
+
+    if (kept.length === 0) {
+        // Own alone exceeds the budget — render it truncated instead of skipping the section.
+        return groupBlocks[0].substring(0, PROPERTIES_CAP) + '... [truncated]';
+    }
+
+    return kept.join(joiner);
+};
+
+/**
+ * Render the `Enums used:` subsection. Walks own + all inheritedN groups and emits one line
+ * per unique enum type name (dedup by `typeNames[key]`). Members come from
+ * `Object.keys(types[key])` in insertion order. Detection requires `typeof types[key] === 'object'`
+ * AND a non-empty `typeNames[key]`. Custom-library enums missing a resolvable type name are
+ * silently skipped. Section omitted entirely when no enums are found.
+ * @private
+ * @param {Object} properties
+ * @returns {string}
+ */
+PromptBuilder.prototype._renderEnumsSection = function (properties) {
+    if (!properties) {
+        return '';
+    }
+
+    const seen = Object.create(null);
+    const lines = [];
+
+    const collect = function (group) {
+        if (!group || !group.data || !group.types) {
+            return;
+        }
+        const data = group.data;
+        const types = group.types;
+        const typeNames = group.typeNames || {};
+        const keys = Object.keys(data);
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            const typeObj = types[key];
+            const typeName = typeNames[key];
+            if (typeof typeObj !== 'object' || typeObj === null) {
+                continue;
+            }
+            if (!typeName) {
+                continue;
+            }
+            if (seen[typeName]) {
+                continue;
+            }
+            seen[typeName] = true;
+            const members = Object.keys(typeObj);
+            lines.push('- ' + typeName + ': ' + members.join(' | '));
+        }
+    };
+
+    collect(properties.own);
+    let i = 0;
+    while (Object.prototype.hasOwnProperty.call(properties, 'inherited' + i)) {
+        collect(properties['inherited' + i]);
+        i++;
+    }
+
+    if (lines.length === 0) {
+        return '';
+    }
+
+    return this._capSection('Enums used:', lines.join('\n'), ENUMS_CAP);
 };
 
 /**
