@@ -207,7 +207,7 @@ describe('AssistantController', function () {
     describe('initial Assistant Capability State', function () {
         it('should seed the capability state to a canonical state before initialization runs', function () {
             const harness = createController();
-            const canonicalStates = ['unsupported', 'unavailable', 'downloadable', 'downloading', 'ready', 'session-failed', 'streaming-failed'];
+            const canonicalStates = ['unsupported', 'unavailable', 'downloadable', 'downloading', 'ready', 'streaming-failed'];
             canonicalStates.should.include(harness.controller._capabilityState.status);
         });
     });
