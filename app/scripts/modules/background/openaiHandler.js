@@ -175,3 +175,5 @@ function attachOpenAIHandler(port, options) {
 }
 
 module.exports = attachOpenAIHandler;
+module.exports.parseSseEvent = parseSseEvent;
+module.exports.DONE = DONE;

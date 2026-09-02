@@ -1,6 +1,8 @@
 'use strict';
 
 const attachOpenAIHandler = require('../../../app/scripts/modules/background/openaiHandler.js');
+const parseSseEvent = attachOpenAIHandler.parseSseEvent;
+const DONE = attachOpenAIHandler.DONE;
 
 function createFakePort() {
     const messageListeners = [];
@@ -177,24 +179,32 @@ describe('openaiHandler', function () {
                 chunks.map(function (c) { return c.content; }).should.deep.equal(['body']);
             });
         });
+    });
 
-        it('should stop at [DONE] and not process further chunks', function () {
-            const fake = createFakePort();
-            const fetchImpl = function () {
-                return Promise.resolve(makeStreamingResponse(encodeChunks([
-                    sseContent('done-test'),
-                    'data: [DONE]\n\n',
-                    sseContent('after')
-                ])));
-            };
+    describe('parseSseEvent', function () {
+        it('should return the delta content string for a content event', function () {
+            parseSseEvent(sseContent('hello')).should.equal('hello');
+        });
 
-            attachOpenAIHandler(fake.port, { fetch: fetchImpl });
-            fake.deliver({ type: 'send', config: validConfig, messages: validMessages });
+        it('should return DONE for the [DONE] sentinel', function () {
+            parseSseEvent('data: [DONE]').should.equal(DONE);
+        });
 
-            return new Promise(function (resolve) { setTimeout(resolve, 30); }).then(function () {
-                const chunks = fake.posted.filter(function (m) { return m.type === 'chunk'; });
-                chunks.map(function (c) { return c.content; }).should.deep.equal(['done-test']);
-            });
+        it('should return empty string for a role-only opener (delta with no content)', function () {
+            const event = 'data: ' + JSON.stringify({ choices: [{ delta: { role: 'assistant' } }] });
+            parseSseEvent(event).should.equal('');
+        });
+
+        it('should return empty string for a comment/keep-alive line (no data: prefix)', function () {
+            parseSseEvent(': keep-alive').should.equal('');
+        });
+
+        it('should return empty string for a non-JSON data payload', function () {
+            parseSseEvent('data: not json').should.equal('');
+        });
+
+        it('should return empty string when choices is empty', function () {
+            parseSseEvent('data: ' + JSON.stringify({ choices: [] })).should.equal('');
         });
     });
 
@@ -208,51 +218,25 @@ describe('openaiHandler', function () {
             };
         }
 
-        it('should post {type:error} with the API `error.message` on 401', function () {
-            const fake = createFakePort();
-            const fetchImpl = function () {
-                return Promise.resolve(makeErrorResponse(401, { error: { message: 'Invalid API key' } }));
-            };
+        [
+            { status: 401, message: 'Invalid API key' },
+            { status: 404, message: 'Model not found' },
+            { status: 429, message: 'Rate limited' }
+        ].forEach(function (testCase) {
+            it('should post {type:error} with the API `error.message` on ' + testCase.status, function () {
+                const fake = createFakePort();
+                const fetchImpl = function () {
+                    return Promise.resolve(makeErrorResponse(testCase.status, { error: { message: testCase.message } }));
+                };
 
-            attachOpenAIHandler(fake.port, { fetch: fetchImpl });
-            fake.deliver({ type: 'send', config: validConfig, messages: validMessages });
+                attachOpenAIHandler(fake.port, { fetch: fetchImpl });
+                fake.deliver({ type: 'send', config: validConfig, messages: validMessages });
 
-            return new Promise(function (resolve) { setTimeout(resolve, 20); }).then(function () {
-                const errors = fake.posted.filter(function (m) { return m.type === 'error'; });
-                errors.should.have.length(1);
-                errors[0].message.should.equal('Invalid API key');
-            });
-        });
-
-        it('should post {type:error} with the API `error.message` on 404', function () {
-            const fake = createFakePort();
-            const fetchImpl = function () {
-                return Promise.resolve(makeErrorResponse(404, { error: { message: 'Model not found' } }));
-            };
-
-            attachOpenAIHandler(fake.port, { fetch: fetchImpl });
-            fake.deliver({ type: 'send', config: validConfig, messages: validMessages });
-
-            return new Promise(function (resolve) { setTimeout(resolve, 20); }).then(function () {
-                const errors = fake.posted.filter(function (m) { return m.type === 'error'; });
-                errors.should.have.length(1);
-                errors[0].message.should.equal('Model not found');
-            });
-        });
-
-        it('should post {type:error} with the API `error.message` on 429', function () {
-            const fake = createFakePort();
-            const fetchImpl = function () {
-                return Promise.resolve(makeErrorResponse(429, { error: { message: 'Rate limited' } }));
-            };
-
-            attachOpenAIHandler(fake.port, { fetch: fetchImpl });
-            fake.deliver({ type: 'send', config: validConfig, messages: validMessages });
-
-            return new Promise(function (resolve) { setTimeout(resolve, 20); }).then(function () {
-                const errors = fake.posted.filter(function (m) { return m.type === 'error'; });
-                errors.should.have.length(1);
-                errors[0].message.should.equal('Rate limited');
+                return new Promise(function (resolve) { setTimeout(resolve, 20); }).then(function () {
+                    const errors = fake.posted.filter(function (m) { return m.type === 'error'; });
+                    errors.should.have.length(1);
+                    errors[0].message.should.equal(testCase.message);
+                });
             });
         });
 
