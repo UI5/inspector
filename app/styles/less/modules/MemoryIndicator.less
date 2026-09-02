@@ -1,0 +1,177 @@
+// MemoryIndicator — circular context-window usage widget + popover
+
+.memory-indicator-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    color: @text-color;
+    transition: background-color 0.15s;
+
+    &:hover {
+        background-color: fade(@gray, 12%);
+    }
+
+    &:focus-visible {
+        outline: 2px solid @lighter-blue;
+        outline-offset: 2px;
+    }
+
+    &[hidden] {
+        display: none;
+    }
+
+    // SVG track (background ring)
+    .memory-track {
+        fill: none;
+        stroke: fade(@gray, 25%);
+        stroke-width: 3;
+    }
+
+    // SVG fill arc (usage)
+    .memory-fill {
+        fill: none;
+        stroke: @lighter-blue;
+        stroke-width: 3;
+        stroke-linecap: round;
+        transition: stroke-dashoffset 0.4s ease, stroke 0.3s;
+    }
+
+    .memory-pct-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: @gray-dark;
+        min-width: 26px;
+    }
+
+    // State: warning (70–89%)
+    &.memory-warning {
+        .memory-fill { stroke: @amber; }
+        .memory-pct-label { color: @amber; }
+    }
+
+    // State: critical (90–99%)
+    &.memory-critical {
+        .memory-fill { stroke: @red-saturated; }
+        .memory-pct-label { color: @red-saturated; }
+    }
+
+    // State: exhausted (100%)
+    &.memory-exhausted {
+        .memory-fill { stroke: @red-dark; }
+        .memory-pct-label { color: @red-dark; }
+    }
+}
+
+// Popover — speech bubble anchored above the indicator button, arrow points down to the circle
+.memory-popover {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 0;
+    width: 240px;
+    background: @bg-white;
+    border: 1px solid @border-gray-lighter;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    padding: 14px 16px 12px;
+    z-index: 100; // Above panel content, below modal dialogs
+
+    // Arrow pointing down toward the circle
+    &::after {
+        content: '';
+        position: absolute;
+        bottom: -6px;
+        left: 14px;
+        width: 10px;
+        height: 10px;
+        background: @bg-white;
+        border-right: 1px solid @border-gray-lighter;
+        border-bottom: 1px solid @border-gray-lighter;
+        transform: rotate(45deg);
+    }
+
+    &[hidden] {
+        display: none;
+    }
+
+    .memory-popover-header {
+        font-size: 13px;
+        font-weight: 600;
+        color: @text-color;
+        margin-bottom: 10px;
+    }
+
+    .memory-popover-bar-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
+    }
+
+    .memory-popover-bar {
+        flex: 1;
+        height: 6px;
+        background-color: fade(@gray, 20%);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+
+    .memory-popover-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        background-color: @lighter-blue;
+        transition: width 0.4s ease;
+
+        &.warning { background-color: @amber; }
+        &.critical { background-color: @red-saturated; }
+        &.exhausted { background-color: @red-dark; }
+    }
+
+    .memory-popover-pct {
+        font-size: 12px;
+        font-weight: 600;
+        color: @text-color;
+        min-width: 32px;
+        text-align: right;
+    }
+
+    .memory-popover-detail {
+        font-size: 11px;
+        color: @gray-dark;
+        margin-bottom: 10px;
+    }
+
+    .memory-popover-explainer {
+        font-size: 12px;
+        color: @gray-dark;
+        line-height: 1.5;
+        margin: 0 0 12px;
+    }
+
+    .memory-clear-btn {
+        width: 100%;
+        padding: 7px 12px;
+        background-color: @lighter-blue;
+        color: @white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+        transition: background-color 0.2s;
+
+        &:hover:not(:disabled) {
+            background-color: darken(@lighter-blue, 10%);
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    }
+}
