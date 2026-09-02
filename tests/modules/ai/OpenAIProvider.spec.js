@@ -289,5 +289,29 @@ describe('OpenAIProvider', function () {
             fake.port.disconnected.should.be.false;
             fake.posted.should.have.length(0);
         });
+
+        it('should reject an in-flight sendMessage promise rather than leave it pending', async function () {
+            const { provider } = createProvider();
+            const sendPromise = provider.sendMessage([{ role: 'user', content: 'Hi' }]);
+
+            await Promise.resolve();
+            provider.destroy();
+
+            try {
+                await sendPromise;
+                throw new Error('Expected reject');
+            } catch (err) {
+                err.message.should.not.equal('Expected reject');
+            }
+        });
+    });
+
+    describe('#getUsageInfo()', function () {
+        it('should resolve to null (OpenAI-compatible endpoints expose no client-visible quota)', function () {
+            const { provider } = createProvider();
+            return provider.getUsageInfo().then(function (usage) {
+                (usage === null).should.be.true;
+            });
+        });
     });
 });

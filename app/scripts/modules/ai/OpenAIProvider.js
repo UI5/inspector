@@ -158,9 +158,23 @@ OpenAIProvider.prototype.sendMessage = function (messages, options) {
 };
 
 /**
+ * OpenAI-compatible endpoints expose no client-visible token quota, so there is no usage to
+ * report. Returning `null` tells the UI to leave the token pill untouched (see AIChat).
+ * @returns {Promise<null>}
+ */
+OpenAIProvider.prototype.getUsageInfo = function () {
+    return Promise.resolve(null);
+};
+
+/**
  * Cancel any in-flight request and disconnect the port.
  */
 OpenAIProvider.prototype.destroy = function () {
+    if (this._disconnectHandler) {
+        const h = this._disconnectHandler;
+        this._disconnectHandler = null;
+        h();
+    }
     if (this._isConnected && this._port) {
         this._port.postMessage({ type: 'cancel' });
         this._port.disconnect();
