@@ -122,12 +122,13 @@
         return slotData.type === Node ? 'Node' : 'HTMLElement';
     }
 
-    // Returns the array of runtime descriptors the framework registers on the
-    // shared-resources meta element. See packages/base/src/Runtimes.ts.
-    // Each runtime exposes: version, alias, description, registeredTags,
+    // Returns the raw array of runtime descriptors the framework registers on
+    // the shared-resources meta element. See packages/base/src/Runtimes.ts.
+    // Each runtime exposes (mostly as live getters): version, alias,
+    // description, importMetaUrl, scopingSuffix, registeredTags,
     // registeredFeatures, configuration (theme, language, timezone, etc.),
-    // openUI5Detected, openUI5LoadedFirst, and more. Returns [] if the
-    // meta element or Runtimes property is missing.
+    // openUI5Detected, openUI5LoadedFirst. Returns [] if the meta element or
+    // Runtimes property is missing.
     function _getRuntimes() {
         try {
             var meta = document.querySelector('meta[name="ui5-shared-resources"]');
@@ -140,10 +141,134 @@
         return [];
     }
 
+    // Many runtime fields are live getters that call framework functions and
+    // can throw (e.g. on partially-booted runtimes). Read every field through
+    // this guard so one bad getter never breaks the whole App Info tab.
+    function _safe(fn, fallback) {
+        try {
+            var value = fn();
+            return value === undefined ? fallback : value;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    // Count live UI5 web component instances per tag name, walking the whole
+    // document including shadow roots. Light-DOM-only queries miss components
+    // rendered inside other components' shadow roots, so we recurse. Returns a
+    // plain map { localName: count }.
+    function _getTagUsageCounts() {
+        var counts = Object.create(null);
+
+        function walk(root) {
+            var all = root.querySelectorAll('*');
+            for (var i = 0; i < all.length; i++) {
+                var el = all[i];
+                if (el.isUI5Element === true) {
+                    var tag = el.localName;
+                    counts[tag] = (counts[tag] || 0) + 1;
+                }
+                if (el.shadowRoot) {
+                    walk(el.shadowRoot);
+                }
+            }
+        }
+
+        walk(document);
+        return counts;
+    }
+
+    // Look up how many instances of a registered tag are on the page.
+    // `registeredTags` comes from getMetadata().getTag(), which already applies
+    // any scoping suffix (ui5-button-<suffix>), and the DOM elements carry that
+    // same scoped name — so usageCounts[tag] matches directly. The extra
+    // scoped-spelling lookup below is a defensive no-op for that case and only
+    // contributes if a framework version were to expose base (unscoped) tags.
+    // See packages/base/src/UI5ElementMetadata.ts (getTag) and
+    // packages/base/src/CustomElementsScopeUtils.ts.
+    function _usageForTag(usageCounts, tag, scopingSuffix) {
+        var count = usageCounts[tag] || 0;
+        if (scopingSuffix) {
+            count += usageCounts[tag + '-' + scopingSuffix] || 0;
+        }
+        return count;
+    }
+
+    // Normalize the raw runtime descriptors into plain, serializable objects
+    // (the panel receives these over postMessage, so no getters/functions can
+    // survive). Splits each runtime's registered tags into used/unused with
+    // instance counts.
+    function _normalizeRuntimes() {
+        var raw = _getRuntimes();
+        var usageCounts = _getTagUsageCounts();
+
+        return raw.map(function (rt, index) {
+            var scopingSuffix = _safe(function () { return rt.scopingSuffix; }, '');
+            var registeredTags = _safe(function () { return rt.registeredTags; }, []) || [];
+            var usedTags = [];
+            var unusedTags = [];
+
+            registeredTags.forEach(function (tag) {
+                var count = _usageForTag(usageCounts, tag, scopingSuffix);
+                if (count > 0) {
+                    usedTags.push({ tag: tag, count: count });
+                } else {
+                    unusedTags.push(tag);
+                }
+            });
+
+            return {
+                index: index,
+                version: _safe(function () { return rt.version; }, ''),
+                isNext: _safe(function () { return rt.isNext; }, false),
+                buildTime: _safe(function () { return rt.buildTime; }, undefined),
+                alias: _safe(function () { return rt.alias; }, ''),
+                description: _safe(function () { return rt.description; }, ''),
+                importMetaUrl: _safe(function () { return rt.importMetaUrl; }, ''),
+                scopingSuffix: scopingSuffix,
+                registeredTags: registeredTags,
+                usedTags: usedTags,
+                unusedTags: unusedTags,
+                registeredFeatures: _safe(function () { return rt.registeredFeatures; }, []) || [],
+                configuration: _safe(function () { return rt.configuration; }, null),
+                openUI5Detected: _safe(function () { return rt.openUI5Detected; }, undefined),
+                openUI5LoadedFirst: _safe(function () { return rt.openUI5LoadedFirst; }, undefined)
+            };
+        });
+    }
+
+    // Resolve which runtime a given component belongs to and return THAT
+    // runtime's version. A single page can load several UI5 Web Components
+    // runtimes at once (multiple bundles / micro-frontends), each potentially a
+    // different version. Enum values must be matched to the exact version, so
+    // we cannot just assume the primary runtime. Every runtime scopes its
+    // custom element tags with a unique suffix (ui5-button-<scopingSuffix>), so
+    // the element's scoped tag identifies its runtime. Falls back to the
+    // primary detected version when the component is unscoped or no suffix
+    // matches. See packages/base/src/CustomElementsScopeUtils.ts and Runtimes.ts.
+    function _getRuntimeVersionForTag(scopedTag, pureTag) {
+        var version = _getVersion();
+        if (!scopedTag || !pureTag || scopedTag === pureTag) {
+            return version;
+        }
+        var prefix = pureTag + '-';
+        if (scopedTag.indexOf(prefix) !== 0) {
+            return version;
+        }
+        var suffix = scopedTag.slice(prefix.length);
+        _getRuntimes().forEach(function (rt) {
+            var rtSuffix = _safe(function () { return rt.scopingSuffix; }, '');
+            if (rtSuffix && rtSuffix === suffix) {
+                version = _safe(function () { return rt.version; }, version) || version;
+            }
+        });
+        return version;
+    }
+
     window.__ui5WebComponentsToolsAPI = {
 
         getFrameworkInformation: function () {
-            var runtimes = _getRuntimes();
+            var runtimes = _normalizeRuntimes();
             var primary = runtimes[0] || {};
             return Promise.resolve({
                 commonInformation: {
@@ -174,6 +299,15 @@
             result.own = Object.create(null);
             result.own.meta = Object.create(null);
             result.own.meta.controlName = metadata.getTag ? metadata.getTag() : element.localName;
+            // Unscoped tag (e.g. "ui5-button") for matching against the CDN
+            // custom-elements manifest. getTag() may carry a scoping suffix
+            // (ui5-button-<suffix>) chosen per app/runtime, which the manifest
+            // does not know about. See UI5ElementMetadata.getPureTag/getTag.
+            result.own.meta.pureTag = metadata.getPureTag ? metadata.getPureTag() : result.own.meta.controlName;
+            // Version of the runtime THIS element belongs to (see
+            // _getRuntimeVersionForTag) so the panel fetches the matching CDN
+            // manifest on multi-runtime pages, not just the primary version.
+            result.own.meta.version = _getRuntimeVersionForTag(result.own.meta.controlName, result.own.meta.pureTag);
 
             result.own.properties = Object.create(null);
             var propNames = Object.keys(propsMetadata);
