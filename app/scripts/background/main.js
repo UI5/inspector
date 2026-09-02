@@ -4,6 +4,7 @@
     var utils = require('../modules/utils/utils.js');
     var ContextMenu = require('../modules/background/ContextMenu.js');
     var pageAction = require('../modules/background/pageAction.js');
+    var attachOpenAIHandler = require('../modules/background/openaiHandler.js');
 
     var contextMenu = new ContextMenu({
         title: 'Inspect UI5 element',
@@ -501,6 +502,8 @@
                         break;
                 }
             });
+        } else if (port.name === 'openai-api') {
+            attachOpenAIHandler(port);
         }
     });
 
