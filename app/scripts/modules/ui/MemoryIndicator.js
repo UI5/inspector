@@ -1,6 +1,6 @@
 'use strict';
 
-const CIRCLE_RADIUS = 14;
+const CIRCLE_RADIUS = 9;
 const CIRCLE_CIRCUMFERENCE = 2 * Math.PI * CIRCLE_RADIUS;
 
 /**
@@ -27,12 +27,12 @@ function MemoryIndicator(hostId, { onClear = function () {} } = {}) {
 MemoryIndicator.prototype._render = function () {
     this._host.innerHTML = `
         <button class="memory-indicator-btn" aria-label="Conversation memory: 0% used" aria-expanded="false" hidden>
-            <svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true">
-                <circle class="memory-track" cx="16" cy="16" r="${CIRCLE_RADIUS}" />
-                <circle class="memory-fill" cx="16" cy="16" r="${CIRCLE_RADIUS}"
+            <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+                <circle class="memory-track" cx="11" cy="11" r="${CIRCLE_RADIUS}" />
+                <circle class="memory-fill" cx="11" cy="11" r="${CIRCLE_RADIUS}"
                     stroke-dasharray="${CIRCLE_CIRCUMFERENCE}"
                     stroke-dashoffset="${CIRCLE_CIRCUMFERENCE}"
-                    transform="rotate(-90 16 16)" />
+                    transform="rotate(-90 11 11)" />
             </svg>
             <span class="memory-pct-label">0%</span>
         </button>
