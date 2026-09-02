@@ -85,7 +85,21 @@
                 editableValues: true
             },
             data: formattedProps,
-            types: types
+            types: types,
+            // Lets the panel recognise a Web Components selection and resolve
+            // enum dropdowns from the CDN manifest (see the panel's
+            // WebCEnumRegistry). `tag` is the *pure* (unscoped) custom element
+            // tag, e.g. "ui5-button" — the DOM tag may carry an app/runtime
+            // scoping suffix (ui5-button-<suffix>) that the manifest doesn't
+            // know about.
+            meta: {
+                isWebComponent: true,
+                tag: (properties.own.meta && properties.own.meta.pureTag) || title,
+                // Version of the runtime this element belongs to, resolved per
+                // element so multi-runtime pages match each component to its
+                // own CDN manifest rather than the primary runtime's version.
+                version: properties.own.meta && properties.own.meta.version
+            }
         };
         return result;
     }

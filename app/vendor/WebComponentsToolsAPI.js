@@ -237,6 +237,34 @@
         });
     }
 
+    // Resolve which runtime a given component belongs to and return THAT
+    // runtime's version. A single page can load several UI5 Web Components
+    // runtimes at once (multiple bundles / micro-frontends), each potentially a
+    // different version. Enum values must be matched to the exact version, so
+    // we cannot just assume the primary runtime. Every runtime scopes its
+    // custom element tags with a unique suffix (ui5-button-<scopingSuffix>), so
+    // the element's scoped tag identifies its runtime. Falls back to the
+    // primary detected version when the component is unscoped or no suffix
+    // matches. See packages/base/src/CustomElementsScopeUtils.ts and Runtimes.ts.
+    function _getRuntimeVersionForTag(scopedTag, pureTag) {
+        var version = _getVersion();
+        if (!scopedTag || !pureTag || scopedTag === pureTag) {
+            return version;
+        }
+        var prefix = pureTag + '-';
+        if (scopedTag.indexOf(prefix) !== 0) {
+            return version;
+        }
+        var suffix = scopedTag.slice(prefix.length);
+        _getRuntimes().forEach(function (rt) {
+            var rtSuffix = _safe(function () { return rt.scopingSuffix; }, '');
+            if (rtSuffix && rtSuffix === suffix) {
+                version = _safe(function () { return rt.version; }, version) || version;
+            }
+        });
+        return version;
+    }
+
     window.__ui5WebComponentsToolsAPI = {
 
         getFrameworkInformation: function () {
@@ -271,6 +299,15 @@
             result.own = Object.create(null);
             result.own.meta = Object.create(null);
             result.own.meta.controlName = metadata.getTag ? metadata.getTag() : element.localName;
+            // Unscoped tag (e.g. "ui5-button") for matching against the CDN
+            // custom-elements manifest. getTag() may carry a scoping suffix
+            // (ui5-button-<suffix>) chosen per app/runtime, which the manifest
+            // does not know about. See UI5ElementMetadata.getPureTag/getTag.
+            result.own.meta.pureTag = metadata.getPureTag ? metadata.getPureTag() : result.own.meta.controlName;
+            // Version of the runtime THIS element belongs to (see
+            // _getRuntimeVersionForTag) so the panel fetches the matching CDN
+            // manifest on multi-runtime pages, not just the primary version.
+            result.own.meta.version = _getRuntimeVersionForTag(result.own.meta.controlName, result.own.meta.pureTag);
 
             result.own.properties = Object.create(null);
             var propNames = Object.keys(propsMetadata);

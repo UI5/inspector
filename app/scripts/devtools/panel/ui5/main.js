@@ -31,6 +31,7 @@
     var ControllerDetailView = require('../../../modules/ui/ControllerDetailView.js');
     var OElementsRegistryMasterView = require('../../../modules/ui/OElementsRegistryMasterView.js');
     var AIChat = require('../../../modules/ui/AIChat.js');
+    var WebCEnumRegistry = require('../../../modules/webc/WebCEnumRegistry.js');
 
 
     // Apply theme
@@ -60,6 +61,40 @@
     var framesSelect;
     var displayFrameData;
     var updateSupportabilityOverlay;
+    // Resolves UI5 Web Components enum properties to dropdown values by
+    // fetching the CDN manifest for the detected framework version. Runs here
+    // (extension context) rather than in the page, whose CSP often blocks the
+    // CDN hosts.
+    var webcEnumRegistry = new WebCEnumRegistry();
+
+    // Monotonic counter bumped on every control selection for the displayed
+    // frame. Web Components rendering is deferred behind an async manifest
+    // fetch, so this lets a deferred render detect that a newer selection has
+    // superseded it and bail instead of clobbering the current one.
+    var controlSelectSeq = 0;
+
+    // Rewrite a Web Components property section's `types` in place: where a
+    // property is a known enum (per the primed CDN manifest), replace its
+    // plain string type with the `{label: value}` map the DataView needs to
+    // render a <select>. Unknown properties keep their string type (editable
+    // text field). Safe to call when nothing is primed — it just no-ops.
+    function _enrichWebcEnumTypes(own, version) {
+        if (!own || !own.types || !own.meta || !own.meta.tag) {
+            return;
+        }
+        var tag = own.meta.tag;
+        Object.keys(own.types).forEach(function (property) {
+            // Only convert declared string types; leave booleans, objects and
+            // already-resolved enum maps untouched.
+            if (typeof own.types[property] !== 'string') {
+                return;
+            }
+            var values = webcEnumRegistry.getEnumValues(version, tag, property);
+            if (values) {
+                own.types[property] = values;
+            }
+        });
+    }
     // Synthetic root inserted under the merged tree (mixed pages) to group all
     // WebC controls under one expandable header. Its id ('__webc_root__') is
     // reserved: selecting or hovering it in the tree must be a no-op since it
@@ -720,7 +755,23 @@
             frameData[frameId].controlAggregations = message.controlAggregations;
             frameData[frameId].controlEvents = message.controlEvents;
 
-            if (framesSelect.getSelectedId() === frameId) {
+            if (framesSelect.getSelectedId() !== frameId) {
+                return;
+            }
+
+            // Capture the selection token now; the deferred Web Components
+            // render below can resolve out of order (different runtime
+            // versions / fetch latencies), so it must verify it is still the
+            // current selection before applying its data.
+            var token = ++controlSelectSeq;
+
+            var render = function () {
+                // A newer selection (or a frame switch) has superseded this
+                // one while its manifest fetch was in flight — drop the stale
+                // render.
+                if (token !== controlSelectSeq || framesSelect.getSelectedId() !== frameId) {
+                    return;
+                }
                 controlProperties.setData(message.controlProperties);
                 controlBindingInfoLeftDataView.setData(message.controlBindings);
                 controlAggregations.setData(message.controlAggregations);
@@ -753,6 +804,26 @@
                     },
                     appInfo: frameData[frameId].applicationInformation
                 });
+            };
+
+            // For UI5 Web Components, resolve enum properties to dropdown values
+            // from the CDN manifest before rendering. The manifest fetch is
+            // async (cached after the first hit per version); on any failure we
+            // just render with plain-string values. Classic UI5 renders
+            // synchronously as before.
+            var own = message.controlProperties && message.controlProperties.own;
+            if (own && own.meta && own.meta.isWebComponent) {
+                var webcTree = frameData[frameId].controlTreeWebC;
+                // Prefer the per-component runtime version (multi-runtime pages
+                // can mix versions); fall back to the tree's primary runtime
+                // version when the element didn't report one.
+                var version = (own.meta && own.meta.version) ||
+                    (webcTree && webcTree.versionInfo && webcTree.versionInfo.version);
+                webcEnumRegistry.prime(version).then(function () {
+                    _enrichWebcEnumTypes(own, version);
+                }, function () { /* keep plain strings */ }).then(render);
+            } else {
+                render();
             }
         },
 
