@@ -491,16 +491,16 @@ describe('PromptBuilder', function () {
         });
 
         describe('properties rendering', function () {
-            it('should render properties as key: value lines with no JSON braces on the happy path', function () {
+            it('should unwrap {value} shape and render as key: value lines', function () {
                 const inspectionContext = {
                     control: {
                         type: 'sap.m.Button',
                         properties: {
                             own: {
                                 data: {
-                                    text: 'Save',
-                                    enabled: true,
-                                    width: '100px'
+                                    text: { value: 'Save', isDefault: false },
+                                    enabled: { value: true, isDefault: true },
+                                    width: { value: '100px', isDefault: false }
                                 }
                             }
                         }
@@ -510,11 +510,107 @@ describe('PromptBuilder', function () {
                 const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
                 const propsSection = _extractPropertiesSection(result);
 
-                propsSection.should.contain('text: Save');
-                propsSection.should.contain('enabled: true');
-                propsSection.should.contain('width: 100px');
-                propsSection.should.not.contain('{');
-                propsSection.should.not.contain('}');
+                propsSection.should.contain('text');
+                propsSection.should.contain('Save');
+                propsSection.should.contain('enabled');
+                propsSection.should.contain('true');
+                propsSection.should.contain('width');
+                propsSection.should.contain('100px');
+                propsSection.should.not.contain('isDefault');
+            });
+
+            it('should render a string type annotation "(type: X)" when types entry is a string', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: {
+                            own: {
+                                data: { text: { value: 'Save', isDefault: false } },
+                                types: { text: 'string' }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+                const propsSection = _extractPropertiesSection(result);
+
+                propsSection.should.contain('text (type: string): Save');
+            });
+
+            it('should render enum valid values "(enum: A, B, C)" when types entry is an object', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: {
+                            own: {
+                                data: { type: { value: 'Default', isDefault: true } },
+                                types: { type: { Default: 'Default', Emphasized: 'Emphasized', Reject: 'Reject' } }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+                const propsSection = _extractPropertiesSection(result);
+
+                propsSection.should.contain('(enum: Default, Emphasized, Reject)');
+                propsSection.should.contain(': Default');
+            });
+
+            it('should render inherited property groups under their ancestor class name', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: {
+                            own: {
+                                data: { text: { value: 'Save', isDefault: false } }
+                            },
+                            inherited0: {
+                                data: {
+                                    enabled: { value: true },
+                                    visible: { value: false }
+                                },
+                                types: { enabled: 'boolean', visible: 'boolean' },
+                                options: { title: 'Inherits from (sap.ui.core.Control)' }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('Inherited from');
+                result.should.contain('sap.ui.core.Control');
+                result.should.contain('enabled');
+                result.should.contain('visible');
+            });
+
+            it('should render multiple inherited groups in order', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        properties: {
+                            own: { data: { text: { value: 'X', isDefault: false } } },
+                            inherited0: {
+                                data: { busy: { value: false } },
+                                types: {},
+                                options: { title: 'Inherits from (sap.ui.core.Control)' }
+                            },
+                            inherited1: {
+                                data: { tooltip: { value: '' } },
+                                types: {},
+                                options: { title: 'Inherits from (sap.ui.core.Element)' }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('sap.ui.core.Control');
+                result.should.contain('sap.ui.core.Element');
+                result.indexOf('sap.ui.core.Control').should.be.lessThan(result.indexOf('sap.ui.core.Element'));
             });
 
             it('should omit the Properties section entirely when own properties are empty', function () {
@@ -708,7 +804,32 @@ describe('PromptBuilder', function () {
                 result.should.contain('...');
             });
 
-            it('should render composite bindings (parts) as a degenerate one-line entry without throwing', function () {
+            it('should render composite bindings (parts) with each part\'s path and value', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        bindings: {
+                            text: {
+                                parts: [
+                                    { path: '/First', value: 'John' },
+                                    { path: '/Last', value: 'Doe' }
+                                ]
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('- text ←');
+                result.should.contain('/First');
+                result.should.contain('John');
+                result.should.contain('/Last');
+                result.should.contain('Doe');
+                result.should.not.contain('<composite>');
+            });
+
+            it('should render composite bindings with no values when parts have no resolved values', function () {
                 const inspectionContext = {
                     control: {
                         type: 'sap.m.Text',
@@ -725,7 +846,38 @@ describe('PromptBuilder', function () {
 
                 const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
 
-                result.should.contain('- text ← <composite>');
+                result.should.contain('- text ←');
+                result.should.contain('/First');
+                result.should.contain('/Last');
+                result.should.not.contain('<composite>');
+            });
+
+            it('golden: composite binding with resolved values', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Text',
+                        id: 'fullName',
+                        bindings: {
+                            text: {
+                                parts: [
+                                    { path: '/First', value: 'John' },
+                                    { path: '/Last', value: 'Doe' }
+                                ]
+                            }
+                        }
+                    }
+                };
+
+                const expected =
+                    'User asked: Q\n\n' +
+                    'Current UI5 Control Context:\n' +
+                    '- Type: sap.m.Text\n' +
+                    '- ID: fullName\n' +
+                    'Bindings:\n' +
+                    '- text ← ["/First" = John, "/Last" = Doe]\n\n' +
+                    'Now answer: Q';
+
+                promptBuilder.buildUserPrompt('Q', inspectionContext).should.equal(expected);
             });
 
             it('should truncate the bindings section to its cap on adversarial input', function () {
@@ -890,8 +1042,8 @@ describe('PromptBuilder', function () {
                         properties: {
                             own: {
                                 data: {
-                                    text: 'Save',
-                                    enabled: true
+                                    text: { value: 'Save', isDefault: false },
+                                    enabled: { value: true, isDefault: true }
                                 }
                             }
                         }
