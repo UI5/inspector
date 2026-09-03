@@ -128,6 +128,7 @@ PromptBuilder.prototype.buildSystemPrompt = function (appInfo) {
  * @returns {string}
  */
 PromptBuilder.prototype._buildAppContext = function (appInfo) {
+    /* jshint maxcomplexity: 21 */
     if (!appInfo) {
         return '';
     }
