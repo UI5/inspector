@@ -89,6 +89,16 @@ WebCEnumRegistry.CDN_HOSTS = [
 WebCEnumRegistry.MANIFEST_PATH = '/dist/custom-elements-internal.json';
 
 /**
+ * Allowlist pattern for a version string used in a CDN URL. Permits semver,
+ * pre-release tags, and bare major.minor specifiers; rejects path-traversal
+ * characters (/, ..), package separators (@), and whitespace. Applied in
+ * prime() before any fetch so a hostile page cannot steer the URL to an
+ * unintended package.
+ * @type {RegExp}
+ */
+WebCEnumRegistry.VERSION_PATTERN = /^[\w.+-]+$/;
+
+/**
  * Maximum number of per-version enum maps kept in `chrome.storage.local`.
  * Bounds cache growth on machines that inspect many framework versions over
  * time (now more likely, since multi-runtime pages prime several versions);
@@ -131,9 +141,15 @@ WebCEnumRegistry.parseEnumUnion = function (typeText) {
 
     for (var i = 0; i < members.length; i++) {
         var member = members[i].trim();
+        // Bare `undefined` or `null` appear in nullable enums
+        // (e.g. `"Gregorian" | ... | undefined`). Skip them so the remaining
+        // quoted literals still get a dropdown.
+        if (member === 'undefined' || member === 'null') {
+            continue;
+        }
         var match = /^"([^"]*)"$/.exec(member) || /^'([^']*)'$/.exec(member);
         if (!match) {
-            // A non-literal member (e.g. `undefined`, `string`, `ButtonDesign`)
+            // Any other non-literal member (e.g. `string`, `ButtonDesign`)
             // means this is not a plain string-literal enum — bail out.
             return null;
         }
@@ -342,6 +358,9 @@ WebCEnumRegistry.prototype.prime = function (version) {
     var self = this;
 
     if (!version || !this._fetch) {
+        return Promise.resolve(Object.create(null));
+    }
+    if (!WebCEnumRegistry.VERSION_PATTERN.test(version)) {
         return Promise.resolve(Object.create(null));
     }
     if (this._memory[version]) {

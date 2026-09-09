@@ -84,6 +84,20 @@ describe('WebCEnumRegistry', function () {
             expect(values).to.deep.equal({ A: 'A', B: 'B' });
         });
 
+        it('skips bare undefined members (nullable enum)', function () {
+            const values = WebCEnumRegistry.parseEnumUnion('"Gregorian" | "Islamic" | undefined');
+            expect(values).to.deep.equal({ Gregorian: 'Gregorian', Islamic: 'Islamic' });
+        });
+
+        it('skips bare null members', function () {
+            const values = WebCEnumRegistry.parseEnumUnion('"A" | null | "B"');
+            expect(values).to.deep.equal({ A: 'A', B: 'B' });
+        });
+
+        it('returns null when only one quoted literal remains after skipping undefined', function () {
+            expect(WebCEnumRegistry.parseEnumUnion('"A" | undefined')).to.equal(null);
+        });
+
         it('returns null for a single literal (not an enum)', function () {
             expect(WebCEnumRegistry.parseEnumUnion('"Default"')).to.equal(null);
         });
@@ -257,6 +271,37 @@ describe('WebCEnumRegistry', function () {
 
             return registry.prime('9.9.9').then(function () {
                 expect(registry.getEnumValues('9.9.9', 'ui5-button', 'design')).to.equal(null);
+            });
+        });
+
+        it('resolves to an empty map without fetching when version contains path-traversal characters', function () {
+            const fake = createFakeFetch([{
+                match: function () { return true; },
+                manifest: BUTTON_MANIFEST
+            }]);
+            const registry = new WebCEnumRegistry({
+                fetch: fake.fetch,
+                storage: createFakeStorage().storage,
+                packages: ['@ui5/webcomponents']
+            });
+
+            return registry.prime('2.0.0/../../@evil/pkg@1.0.0').then(function (map) {
+                expect(fake.calls).to.have.length(0);
+                expect(Object.keys(map)).to.have.length(0);
+            });
+        });
+
+        it('resolves to an empty map without fetching when version contains @', function () {
+            const fake = createFakeFetch([{ match: function () { return true; }, manifest: BUTTON_MANIFEST }]);
+            const registry = new WebCEnumRegistry({
+                fetch: fake.fetch,
+                storage: createFakeStorage().storage,
+                packages: ['@ui5/webcomponents']
+            });
+
+            return registry.prime('@evil/pkg@1.0.0').then(function (map) {
+                expect(fake.calls).to.have.length(0);
+                expect(Object.keys(map)).to.have.length(0);
             });
         });
 
