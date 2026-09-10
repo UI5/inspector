@@ -2,6 +2,13 @@
 (function () {
     'use strict';
 
+    // This controller function was already at the configured maxstatements
+    // ceiling (60); adding the App Info merge helpers (WebC + classic UI5)
+    // tips it over. Raise the scoped limit rather than fragment the tightly
+    // coupled panel wiring — same approach as the maxcomplexity directives
+    // elsewhere in the codebase.
+    /* jshint maxstatements: 70 */
+
     // ================================================================================
     // Main controller for 'UI5' tab in devtools
     // ================================================================================
@@ -425,6 +432,50 @@
         return ui5Tree || {};
     }
 
+    // Merge the classic UI5 and Web Components application-info section maps
+    // for the App Info tab. On mixed pages both frameworks contribute sections;
+    // classic UI5 keeps its original top-level sections and the Web Components
+    // info arrives as a single self-labelled "UI5 Web Components" group (see
+    // webcMain.js _buildApplicationInfo), so the two read as distinct without
+    // any title rewriting and their keys never collide. Classic sections are
+    // inserted first so they render above the Web Components group. On
+    // single-framework pages the relevant map is returned unchanged.
+    function _getMergedApplicationInfo(frameId) {
+        var fd = frameData[frameId];
+        if (!fd) {
+            return {};
+        }
+        var ui5Info = fd.applicationInformationUI5;
+        var webcInfo = fd.applicationInformationWebC;
+
+        if (ui5Info && webcInfo) {
+            var merged = {};
+            var key;
+            for (key in ui5Info) {
+                merged[key] = ui5Info[key];
+            }
+            for (key in webcInfo) {
+                merged[key] = webcInfo[key];
+            }
+            return merged;
+        }
+
+        return webcInfo || ui5Info || {};
+    }
+
+    // Recompute the merged App Info map for a frame, cache it on frameData
+    // (used by displayFrameData and the AI chat context), and push it to the
+    // App Info tab when that frame is currently selected.
+    function _refreshAppInfo(frameId) {
+        var merged = _getMergedApplicationInfo(frameId);
+        if (frameData[frameId]) {
+            frameData[frameId].applicationInformation = merged;
+        }
+        if (framesSelect.getSelectedId() === frameId) {
+            appInfo.setData(merged);
+        }
+    }
+
     displayFrameData = function (options) {
         var frameId = options.selectedId;
         var oldFrameId = options.oldSelectedId;
@@ -436,7 +487,7 @@
         if (UI5Data) {
             controlTree.setData(_getMergedControlTree(frameId));
             UI5Data.selectedElementId && controlTree.setSelectedElement(UI5Data.selectedElementId);
-            appInfo.setData(UI5Data.applicationInformation);
+            appInfo.setData(_getMergedApplicationInfo(frameId));
             UI5Data.elementRegistry && oElementsRegistryMasterView.setData(UI5Data.elementRegistry);
 
             controlProperties.setData(UI5Data.controlProperties || {});
@@ -592,7 +643,7 @@
             var frameId = messageSender.frameId;
             frameData[frameId].controlTree = message.controlTree;
             frameData[frameId].controlTreeUI5 = message.controlTree;
-            frameData[frameId].applicationInformation = message.applicationInformation;
+            frameData[frameId].applicationInformationUI5 = message.applicationInformation;
             frameData[frameId].elementRegistry = message.elementRegistry;
 
             if (framesSelect.getSelectedId() === frameId) {
@@ -600,9 +651,12 @@
 
                 // Set URL for AI Chat history
                 aiChat.setUrl(frameData[frameId].url);
-                appInfo.setData(message.applicationInformation);
                 oElementsRegistryMasterView.setData(message.elementRegistry);
             }
+
+            // Merge with any Web Components info already collected for this
+            // frame and refresh the App Info tab (see _getMergedApplicationInfo).
+            _refreshAppInfo(frameId);
         },
 
         /**
@@ -802,23 +856,17 @@
                 frameData[frameId] = {};
             }
             frameData[frameId].controlTreeWebC = message.controlTree;
-            // Precedence rule for the App Info tab on mixed pages: classic UI5
-            // wins because it provides richer info (loaded libraries, modules,
-            // bootstrap config, URL parameters), whereas WebC only emits a
-            // minimal "General" section. We populate from WebC only when
-            // classic hasn't already filled this in.
-            if (!frameData[frameId].applicationInformation) {
-                frameData[frameId].applicationInformation = message.applicationInformation;
-            }
+            frameData[frameId].applicationInformationWebC = message.applicationInformation;
 
             if (framesSelect.getSelectedId() === frameId) {
                 controlTree.setData(_getMergedControlTree(frameId));
-                // Avoid overwriting the App Info tab if classic UI5 will
-                // populate it shortly (or already did) — same precedence rule.
-                if (!frameData[frameId].isUI5Detected) {
-                    appInfo.setData(frameData[frameId].applicationInformation);
-                }
             }
+
+            // On mixed pages the classic UI5 sections and the Web Components
+            // sections are shown together in the App Info tab; on pure-WebC
+            // pages only the WebC sections are present (see
+            // _getMergedApplicationInfo).
+            _refreshAppInfo(frameId);
         },
 
         'on-application-dom-update-webc': function (message, messageSender) {
@@ -827,10 +875,15 @@
                 frameData[frameId] = {};
             }
             frameData[frameId].controlTreeWebC = message.controlTree;
+            // Tag usage counts and the runtime list can change as the DOM
+            // mutates, so refresh the stored WebC app info too.
+            frameData[frameId].applicationInformationWebC = message.applicationInformation;
 
             if (framesSelect.getSelectedId() === frameId) {
                 controlTree.setData(_getMergedControlTree(frameId));
             }
+
+            _refreshAppInfo(frameId);
         },
 
         'on-ping-frames': function(message) {

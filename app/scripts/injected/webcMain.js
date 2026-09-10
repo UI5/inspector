@@ -172,6 +172,20 @@
         };
     }
 
+    // Escape HTML-significant characters. The DataView escapes string *values*
+    // but not section *titles* or *keys* (DataViewHelper._wrapInTag interpolates
+    // them raw). Any page-controlled string that ends up in a title/key — e.g. a
+    // runtime's alias or scoping suffix — must be escaped here first, otherwise a
+    // hostile page could inject markup into the DevTools panel.
+    function _escapeHTML(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     // Stringify a configuration value for display in the App Info tab.
     function _formatConfigValue(value) {
         if (value === null || value === undefined) {
@@ -187,20 +201,20 @@
         return value;
     }
 
-    // Build application info in the same shape as classic UI5's
-    // applicationUtils.getApplicationInfo(). Surfaces what the framework
-    // exposes through `meta.Runtimes` (see packages/base/src/Runtimes.ts):
-    // configuration (theme, language, timezone, ...), registered tags and
-    // features, and a list of runtimes when more than one is active on the
-    // page.
     // --- App Info section builders. Each returns a {options, data} section
     // or null if there's nothing to report. ---
 
-    function _generalSection(common) {
+    function _generalSection(common, runtimes) {
         var general = {};
         general[common.frameworkName] = common.version || '(unknown)';
-        if (common.description) {
-            general.Description = common.description;
+        general.Runtimes = runtimes.length;
+        // Interop is page-level; read it from the primary (first) runtime.
+        var primary = runtimes[0] || {};
+        if (typeof primary.openUI5Detected === 'boolean') {
+            general['OpenUI5 detected'] = primary.openUI5Detected;
+            if (typeof primary.openUI5LoadedFirst === 'boolean') {
+                general['OpenUI5 loaded first'] = primary.openUI5LoadedFirst;
+            }
         }
         general['User Agent'] = navigator.userAgent;
         general.Application = location.href;
@@ -231,11 +245,26 @@
         });
     }
 
-    function _registeredTagsSection(tags) {
-        if (!Array.isArray(tags) || !tags.length) {
+    // Tags with at least one live instance on the page. Object keys sort
+    // alphabetically in the DataView; the value is the instance count.
+    function _usedTagsSection(usedTags) {
+        if (!Array.isArray(usedTags) || !usedTags.length) {
             return null;
         }
-        return _section('Registered tags (' + tags.length + ')', _asSortedArray(tags), false);
+        var data = {};
+        for (var i = 0; i < usedTags.length; i++) {
+            data[usedTags[i].tag] = usedTags[i].count;
+        }
+        return _section('Tags in use (' + usedTags.length + ')', data);
+    }
+
+    // Registered tags that are not currently instantiated anywhere on the page.
+    function _unusedTagsSection(unusedTags) {
+        if (!Array.isArray(unusedTags) || !unusedTags.length) {
+            return null;
+        }
+        return _section('Tags registered, not in use (' + unusedTags.length + ')',
+            _asSortedArray(unusedTags), false);
     }
 
     function _registeredFeaturesSection(features) {
@@ -245,59 +274,96 @@
         return _section('Registered features (' + features.length + ')', _asSortedArray(features), false);
     }
 
-    function _interopSection(primary) {
-        if (typeof primary.openUI5Detected !== 'boolean') {
-            return null;
+    // Left-pad the runtime index so per-runtime section titles keep numeric
+    // order under the DataView's alphabetical key sort. Only widens once indices
+    // reach two digits (11+ runtimes); typical pages keep the bare "Runtime 0".
+    function _padIndex(index, total) {
+        var width = String(Math.max(total - 1, 0)).length;
+        var s = String(index);
+        while (s.length < width) {
+            s = '0' + s;
         }
-        var interop = {};
-        interop['OpenUI5 detected'] = primary.openUI5Detected;
-        if (typeof primary.openUI5LoadedFirst === 'boolean') {
-            interop['OpenUI5 loaded first'] = primary.openUI5LoadedFirst;
-        }
-        return _section('Interop', interop);
+        return s;
     }
 
-    function _runtimesSection(runtimes) {
-        if (runtimes.length <= 1) {
-            return null;
+    // A concise per-runtime label, e.g. "Runtime 0 — v2.19.0 (myapp)" or,
+    // when there's no alias, "Runtime 0 — v2.19.0 [scoping-suffix]". The
+    // version/alias/scoping-suffix are page-controlled and land in a section
+    // title, so escape them (the DataView does not escape titles).
+    function _runtimeLabel(rt, total) {
+        var label = 'Runtime ' + _padIndex(rt.index, total || 1) +
+            ' — v' + _escapeHTML(rt.version || 'unknown');
+        if (rt.alias) {
+            label += ' (' + _escapeHTML(rt.alias) + ')';
+        } else if (rt.scopingSuffix) {
+            label += ' [' + _escapeHTML(rt.scopingSuffix) + ']';
         }
-        var data = [];
-        for (var r = 0; r < runtimes.length; r++) {
-            var rt = runtimes[r];
-            data.push((rt.alias ? rt.alias + ' — ' : '') +
-                (rt.description || ('version ' + (rt.version || 'unknown'))));
-        }
-        return _section('Runtimes (' + runtimes.length + ')', data);
+        return label;
     }
 
-    // Build application info in the same shape as classic UI5's
-    // applicationUtils.getApplicationInfo(). Surfaces what the framework
-    // exposes through `meta.Runtimes` (see packages/base/src/Runtimes.ts):
-    // configuration (theme, language, timezone, ...), registered tags and
-    // features, and a list of runtimes when more than one is active on the
-    // page.
+    // One expandable section for a single runtime: its identity fields plus
+    // nested Configuration / tags-in-use / unused-tags / features sub-sections,
+    // each scoped to that runtime. Collapsed by default — a single runtime can
+    // register hundreds of tags.
+    function _runtimeDetailSection(rt, total) {
+        var data = { Version: rt.version || '(unknown)' };
+        if (rt.alias) {
+            data.Alias = rt.alias;
+        }
+        if (rt.scopingSuffix) {
+            data['Scoping suffix'] = rt.scopingSuffix;
+        }
+        if (rt.importMetaUrl) {
+            data['Runtime URL'] = rt.importMetaUrl;
+        }
+
+        var nested = [
+            _configurationSection(rt.configuration),
+            _usedTagsSection(rt.usedTags),
+            _unusedTagsSection(rt.unusedTags),
+            _registeredFeaturesSection(rt.registeredFeatures)
+        ];
+        for (var i = 0; i < nested.length; i++) {
+            if (nested[i]) {
+                data[nested[i].options.title] = nested[i];
+            }
+        }
+
+        return _section(_runtimeLabel(rt, total), data, false);
+    }
+
+    // Build the Application-Info payload for the App Info tab. Everything the
+    // framework exposes through `meta.Runtimes` (see packages/base/src/Runtimes.ts)
+    // is grouped under a single self-labelled "UI5 Web Components" section so it
+    // reads as distinct from the classic SAPUI5 sections on mixed pages. The
+    // group holds a General summary and one collapsible section per runtime (with
+    // that runtime's configuration, used/unused tags and features).
     function _buildApplicationInfo(frameworkInformation) {
         var common = frameworkInformation.commonInformation;
         var runtimes = (frameworkInformation.runtimes && frameworkInformation.runtimes.length) ?
             frameworkInformation.runtimes : [];
-        var primary = runtimes[0] || {};
-        var sections = {
-            common: _generalSection(common),
-            configuration: _configurationSection(primary.configuration),
-            registeredTags: _registeredTagsSection(primary.registeredTags),
-            registeredFeatures: _registeredFeaturesSection(primary.registeredFeatures),
-            interop: _interopSection(primary),
-            runtimes: _runtimesSection(runtimes)
-        };
 
-        var result = {};
-        var keys = Object.keys(sections);
-        for (var i = 0; i < keys.length; i++) {
-            if (sections[keys[i]]) {
-                result[keys[i]] = sections[keys[i]];
-            }
+        var groupData = { General: _generalSection(common, runtimes) };
+
+        for (var r = 0; r < runtimes.length; r++) {
+            var section = _runtimeDetailSection(runtimes[r], runtimes.length);
+            groupData[section.options.title] = section;
         }
-        return result;
+
+        var title = 'UI5 Web Components';
+        if (runtimes.length > 1) {
+            title += ' — ' + runtimes.length + ' runtimes (primary v' +
+                _escapeHTML(common.version || 'unknown') + ')';
+        } else if (common.version) {
+            title += ' (v' + _escapeHTML(common.version) + ')';
+        }
+
+        return {
+            webcRoot: {
+                options: { title: title, expandable: true, expanded: true },
+                data: groupData
+            }
+        };
     }
 
     // Send the current control tree to the panel
