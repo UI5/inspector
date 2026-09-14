@@ -1270,6 +1270,103 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
 .elementsRegistry splitter {
   background-color: #000;
 }
+flexibility-master-view,
+flexibility-detail-view {
+  height: 100%;
+}
+.flexibilityTab {
+  flex-direction: column;
+  background-color: #252525;
+  color: #949494;
+  cursor: default;
+  font-family: ".SFNSDisplay-Regular", "Helvetica Neue", "Lucida Grande", sans-serif;
+  font-size: 12px;
+  tab-size: 4;
+  user-select: none;
+}
+.flexibilityTab * {
+  min-width: 0px;
+  min-height: 0px;
+}
+.flexibilityTab * {
+  box-sizing: border-box;
+}
+.flexibilityTab :focus {
+  outline-width: 0px;
+}
+.flexibilityTab [is="ui-icon"] {
+  display: inline-block;
+  flex-shrink: 0;
+}
+.flexibilityTab [is="ui-icon"].icon-mask {
+  background-color: #6e6e6e;
+  -webkit-mask-position: var(--spritesheet-position);
+}
+.flexibilityTab .spritesheet-smallicons:not(.icon-mask) {
+  background-image: url("/images/smallIcons.svg");
+}
+.flexibilityTab .spritesheet-smallicons.icon-mask {
+  -webkit-mask-image: url("/images/smallIcons.svg");
+}
+.flexibilityTab .spritesheet-largeicons.icon-mask {
+  -webkit-mask-image: url("/images/largeIcons.svg");
+}
+.flexibilityTab .spritesheet-mediumicons.icon-mask {
+  -webkit-mask-image: url("/images/mediumIcons.svg");
+}
+.flexibilityTab .spritesheet-mediumicons:not(.icon-mask) {
+  background-image: url(/images/mediumIcons.svg);
+}
+.flexibilityTab [is=ui-icon]:not(.icon-mask) {
+  background-position: var(--spritesheet-position);
+}
+.flexibilityTab ::selection {
+  background-color: #252525;
+}
+.flexibilityTab .data-grid:focus {
+  outline: none;
+}
+.flexibilityTab splitter {
+  background-color: #000;
+}
+.flexibilityTab splitter start {
+  flex-direction: column;
+}
+.flexibilityTab splitter > start [is="ui-icon"] {
+  height: 1.3rem;
+  width: 1.3rem;
+  padding-top: 0.15rem;
+  padding-left: 0.15rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  color: #838181;
+  font-weight: bold;
+  display: block;
+}
+.flexibilityTab splitter > start [is="ui-icon"]:hover {
+  opacity: 1;
+}
+.flexibilityTab .data-grid {
+  position: absolute;
+  top: 25px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: auto;
+}
+.flexibilityTab #flexibility-editor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: auto;
+}
+.flexibilityTab table {
+  width: 100%;
+}
 .ai-chat-wrapper {
   display: flex;
   flex-direction: column;
