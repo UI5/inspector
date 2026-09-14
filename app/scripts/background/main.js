@@ -11,6 +11,8 @@
         contexts: ['all']
     });
 
+    var isUI5PanelShown = false;
+
     /**
      * This method will be fired when an instance is clicked. The idea is to be overwritten from the instance.
      * @param {Object} info - Information sent when a context menu item is clicked. Check chrome.contextMenus.onClicked.
@@ -133,6 +135,7 @@
          * @param {Object} message
          */
         'on-ui5-devtool-show': function (message) {
+            isUI5PanelShown = true;
             contextMenu.create();
         },
 
@@ -141,6 +144,7 @@
          * @param {Object} message
          */
         'on-ui5-devtool-hide': function (message) {
+            isUI5PanelShown = false;
             contextMenu.removeAll();
         },
 
@@ -478,6 +482,16 @@
 
     // Listen for long-lived connections for Prompt API
     chrome.runtime.onConnect.addListener((port) => {
+        if (port.name === 'devtools') {
+            port.onDisconnect.addListener(function () {
+                if (isUI5PanelShown) {
+                    contextMenu.removeAll();
+                    isUI5PanelShown = false;
+                }
+            });
+            return;
+        }
+
         if (port.name === 'prompt-api') {
             port.onMessage.addListener((message) => {
                 switch (message.type) {
