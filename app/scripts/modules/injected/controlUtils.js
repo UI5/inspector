@@ -237,17 +237,34 @@ var controlProperties = (function () {
 
     /**
      * Formatter for the type enums.
+     *
+     * Resolves an enum's keys/values so the DataView can render a dropdown.
+     * The values are read from the registered UI5 DataType
+     * (DataType.getType(type).getEnumValues()) rather than from the global
+     * namespace: classic libraries (e.g. sap.m) expose their enums on
+     * window.sap.m.<Enum>, but the generated UI5 Web Components wrappers are
+     * AMD-only modules that register their enums as DataTypes without ever
+     * placing them on the global namespace. The legacy global-namespace walk
+     * (_transformStringTypeToObject) is kept as a fallback for runtimes whose
+     * DataType lacks getEnumValues().
      * @param {string | Object} type
      * @private
      */
     function _formatTypes (type) {
-        var objectType;
-        if (type.startsWith('sap.') && sap.ui.require('sap/ui/base/DataType').getType(type).getDefaultValue()) {
-            objectType = _transformStringTypeToObject(type);
-        } else {
-            objectType = type;
+        if (typeof type !== 'string' || !type.startsWith('sap.')) {
+            return type;
         }
-        return objectType;
+
+        var DataType = sap.ui.require('sap/ui/base/DataType');
+        var oType = DataType && DataType.getType(type);
+        if (oType && typeof oType.isEnumType === 'function' && oType.isEnumType()) {
+            if (typeof oType.getEnumValues === 'function') {
+                return oType.getEnumValues();
+            }
+            return _transformStringTypeToObject(type);
+        }
+
+        return type;
     }
 
     /**

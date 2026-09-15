@@ -440,4 +440,23 @@ describe('Helpers for DataView', function () {
             expect(shouldReturnEmpty).to.equal(null);
         });
     });
+
+    describe('#wrapInSelectTag', function () {
+        it('escapes HTML in option labels and values', function () {
+            var malicious = '</option><img src=x onerror=alert(1)>';
+            var type = {};
+            type[malicious] = malicious;
+            var html = DVHelper.wrapInSelectTag('', {}, type);
+            expect(html).to.not.include('<img');
+            expect(html).to.include('&lt;/option&gt;');
+        });
+
+        it('preserves correct selected state after escaping', function () {
+            var type = { Default: 'Default', Emphasized: 'Emphasized' };
+            var html = DVHelper.wrapInSelectTag('Emphasized', {}, type);
+            expect(html).to.include('value="Emphasized" selected');
+            expect(html).to.include('value="Default"');
+            expect(html).to.not.include('value="Default" selected');
+        });
+    });
 });

@@ -3,6 +3,16 @@
 var _ = require('lodash');
 
 /**
+ * Escape HTML special characters.
+ * @param {string} value - String to escape
+ * @returns {string} - Escaped string
+ * @private
+ */
+function _escapeHTML(value) {
+    return _.escape(value);
+}
+
+/**
  * Generates attributes in HTML.
  * @param {Object} attributes
  * @returns {string}
@@ -117,8 +127,8 @@ function _generateValueOptions(value, type) {
         types = Object.keys(type);
 
         for (i = 0; i < types.length; i++) {
-            html += '<option value="' + type[types[i]] + '"' + (type[types[i]] === value ? ' selected' : '') + '>' +
-                types[i] + '</option>';
+            html += '<option value="' + _escapeHTML(type[types[i]]) + '"' + (type[types[i]] === value ? ' selected' : '') + '>' +
+                _escapeHTML(types[i]) + '</option>';
         }
 
     }
@@ -419,16 +429,6 @@ function _cleanDuplicateClasses(value) {
         var uniqueClasses = [...new Set(classString.split(/\s+/).filter(Boolean))];
         return 'class="' + uniqueClasses.join(' ') + '"';
     });
-}
-
-/**
- * Escape HTML special characters.
- * @param {string} value - String to escape
- * @returns {string} - Escaped string
- * @private
- */
-function _escapeHTML(value) {
-    return _.escape(value);
 }
 
 /**
