@@ -484,6 +484,7 @@
     chrome.runtime.onConnect.addListener((port) => {
         if (port.name === 'devtools') {
             port.onDisconnect.addListener(function () {
+                utils.sendToAll({ action: 'on-hide-highlight' });
                 if (isUI5PanelShown) {
                     contextMenu.removeAll();
                     isUI5PanelShown = false;

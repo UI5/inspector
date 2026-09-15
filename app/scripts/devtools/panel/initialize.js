@@ -28,6 +28,9 @@ function _getNearestUI5ControlID(selectedElement) {
 chrome.devtools.panels.create('UI5', '/images/icon-128.png', '/html/panel/ui5/index.html', function (panel) {
     panel.onHidden.addListener(function () {
         messagePort.postMessage({
+            action: 'on-hide-highlight'
+        });
+        messagePort.postMessage({
             action: 'on-ui5-devtool-hide'
         });
     });
