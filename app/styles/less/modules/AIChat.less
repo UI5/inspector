@@ -433,7 +433,14 @@
 .input-wrapper {
     display: flex;
     gap: 8px;
-    align-items: flex-end;
+    align-items: center;
+
+    .memory-indicator-host {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        flex-shrink: 0;
+    }
 }
 
 // Inline error slot: muted red single-line status placed above the input row for transient
@@ -494,41 +501,6 @@
     }
 }
 
-.input-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 8px;
-    padding: 0 4px;
-}
-
-.token-counter {
-    font-size: 12px;
-    color: @gray-darkest;
-    font-weight: 500;
-    padding: 4px 8px;
-    background-color: fade(@gray, 10%);
-    border-radius: 4px;
-
-    &[hidden] {
-        display: none;
-    }
-
-    &.warning {
-        color: @amber;
-        background-color: fade(@amber, 10%);
-    }
-
-    &.warning-critical {
-        color: @red-saturated;
-        background-color: fade(@red-saturated, 10%);
-    }
-
-    &.quota-exhausted {
-        color: @red-dark;
-        background-color: fade(@red-dark, 10%);
-    }
-}
 
 // Scrollbar styling
 .ai-messages-container {

@@ -164,6 +164,7 @@
         "sinon": true,
         "should": true,
         "Event": true,
+		"KeyboardEvent": true,
 		"ace": true,
 		"self": true,
 		"AbortController": true
