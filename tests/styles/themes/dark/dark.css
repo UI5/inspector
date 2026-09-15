@@ -1351,16 +1351,13 @@ elements-registry-master-view:not([show-filtered-elements]) .selected ::selectio
   background-color: #C98730;
   animation: pulse 1.5s ease-in-out infinite;
 }
-.ai-status-banner.status-session-failed,
 .ai-status-banner.status-streaming-failed {
   background-color: rgba(154, 186, 218, 0.15);
   border-color: #d4d4d4;
 }
-.ai-status-banner.status-session-failed .status-indicator,
 .ai-status-banner.status-streaming-failed .status-indicator {
   background-color: #9ABADA;
 }
-.ai-status-banner.status-session-failed .status-text,
 .ai-status-banner.status-streaming-failed .status-text {
   white-space: pre-line;
   font-size: 11px;
