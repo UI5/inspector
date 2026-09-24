@@ -19,9 +19,9 @@ jobs:
       # Build + upload the artifact ONLY when a release was actually created
       # (i.e. the Release PR was merged this run). Most pushes only refresh the
       # Release PR, so release_created is false and these steps are skipped.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: ${{ steps.release.outputs.release_created }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         if: ${{ steps.release.outputs.release_created }}
         with:
           node-version: 24
