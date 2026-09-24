@@ -27,8 +27,11 @@ jobs:
           node-version: 24
       - name: Build distribution zip
         if: ${{ steps.release.outputs.release_created }}
+        # --ignore-scripts skips postinstall (which itself runs tsc + grunt dist);
+        # we build explicitly below so the artifact isn't produced twice.
         run: |
-          npm ci
+          npm ci --ignore-scripts
+          npm run generate:typescript
           grunt dist
       - name: Upload release asset
         if: ${{ steps.release.outputs.release_created }}
