@@ -1,32 +1,40 @@
-# This is a basic workflow to automate the creation of the build artifact
 name: Release
-# Controls when the workflow will run
 on:
-  schedule:
-  - cron: "0 9 15 * *"
-  # Allows you to run this workflow manually from the Actions tab
+  push:
+    branches: [ master ]
   workflow_dispatch:
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
 jobs:
-  release:
+  release-please:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
-      - uses: actions/checkout@v6
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - uses: googleapis/release-please-action@v5
+        id: release
         with:
-          node-version: 22
-      - name: Install NPM dependencies
-        run: npm ci
-      - name: Run tests
-        run: grunt test
-      # Release using semantic-release if there are new semantic commits.
-      # The @semantic-release/git plugin commits the version bump
-      # (package.json, package-lock.json, app/manifest.json, CHANGELOG.md)
-      # directly back to master.
-      - name: Release
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build + upload the artifact ONLY when a release was actually created
+      # (i.e. the Release PR was merged this run). Most pushes only refresh the
+      # Release PR, so release_created is false and these steps are skipped.
+      - uses: actions/checkout@v6
+        if: ${{ steps.release.outputs.release_created }}
+      - uses: actions/setup-node@v6
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          node-version: 24
+      - name: Build distribution zip
+        if: ${{ steps.release.outputs.release_created }}
+        run: |
+          npm ci
+          grunt dist
+      - name: Upload release asset
+        if: ${{ steps.release.outputs.release_created }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx semantic-release
+        run: |
+          cp package/ui5inspector.zip "ui5inspector-${{ steps.release.outputs.tag_name }}.zip"
+          gh release upload "${{ steps.release.outputs.tag_name }}" \
+            "ui5inspector-${{ steps.release.outputs.tag_name }}.zip"
