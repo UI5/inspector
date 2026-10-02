@@ -117,6 +117,7 @@ describe('PromptBuilder', function () {
 
                 rule1.should.match(/English/);
                 rule2.should.contain('Current UI5 Control Context');
+                rule2.should.contain('Current UI5 Web Component Context');
                 rule3.should.contain('confident');
                 rule4.should.match(/runtime data/i);
                 rule4.should.contain('shown above');
@@ -126,6 +127,14 @@ describe('PromptBuilder', function () {
                 const prompt = promptBuilder.buildSystemPrompt();
 
                 prompt.should.contain('I\'m not certain <name> exists on <control> — verify in the API reference.');
+            });
+
+            it('should include a rule teaching UI5 Web Component vocabulary (tag, slots, no bindings)', function () {
+                const prompt = promptBuilder.buildSystemPrompt();
+
+                prompt.should.contain('custom elements');
+                prompt.should.contain('Slots are the web-component equivalent of aggregations');
+                prompt.should.contain('no data bindings or models');
             });
 
             it('should include a bad/good copy-me example demonstrating the uncertainty phrase', function () {
@@ -140,6 +149,13 @@ describe('PromptBuilder', function () {
                 // The good example must instantiate the uncertainty phrase pattern.
                 const goodSection = prompt.substring(goodIdx);
                 goodSection.should.match(/I'm not certain .+ exists on .+ — verify in the API reference\./);
+            });
+
+            it('should ground rule 2 in both the classic and web component context sections', function () {
+                const prompt = promptBuilder.buildSystemPrompt();
+
+                prompt.should.contain('Current UI5 Control Context or Current UI5 Web Component Context');
+                prompt.should.contain('do not describe it from general knowledge');
             });
         });
 
@@ -344,10 +360,11 @@ describe('PromptBuilder', function () {
             const RULES =
                 'Rules:\n' +
                 '1. Always reply in English, regardless of the language of the user\'s message.\n' +
-                '2. When a Current UI5 Control Context section is present in the user prompt, only reference property, aggregation, event, and binding names that appear in it. If asked about a name not listed there, say so plainly.\n' +
+                '2. When a Current UI5 Control Context or Current UI5 Web Component Context section is present, treat it as the authoritative list of that control\'s property, aggregation, slot, event, and binding names. Only reference names that appear in it. If asked about a name not listed there, do not describe it from general knowledge — say it is not in the context, or use the rule 3 uncertainty phrase.\n' +
                 '3. When naming a specific property, event, method, or enum value on a UI5 control, only state it if confident it exists. Otherwise use this exact phrase and add no further disclaimers:\n' +
                 'I\'m not certain <name> exists on <control> — verify in the API reference.\n' +
-                '4. Prefer runtime data (resolved binding values, console errors, application metadata shown above) over general assumptions when answering.';
+                '4. Prefer runtime data (resolved binding values, console errors, application metadata shown above) over general assumptions when answering.\n' +
+                '5. UI5 Web Components are custom elements (e.g. ui5-button). Reason about them via their tag name, attributes/properties, slots, and events — not sap.* class APIs. Slots are the web-component equivalent of aggregations, and web components have no data bindings or models.';
 
             const STYLE =
                 'Style:\n' +
@@ -487,6 +504,26 @@ describe('PromptBuilder', function () {
 
                 result.should.contain('- Type: sap.m.Button');
                 result.should.contain('- ID: myButton');
+            });
+
+            it('should use the classic "Current UI5 Control Context:" header and no Slots header for a classic control', function () {
+                const inspectionContext = {
+                    control: { type: 'sap.m.Button', id: 'btn1' }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.contain('Current UI5 Control Context:');
+                result.should.not.contain('Current UI5 Web Component Context:');
+                result.should.not.contain('Slots:');
+            });
+
+            it('should not add the web-component no-bindings line to a classic control', function () {
+                const result = promptBuilder.buildUserPrompt('Q', {
+                    control: { type: 'sap.m.Button', id: 'btn1' }
+                });
+
+                result.should.not.contain('Data bindings: none');
             });
         });
 
@@ -1355,6 +1392,173 @@ describe('PromptBuilder', function () {
                     'Now answer: Q';
 
                 result.should.equal(expected);
+            });
+        });
+
+        describe('events rendering', function () {
+            it('should render an Events section with event names for a classic control', function () {
+                const inspectionContext = {
+                    control: {
+                        type: 'sap.m.Button',
+                        id: 'btn1',
+                        events: { own: { data: { press: {}, tap: {} } } }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+                const events = _extractSection(result, 'Events:');
+
+                result.should.contain('Events:');
+                events.should.contain('press');
+                events.should.contain('tap');
+            });
+
+            it('should render an Events section for a web component', function () {
+                const inspectionContext = {
+                    control: {
+                        isWebComponent: true,
+                        tag: 'ui5-button',
+                        version: '2.4.0',
+                        events: { own: { data: { click: {}, 'active-state-change': {} } } }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+                const events = _extractSection(result, 'Events:');
+
+                result.should.contain('Events:');
+                events.should.contain('click');
+                events.should.contain('active-state-change');
+            });
+
+            it('should omit the Events section when there are no events', function () {
+                const inspectionContext = {
+                    control: { type: 'sap.m.Button', id: 'btn1' }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.not.contain('Events:');
+            });
+
+            it('should omit the Events section when events.own.data is empty', function () {
+                const inspectionContext = {
+                    control: { isWebComponent: true, tag: 'ui5-button', version: '2.4.0', events: { own: { data: {} } } }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
+
+                result.should.not.contain('Events:');
+            });
+        });
+
+        describe('web component control block', function () {
+            function _webcContext() {
+                return {
+                    control: {
+                        isWebComponent: true,
+                        tag: 'ui5-button',
+                        version: '2.4.0',
+                        properties: {
+                            own: {
+                                data: { design: { value: 'Emphasized' } },
+                                types: { design: { Default: 'Default', Emphasized: 'Emphasized' } }
+                            }
+                        },
+                        aggregations: {
+                            own: { data: { icon: [{ id: 'ico1', type: 'ui5-icon' }] } }
+                        },
+                        bindings: { text: { path: '/label', value: 'Save', model: 'default' } }
+                    }
+                };
+            }
+
+            it('should use the "Current UI5 Web Component Context:" header', function () {
+                const result = promptBuilder.buildUserPrompt('Q', _webcContext());
+
+                result.should.contain('Current UI5 Web Component Context:');
+                result.should.not.contain('Current UI5 Control Context:');
+            });
+
+            it('should render Tag and Version identity lines', function () {
+                const result = promptBuilder.buildUserPrompt('Q', _webcContext());
+
+                result.should.contain('- Tag: ui5-button');
+                result.should.contain('- Version: 2.4.0');
+            });
+
+            it('should render aggregations under a "Slots:" header, not "Aggregations:"', function () {
+                const result = promptBuilder.buildUserPrompt('Q', _webcContext());
+
+                result.should.contain('Slots:');
+                result.should.not.contain('Aggregations:');
+                const slots = _extractSection(result, 'Slots:');
+                slots.should.contain('icon');
+            });
+
+            it('should omit the Bindings section for a web component even when bindings are present', function () {
+                const result = promptBuilder.buildUserPrompt('Q', _webcContext());
+
+                result.should.not.contain('Bindings:');
+            });
+
+            it('should still render enum property values inline', function () {
+                const result = promptBuilder.buildUserPrompt('Q', _webcContext());
+                const props = _extractPropertiesSection(result);
+
+                props.should.contain('design');
+                props.should.contain('(enum: Default, Emphasized)');
+            });
+
+            it('should omit the Slots section when the web component has no aggregations', function () {
+                const ctx = {
+                    control: {
+                        isWebComponent: true,
+                        tag: 'ui5-busy-indicator',
+                        version: '2.4.0',
+                        properties: { own: { data: { active: { value: true } }, types: {} } }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', ctx);
+
+                result.should.contain('Current UI5 Web Component Context:');
+                result.should.not.contain('Slots:');
+            });
+
+            it('should render Slots when aggregations have data', function () {
+                const ctx = {
+                    control: {
+                        isWebComponent: true,
+                        tag: 'ui5-list',
+                        version: '2.4.0',
+                        aggregations: { own: { data: { items: [{ id: 'i1', type: 'ui5-li' }] } } }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', ctx);
+
+                result.should.contain('Slots:');
+                result.should.not.contain('Aggregations:');
+            });
+
+            it('should fall back to Unknown for missing tag and version', function () {
+                const ctx = {
+                    control: { isWebComponent: true }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', ctx);
+
+                result.should.contain('- Tag: Unknown');
+                result.should.contain('- Version: Unknown');
+            });
+
+            it('should state explicitly that a web component has no data bindings', function () {
+                const result = promptBuilder.buildUserPrompt('Q', {
+                    control: { isWebComponent: true, tag: 'ui5-button', version: '2.4.0' }
+                });
+
+                result.should.contain('Data bindings: none');
             });
         });
     });
