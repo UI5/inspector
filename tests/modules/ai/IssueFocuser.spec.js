@@ -101,12 +101,16 @@ describe('IssueFocuser', function () {
             });
         });
 
-        it('should decline when there are more candidates than maxCandidates', function () {
-            return new IssueFocuser({ promptClient: createFakeClient() })
-                .focus(sampleSnapshot(), 'bug', { maxCandidates: 2 })
+        it('should batch candidates when there are more than the per-batch window', function () {
+            const promptStreaming = sinon.stub().returns(Promise.resolve(makeStream(['["btnSave"]'])));
+            const client = createFakeClient({ promptStreaming: promptStreaming });
+            return new IssueFocuser({ promptClient: client })
+                .focus(sampleSnapshot(), 'Save fails', { maxCandidates: 2 })
                 .then(function (result) {
-                    result.usedAI.should.equal(false);
-                    result.reason.should.equal('too-large');
+                    // 6 candidates / batch size 2 -> 3 sequential model calls, ids unioned.
+                    promptStreaming.callCount.should.equal(3);
+                    result.usedAI.should.equal(true);
+                    result.focusedIds.should.deep.equal(['btnSave']);
                 });
         });
     });

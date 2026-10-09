@@ -2,9 +2,10 @@
 
 var PromptClient = require('./PromptClient.js');
 
-// Candidate ceiling. Beyond this the on-device model's small context makes id-selection unreliable,
-// so the focuser declines and the deterministic compaction path is used instead.
-var DEFAULT_MAX_CANDIDATES = 300;
+// Per-request candidate window. The on-device model's small context makes id-selection unreliable
+// beyond this many controls, so larger apps are split into sequential batches of this size and the
+// ids selected across batches are unioned — the focuser never declines purely on size.
+var DEFAULT_BATCH_SIZE = 300;
 var LABEL_MAX_LENGTH = 40;
 var LABEL_PROPERTY_PATTERN = /^(text|title|label|placeholder|value|tooltip|name)$/i;
 
@@ -187,6 +188,41 @@ IssueFocuser.prototype._collect = function (stream) {
 };
 
 /**
+ * Run the model across the candidate batches sequentially and return the de-duplicated union of
+ * selected ids, preserving first-seen order. Any batch failure rejects the whole run so the caller
+ * falls back to the full tree.
+ * @private
+ * @param {string} issue
+ * @param {Array<Array>} batches
+ * @param {Object} validIds
+ * @returns {Promise<Array<string>>}
+ */
+IssueFocuser.prototype._selectAcrossBatches = function (issue, batches, validIds) {
+    var self = this;
+    var collected = Object.create(null);
+    var order = [];
+    var chain = Promise.resolve();
+
+    batches.forEach(function (batch) {
+        chain = chain.then(function () {
+            var prompt = self._buildFocusPrompt(issue, batch);
+            return self._selectIds(prompt, validIds).then(function (ids) {
+                ids.forEach(function (id) {
+                    if (!Object.prototype.hasOwnProperty.call(collected, id)) {
+                        collected[id] = true;
+                        order.push(id);
+                    }
+                });
+            });
+        });
+    });
+
+    return chain.then(function () {
+        return order;
+    });
+};
+
+/**
  * Run the model and return the validated, selected ids. Session is created and destroyed here.
  * @private
  * @param {{system: string, user: string}} prompt
@@ -214,7 +250,8 @@ IssueFocuser.prototype._selectIds = function (prompt, validIds) {
  * @param {Object} snapshot - Crawler snapshot.
  * @param {string} issue - Reported-issue description.
  * @param {Object} [options]
- * @param {number} [options.maxCandidates] - Candidate ceiling above which the focuser declines.
+ * @param {number} [options.maxCandidates] - Per-batch candidate window; larger apps are split into
+ *     sequential batches of this size rather than declined.
  * @returns {Promise<{tree: Array, focusedIds: Array<string>, usedAI: boolean, reason: string}>}
  *     Always resolves; `usedAI` is false when the original tree is returned unchanged.
  */
@@ -234,10 +271,9 @@ IssueFocuser.prototype.focus = function (snapshot, issue, options) {
         return Promise.resolve(original);
     }
 
-    var maxCandidates = typeof options.maxCandidates === 'number' ? options.maxCandidates : DEFAULT_MAX_CANDIDATES;
-    if (candidates.length > maxCandidates) {
-        original.reason = 'too-large';
-        return Promise.resolve(original);
+    var batchSize = typeof options.maxCandidates === 'number' ? options.maxCandidates : DEFAULT_BATCH_SIZE;
+    if (batchSize < 1) {
+        batchSize = DEFAULT_BATCH_SIZE;
     }
 
     var validIds = Object.create(null);
@@ -245,10 +281,14 @@ IssueFocuser.prototype.focus = function (snapshot, issue, options) {
         validIds[candidate.id] = true;
     });
 
-    var prompt = this._buildFocusPrompt(issue, candidates);
+    var batches = [];
+    for (var i = 0; i < candidates.length; i += batchSize) {
+        batches.push(candidates.slice(i, i + batchSize));
+    }
+
     var self = this;
 
-    return this._selectIds(prompt, validIds).then(function (ids) {
+    return this._selectAcrossBatches(issue, batches, validIds).then(function (ids) {
         if (ids.length === 0) {
             original.reason = 'empty-selection';
             return original;
