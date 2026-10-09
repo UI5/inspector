@@ -1,0 +1,86 @@
+// ReproductionView component styles
+
+reproduction-view {
+    display: block;
+    height: 100%;
+}
+
+.reproduction-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    box-sizing: border-box;
+    background-color: @bg-white;
+}
+
+.reproduction-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid @border-gray-lighter;
+
+    button {
+        cursor: pointer;
+    }
+
+    button[disabled] {
+        cursor: default;
+        opacity: 0.5;
+    }
+}
+
+.reproduction-issue {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 12px;
+    border-bottom: 1px solid @border-gray-lighter;
+}
+
+.reproduction-issue-label {
+    font-size: 12px;
+    color: @gray;
+}
+
+.reproduction-issue-input {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    color: @text-color;
+    background-color: @bg-white;
+    border: 1px solid @border-gray-lighter;
+}
+
+.reproduction-realdata {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: @text-color;
+}
+
+.reproduction-status {
+    margin-left: auto;
+    font-size: 12px;
+    color: @gray;
+}
+
+.reproduction-output {
+    flex: 1;
+    width: 100%;
+    box-sizing: border-box;
+    border: none;
+    resize: none;
+    padding: 12px;
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: @text-color;
+    background-color: @bg-white;
+    white-space: pre;
+    overflow: auto;
+}

@@ -31,6 +31,7 @@
     var ControllerDetailView = require('../../../modules/ui/ControllerDetailView.js');
     var OElementsRegistryMasterView = require('../../../modules/ui/OElementsRegistryMasterView.js');
     var AIChat = require('../../../modules/ui/AIChat.js');
+    var ReproductionView = require('../../../modules/ui/ReproductionView.js');
     var WebCEnumRegistry = require('../../../modules/webc/WebCEnumRegistry.js');
 
 
@@ -628,6 +629,17 @@
         });
     }
 
+    // Reproduction prompt generator. On Generate it asks the injected script to crawl the
+    // inspected frame; the snapshot arrives via the 'on-reproduction-snapshot' message below.
+    var reproductionView = new ReproductionView('reproduction-view', {
+        onRequestSnapshot: function () {
+            port.postMessage({
+                action: 'get-reproduction-snapshot',
+                frameId: framesSelect.getSelectedId()
+            });
+        }
+    });
+
     // ================================================================================
     // Communication
     // ================================================================================
@@ -984,6 +996,14 @@
                 return;
             }
             frameData[frameId].consoleErrors = message.consoleErrors || [];
+        },
+
+        /**
+         * Hand the reproduction crawl result to the Reproduce view.
+         * @param {Object} message
+         */
+        'on-reproduction-snapshot': function (message) {
+            reproductionView.showSnapshot(message.snapshot, message.error);
         }
     };
 

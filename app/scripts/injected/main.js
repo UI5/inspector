@@ -7,6 +7,7 @@ sap.ui.require(['ToolsAPI'], function (ToolsAPI) {
     var rightClickHandler = require('../modules/injected/rightClickHandler.js');
     var applicationUtils = require('../modules/injected/applicationUtils');
     var consoleErrorCapture = require('../modules/injected/consoleErrorCapture.js');
+    var reproductionCrawler = require('../modules/injected/reproductionCrawler.js');
 
     var ui5TempName = 'ui5$temp';
 	var ui5Temp = window[ui5TempName] = {}; // Container for all temp. variables
@@ -387,6 +388,28 @@ sap.ui.require(['ToolsAPI'], function (ToolsAPI) {
             message.send({
                 action: 'on-console-errors-updated',
                 consoleErrors: []
+            });
+        },
+
+        /**
+         * Crawl the whole application into a reproduction snapshot and send it to the panel.
+         */
+        'get-reproduction-snapshot': function () {
+            reproductionCrawler.crawl(ToolsAPI, {
+                href: window.location.href,
+                title: document.title,
+                consoleErrors: consoleErrorHandle.buffer.snapshot()
+            }).then(function (snapshot) {
+                message.send({
+                    action: 'on-reproduction-snapshot',
+                    snapshot: snapshot
+                });
+            }).catch(function (error) {
+                message.send({
+                    action: 'on-reproduction-snapshot',
+                    snapshot: null,
+                    error: error && error.message ? error.message : 'Failed to crawl application'
+                });
             });
         }
     };
