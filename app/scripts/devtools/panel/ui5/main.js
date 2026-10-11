@@ -794,13 +794,19 @@
                     }
                 }
 
+                var ownMeta = (message.controlProperties.own && message.controlProperties.own.meta) || {};
+
                 aiChat.updateContext({
                     control: {
                         type: controlType,
                         id: controlId,
+                        isWebComponent: ownMeta.isWebComponent === true,
+                        tag: ownMeta.tag,
+                        version: ownMeta.version,
                         properties: message.controlProperties,
                         bindings: message.controlBindings,
-                        aggregations: message.controlAggregations
+                        aggregations: message.controlAggregations,
+                        events: message.controlEvents
                     },
                     appInfo: frameData[frameId].applicationInformation
                 });

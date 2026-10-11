@@ -4,6 +4,7 @@
 const PROPERTIES_CAP = 800;
 const BINDINGS_CAP = 800;
 const AGGREGATIONS_CAP = 400;
+const EVENTS_CAP = 400;
 const CONSOLE_ERRORS_CAP = 400;
 const BINDING_VALUE_CAP = 100;
 
@@ -100,10 +101,11 @@ PromptBuilder.prototype.buildSystemPrompt = function (appInfo) {
 
     const rules = 'Rules:\n' +
         '1. Always reply in English, regardless of the language of the user\'s message.\n' +
-        '2. When a Current UI5 Control Context section is present in the user prompt, only reference property, aggregation, event, and binding names that appear in it. If asked about a name not listed there, say so plainly.\n' +
+        '2. When a Current UI5 Control Context or Current UI5 Web Component Context section is present, treat it as the authoritative list of that control\'s property, aggregation, slot, event, and binding names. Only reference names that appear in it. If asked about a name not listed there, do not describe it from general knowledge — say it is not in the context, or use the rule 3 uncertainty phrase.\n' +
         '3. When naming a specific property, event, method, or enum value on a UI5 control, only state it if confident it exists. Otherwise use this exact phrase and add no further disclaimers:\n' +
         'I\'m not certain <name> exists on <control> — verify in the API reference.\n' +
-        '4. Prefer runtime data (resolved binding values, console errors, application metadata shown above) over general assumptions when answering.';
+        '4. Prefer runtime data (resolved binding values, console errors, application metadata shown above) over general assumptions when answering.\n' +
+        '5. UI5 Web Components are custom elements (e.g. ui5-button). Reason about them via their tag name, attributes/properties, slots, and events — not sap.* class APIs. Slots are the web-component equivalent of aggregations, and web components have no data bindings or models.';
 
     const style = 'Style:\n' +
         'Neutral, direct, and developer-focused. Use code snippets for code. No marketing filler, no generic disclaimers.';
@@ -217,6 +219,10 @@ PromptBuilder.prototype.buildUserPrompt = function (userMessage, inspectionConte
  * @returns {string}
  */
 PromptBuilder.prototype._buildControlContextBlock = function (control) {
+    if (control.isWebComponent) {
+        return this._buildWebComponentContextBlock(control);
+    }
+
     const identityLines = [
         '- Type: ' + (control.type || 'Unknown'),
         '- ID: ' + (control.id || 'None')
@@ -235,9 +241,47 @@ PromptBuilder.prototype._buildControlContextBlock = function (control) {
     if (aggregationsSection) {
         sections.push(aggregationsSection);
     }
+    const eventsSection = this._renderEventsSection(control.events);
+    if (eventsSection) {
+        sections.push(eventsSection);
+    }
 
     const contextBody = identityLines.concat(sections).join('\n');
     return 'Current UI5 Control Context:\n' + contextBody;
+};
+
+/**
+ * Build the control-context block for a UI5 Web Component: tag/version identity,
+ * properties (enum types resolved from the manifest), and slots. Web components
+ * have no data bindings, so no Bindings section is emitted.
+ * @private
+ * @param {Object} control
+ * @returns {string}
+ */
+PromptBuilder.prototype._buildWebComponentContextBlock = function (control) {
+    const identityLines = [
+        '- Tag: ' + (control.tag || control.type || 'Unknown'),
+        '- Version: ' + (control.version || 'Unknown'),
+        '- ID: ' + (control.id || 'None'),
+        '- Data bindings: none (web components do not use data binding)'
+    ];
+
+    const sections = [];
+    const propertiesSection = this._renderPropertiesSection(control.properties);
+    if (propertiesSection) {
+        sections.push(propertiesSection);
+    }
+    const slotsSection = this._renderAggregationsSection(control.aggregations, 'Slots:');
+    if (slotsSection) {
+        sections.push(slotsSection);
+    }
+    const eventsSection = this._renderEventsSection(control.events);
+    if (eventsSection) {
+        sections.push(eventsSection);
+    }
+
+    const contextBody = identityLines.concat(sections).join('\n');
+    return 'Current UI5 Web Component Context:\n' + contextBody;
 };
 
 /**
@@ -452,9 +496,12 @@ PromptBuilder.prototype._renderBindingLine = function (propertyName, binding) {
 /**
  * @private
  * @param {Object} aggregations
+ * @param {string} [headerLabel] - Optional section header. Defaults to `'Aggregations:'`.
+ *     Pass `'Slots:'` when rendering web-component slot data.
  * @returns {string}
  */
-PromptBuilder.prototype._renderAggregationsSection = function (aggregations) {
+PromptBuilder.prototype._renderAggregationsSection = function (aggregations, headerLabel) {
+    headerLabel = headerLabel || 'Aggregations:';
     if (!aggregations || !aggregations.own || !aggregations.own.data) {
         return '';
     }
@@ -468,7 +515,28 @@ PromptBuilder.prototype._renderAggregationsSection = function (aggregations) {
         return _renderAggregationLine(name, data[name]);
     });
 
-    return this._capSection('Aggregations:', lines.join('\n'), AGGREGATIONS_CAP);
+    return this._capSection(headerLabel, lines.join('\n'), AGGREGATIONS_CAP);
+};
+
+/**
+ * Render the Events section as a list of event names. Values are omitted — only
+ * the event names are useful to the assistant. Returns '' when there are none.
+ * @private
+ * @param {Object} events - `{ own: { data: { <eventName>: ... } } }`
+ * @returns {string}
+ */
+PromptBuilder.prototype._renderEventsSection = function (events) {
+    if (!events || !events.own || !events.own.data) {
+        return '';
+    }
+    const names = Object.keys(events.own.data);
+    if (names.length === 0) {
+        return '';
+    }
+    const body = names.map(function (name) {
+        return '- ' + name;
+    }).join('\n');
+    return this._capSection('Events:', body, EVENTS_CAP);
 };
 
 /**

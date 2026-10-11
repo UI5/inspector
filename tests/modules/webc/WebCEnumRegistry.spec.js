@@ -73,6 +73,34 @@ const BUTTON_MANIFEST = {
 
 describe('WebCEnumRegistry', function () {
 
+    describe('normalizeVersion', function () {
+        it('extracts the leading semver core, dropping trailing path/package junk', function () {
+            expect(WebCEnumRegistry.normalizeVersion('2.0.0/../../react@18.2.0')).to.equal('2.0.0');
+        });
+
+        it('returns a clean semver unchanged', function () {
+            expect(WebCEnumRegistry.normalizeVersion('2.26.0')).to.equal('2.26.0');
+        });
+
+        it('keeps a prerelease suffix', function () {
+            expect(WebCEnumRegistry.normalizeVersion('1.120.3-rc.1')).to.equal('1.120.3-rc.1');
+        });
+
+        it('trims surrounding whitespace', function () {
+            expect(WebCEnumRegistry.normalizeVersion('  2.4.0 ')).to.equal('2.4.0');
+        });
+
+        it('returns empty string when there is no leading semver core', function () {
+            expect(WebCEnumRegistry.normalizeVersion('garbage')).to.equal('');
+            expect(WebCEnumRegistry.normalizeVersion('/../../etc')).to.equal('');
+        });
+
+        it('returns empty string for non-string input', function () {
+            expect(WebCEnumRegistry.normalizeVersion(undefined)).to.equal('');
+            expect(WebCEnumRegistry.normalizeVersion(null)).to.equal('');
+        });
+    });
+
     describe('parseEnumUnion', function () {
         it('parses a union of quoted string literals into a label->value map', function () {
             const values = WebCEnumRegistry.parseEnumUnion('"Default" | "Emphasized" | "Positive"');
@@ -274,7 +302,35 @@ describe('WebCEnumRegistry', function () {
             });
         });
 
-        it('resolves to an empty map without fetching when version contains path-traversal characters', function () {
+        it('normalizes a malformed runtime version before fetch, storage and lookup', function () {
+            const fakeStorage = createFakeStorage();
+            const fake = createFakeFetch([{
+                match: function (url) { return url.indexOf('@ui5/webcomponents@2.0.0') !== -1; },
+                manifest: BUTTON_MANIFEST
+            }]);
+            const registry = new WebCEnumRegistry({
+                fetch: fake.fetch,
+                storage: fakeStorage.storage,
+                packages: ['@ui5/webcomponents']
+            });
+
+            return registry.prime('2.0.0/../../react@18.2.0').then(function (map) {
+                // The malformed string never reaches a storage key.
+                expect(fakeStorage.data[WebCEnumRegistry.storageKey('2.0.0')]).to.not.equal(undefined);
+                expect(fakeStorage.data['webc_enums_2.0.0/../../react@18.2.0']).to.equal(undefined);
+                // No fetched URL carries the junk tail.
+                fake.calls.forEach(function (url) {
+                    expect(url.indexOf('react@18.2.0')).to.equal(-1);
+                });
+                expect(map['ui5-button'].design)
+                    .to.deep.equal({ Default: 'Default', Emphasized: 'Emphasized', Positive: 'Positive' });
+                // Lookups by the malformed and the normalized version agree.
+                expect(registry.getEnumValues('2.0.0/../../react@18.2.0', 'ui5-button', 'design'))
+                    .to.deep.equal(registry.getEnumValues('2.0.0', 'ui5-button', 'design'));
+            });
+        });
+
+        it('strips a traversal/package tail to the leading semver core before fetching', function () {
             const fake = createFakeFetch([{
                 match: function () { return true; },
                 manifest: BUTTON_MANIFEST
@@ -285,9 +341,15 @@ describe('WebCEnumRegistry', function () {
                 packages: ['@ui5/webcomponents']
             });
 
-            return registry.prime('2.0.0/../../@evil/pkg@1.0.0').then(function (map) {
-                expect(fake.calls).to.have.length(0);
-                expect(Object.keys(map)).to.have.length(0);
+            return registry.prime('2.0.0/../../@evil/pkg@1.0.0').then(function () {
+                // The traversal/evil-package tail never reaches any CDN URL;
+                // only the clean @2.0.0 specifier is requested.
+                expect(fake.calls.length).to.be.above(0);
+                fake.calls.forEach(function (url) {
+                    expect(url.indexOf('..')).to.equal(-1);
+                    expect(url.indexOf('@evil')).to.equal(-1);
+                    expect(url.indexOf('@ui5/webcomponents@2.0.0')).to.not.equal(-1);
+                });
             });
         });
 
