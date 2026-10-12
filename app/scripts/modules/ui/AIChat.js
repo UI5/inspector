@@ -42,6 +42,8 @@ function AIChat(containerId, {
     this._getConsoleErrors = getConsoleErrors;
     this._clearConsoleErrors = clearConsoleErrors;
     this._controller = controller || new AssistantController({
+        providerName: 'gemini-nano',
+        providerConfig: {},
         getAppInfo: this._getAppInfo || function () { return null; },
         getConsoleErrors: this._getConsoleErrors || function () { return []; },
         clearConsoleErrors: this._clearConsoleErrors || function () {}
@@ -267,8 +269,6 @@ AIChat._CAPABILITY_CONFIG = {
     'downloadable':     {},
     'downloading':      {},
     'ready':            { showClearButton: true, updateTokens: true },
-    // Recovery: clearConversation destroys the broken session and reseeds.
-    'session-failed':   { showClearButton: true },
     // Keep the prior banner; recovery clears on the next successful send. Error surfaces via `_showError`.
     'streaming-failed': { skip: true }
 };
@@ -295,7 +295,6 @@ AIChat.prototype._onCapabilityStateChanged = function (state) {
 
     if (config.showClearButton) {
         // `ready` is gated on `_hasMessages` so a post-clear reseed does not re-reveal the button.
-        // `session-failed` still forces it visible — clearing is the recovery path.
         const clearButton = document.getElementById('ai-clear-history-button');
         if (clearButton && (status !== 'ready' || this._hasMessages)) {
             clearButton.style.display = 'inline-block';
