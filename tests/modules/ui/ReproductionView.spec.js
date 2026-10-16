@@ -25,18 +25,21 @@ describe('ReproductionView', function () {
     const fixtures = document.getElementById('fixtures');
     let view;
     let fakeBuilder;
+    let fakeHtmlBuilder;
     let fakeFocuser;
     let requested;
 
     beforeEach(function () {
         fixtures.innerHTML = '<div id="reproduction-view"></div>';
         fakeBuilder = createFakeBuilder('PROMPT');
+        fakeHtmlBuilder = createFakeBuilder('<!DOCTYPE html>');
         fakeFocuser = {
             focus: sinon.stub().returns(Promise.resolve({ usedAI: false, reason: 'empty-selection', tree: [] }))
         };
         requested = 0;
         view = new ReproductionView('reproduction-view', {
             promptBuilder: fakeBuilder,
+            htmlBuilder: fakeHtmlBuilder,
             issueFocuser: fakeFocuser,
             onRequestSnapshot: function () { requested += 1; }
         });
@@ -45,6 +48,7 @@ describe('ReproductionView', function () {
     afterEach(function () {
         view = null;
         fakeBuilder = null;
+        fakeHtmlBuilder = null;
         fakeFocuser = null;
         fixtures.innerHTML = '';
     });
@@ -52,6 +56,7 @@ describe('ReproductionView', function () {
     describe('Rendering', function () {
         it('should render the toolbar controls and the output area', function () {
             view._container.querySelector('.reproduction-generate').should.exist;
+            view._container.querySelector('.reproduction-generate-html').should.exist;
             view._container.querySelector('.reproduction-realdata-input').should.exist;
             view._container.querySelector('.reproduction-copy').should.exist;
             view._container.querySelector('.reproduction-output').should.exist;
@@ -63,12 +68,127 @@ describe('ReproductionView', function () {
     });
 
     describe('Generate', function () {
-        it('should request a snapshot, disable the button and show a crawling status', function () {
+        it('should request a snapshot, disable both generate buttons and show a crawling status', function () {
             view._generateButton.click();
 
             requested.should.equal(1);
             view._generateButton.disabled.should.equal(true);
+            view._generateHtmlButton.disabled.should.equal(true);
             view._status.textContent.should.contain('Crawling');
+        });
+    });
+
+    describe('Generate app code', function () {
+        it('should request a snapshot and switch to html mode', function () {
+            view._generateHtmlButton.click();
+
+            requested.should.equal(1);
+            view._mode.should.equal('html');
+            view._generateButton.disabled.should.equal(true);
+            view._generateHtmlButton.disabled.should.equal(true);
+        });
+
+        it('should build the app code into the output field on success', function () {
+            view._generateHtmlButton.click();
+            view.showSnapshot(sampleSnapshot());
+
+            view._output.value.should.equal('<!DOCTYPE html>');
+            fakeHtmlBuilder.calls.should.have.length(1);
+            fakeBuilder.calls.should.have.length(0);
+            view._copyButton.disabled.should.equal(false);
+            view._status.textContent.should.contain('App code ready');
+            view._status.textContent.should.contain('3 controls');
+        });
+
+        it('should keep producing the prompt in prompt mode', function () {
+            view._generateButton.click();
+            view.showSnapshot(sampleSnapshot());
+
+            view._output.value.should.equal('PROMPT');
+            fakeBuilder.calls.should.have.length(1);
+            fakeHtmlBuilder.calls.should.have.length(0);
+        });
+    });
+
+    describe('Validation (Playwright + Snippix MCP)', function () {
+        function viewWithVerifier(verifier) {
+            fixtures.innerHTML = '<div id="reproduction-view"></div>';
+            return new ReproductionView('reproduction-view', {
+                promptBuilder: fakeBuilder,
+                htmlBuilder: fakeHtmlBuilder,
+                issueFocuser: fakeFocuser,
+                verifier: verifier,
+                onRequestSnapshot: function () {}
+            });
+        }
+
+        it('should not validate when no verifier is wired', function () {
+            view._generateHtmlButton.click();
+            const result = view.showSnapshot(sampleSnapshot());
+            (result === null).should.equal(true);
+            view._status.textContent.should.contain('App code ready');
+            view._status.textContent.should.not.contain('Validating');
+        });
+
+        it('should validate the generated app and report a clean render + Snippix URL', function () {
+            const verifier = {
+                verifyAndSave: sinon.stub().returns(Promise.resolve({
+                    verification: { ok: true, errors: [], reason: 'ok' },
+                    snippet: { ok: true, url: 'https://snippix/snippets/abc.html', reason: 'saved' }
+                }))
+            };
+            const v = viewWithVerifier(verifier);
+            v._generateHtmlButton.click();
+
+            const promise = v.showSnapshot(sampleSnapshot());
+            verifier.verifyAndSave.calledOnce.should.equal(true);
+            verifier.verifyAndSave.firstCall.args[0].should.equal('<!DOCTYPE html>');
+
+            return promise.then(function () {
+                v._status.textContent.should.contain('Rendered with no console errors');
+                v._status.textContent.should.contain('Snippix: https://snippix/snippets/abc.html');
+            });
+        });
+
+        it('should report console errors from a failed render', function () {
+            const verifier = {
+                verifyAndSave: sinon.stub().returns(Promise.resolve({
+                    verification: { ok: false, errors: ['[ERROR] boom'], reason: 'errors' },
+                    snippet: { ok: null, url: '', reason: 'unavailable' }
+                }))
+            };
+            const v = viewWithVerifier(verifier);
+            v._generateHtmlButton.click();
+            return v.showSnapshot(sampleSnapshot()).then(function () {
+                v._status.textContent.should.contain('1 console error(s)');
+                v._status.textContent.should.contain('boom');
+                v._status.textContent.should.contain('Snippix save skipped (unavailable)');
+            });
+        });
+
+        it('should report a skipped render check when the bridge is unavailable', function () {
+            const verifier = {
+                verifyAndSave: sinon.stub().returns(Promise.resolve({
+                    verification: { ok: null, errors: [], reason: 'unavailable' },
+                    snippet: { ok: null, url: '', reason: 'unavailable' }
+                }))
+            };
+            const v = viewWithVerifier(verifier);
+            v._generateHtmlButton.click();
+            return v.showSnapshot(sampleSnapshot()).then(function () {
+                v._status.textContent.should.contain('Render check skipped (unavailable)');
+            });
+        });
+
+        it('should degrade gracefully when verifyAndSave rejects', function () {
+            const verifier = {
+                verifyAndSave: sinon.stub().returns(Promise.reject(new Error('bridge down')))
+            };
+            const v = viewWithVerifier(verifier);
+            v._generateHtmlButton.click();
+            return v.showSnapshot(sampleSnapshot()).then(function () {
+                v._status.textContent.should.contain('Validation unavailable');
+            });
         });
     });
 

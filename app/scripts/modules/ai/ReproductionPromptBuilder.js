@@ -114,6 +114,12 @@ ReproductionPromptBuilder.prototype._renderNode = function (node, depth, options
         if (node.id) {
             header += ' #' + node.id;
         }
+        if (node.aggregation) {
+            header += ' [' + node.aggregation + ']';
+        }
+        if (node.isSmartGenerated) {
+            header += ' (smart-generated)';
+        }
         lines.push(header);
 
         var detailIndent = indent + INDENT_UNIT;
@@ -256,24 +262,72 @@ ReproductionPromptBuilder.prototype._buildErrorsSection = function (consoleError
 };
 
 /**
+ * Render a single frame's tree, labelled by frame id and URL.
  * @private
  */
-ReproductionPromptBuilder.prototype._buildTreeSection = function (tree, options) {
-    var lines = ['## Control tree'];
+ReproductionPromptBuilder.prototype._renderFrameTree = function (frame, options) {
+    var frameLabel = frame.frameId === 0 ? 'main frame' : 'frame ' + frame.frameId;
+    if (frame.url) {
+        frameLabel += ' (' + frame.url + ')';
+    }
+    var lines = ['### ' + frameLabel];
     var body = [];
+    var tree = frame.tree || [];
     for (var i = 0; i < tree.length; i++) {
         body = body.concat(this._renderNode(tree[i], 0, options));
     }
-    if (body.length > options.maxTreeLines) {
-        body = body.slice(0, options.maxTreeLines);
-        body.push('… [outline truncated to fit the editor line budget]');
+    lines.push(body.join('\n') || '(no controls)');
+    return lines.join('\n');
+};
+
+/**
+ * @private
+ */
+ReproductionPromptBuilder.prototype._buildTreeSection = function (snapshot, options) {
+    var frames = Array.isArray(snapshot.frames) ? snapshot.frames : null;
+    var body;
+    if (frames && frames.length > 1) {
+        body = this._buildMultiFrameBody(frames, options);
+    } else {
+        body = this._buildSingleFrameBody(snapshot, frames, options);
     }
-    var rendered = body.join('\n');
+    return '## Control tree\n' + (body || '(no controls found)');
+};
+
+/**
+ * Render each frame under its own sub-heading (multi-frame apps).
+ * @private
+ */
+ReproductionPromptBuilder.prototype._buildMultiFrameBody = function (frames, options) {
+    var self = this;
+    var body = frames.map(function (f) {
+        return self._renderFrameTree(f, options);
+    }).join('\n\n');
+    if (body.length > options.maxTreeChars) {
+        body = body.substring(0, options.maxTreeChars) + '\n… [tree truncated]';
+    }
+    return body;
+};
+
+/**
+ * Render a single control tree (the main frame, or a single-frame app).
+ * @private
+ */
+ReproductionPromptBuilder.prototype._buildSingleFrameBody = function (snapshot, frames, options) {
+    var tree = frames ? (frames[0] && frames[0].tree) || [] : (Array.isArray(snapshot.tree) ? snapshot.tree : []);
+    var singleBody = [];
+    for (var i = 0; i < tree.length; i++) {
+        singleBody = singleBody.concat(this._renderNode(tree[i], 0, options));
+    }
+    if (singleBody.length > options.maxTreeLines) {
+        singleBody = singleBody.slice(0, options.maxTreeLines);
+        singleBody.push('… [outline truncated to fit the editor line budget]');
+    }
+    var rendered = singleBody.join('\n');
     if (rendered.length > options.maxTreeChars) {
         rendered = rendered.substring(0, options.maxTreeChars) + '\n… [tree truncated]';
     }
-    lines.push(rendered || '(no controls found)');
-    return lines.join('\n');
+    return rendered;
 };
 
 /**
@@ -377,7 +431,6 @@ ReproductionPromptBuilder.prototype.build = function (snapshot, options) {
     var resolved = this._resolveOptions(options || {});
 
     var meta = snapshot.meta || {};
-    var tree = Array.isArray(snapshot.tree) ? snapshot.tree : [];
 
     var intro = '# UI5 Reproduction Request\n' +
         'You are a SAPUI5 expert. Using the application description below, recreate a minimal, runnable reproduction so customer support can reproduce a reported issue. Preserve the structure and behaviour; do not add anything that is not described.';
@@ -396,7 +449,7 @@ ReproductionPromptBuilder.prototype.build = function (snapshot, options) {
         sections.push(errors);
     }
 
-    sections.push(this._buildTreeSection(tree, resolved));
+    sections.push(this._buildTreeSection(snapshot, resolved));
     sections.push(this._buildInstructions(!!resolved.issue));
     sections.push(this._buildOutputBudgetSection(resolved));
     sections.push(this._buildNotes(snapshot.stats, resolved));

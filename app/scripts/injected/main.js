@@ -395,22 +395,40 @@ sap.ui.require(['ToolsAPI'], function (ToolsAPI) {
          * Crawl the whole application into a reproduction snapshot and send it to the panel.
          */
         'get-reproduction-snapshot': function () {
-            reproductionCrawler.crawl(ToolsAPI, {
-                href: window.location.href,
-                title: document.title,
-                consoleErrors: consoleErrorHandle.buffer.snapshot()
-            }).then(function (snapshot) {
-                message.send({
-                    action: 'on-reproduction-snapshot',
-                    snapshot: snapshot
-                });
-            }).catch(function (error) {
+            function sendError(error) {
                 message.send({
                     action: 'on-reproduction-snapshot',
                     snapshot: null,
                     error: error && error.message ? error.message : 'Failed to crawl application'
                 });
-            });
+            }
+            // The dispatcher calls this handler without a try/catch; any synchronous throw would
+            // leave the panel hanging in "Crawling…" with no response. Guard it so a response is
+            // always sent, success or failure.
+            try {
+                reproductionCrawler.crawl(ToolsAPI, {
+                    href: window.location.href,
+                    title: document.title,
+                    consoleErrors: consoleErrorHandle.buffer.snapshot(),
+                    // Provide direct access to live UI5 control instances so the crawler can annotate
+                    // each node with its parent-aggregation name and detect smart-generated children,
+                    // matching what the UI5 Inspector control tree shows.
+                    getElement: function (id) {
+                        var Element = sap.ui.require('sap/ui/core/Element');
+                        if (Element && Element.getElementById) {
+                            return Element.getElementById(id);
+                        }
+                        return sap.ui.getCore ? sap.ui.getCore().byId(id) : undefined;
+                    }
+                }).then(function (snapshot) {
+                    message.send({
+                        action: 'on-reproduction-snapshot',
+                        snapshot: snapshot
+                    });
+                }).catch(sendError);
+            } catch (error) {
+                sendError(error);
+            }
         }
     };
 

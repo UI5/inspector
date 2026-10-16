@@ -15,6 +15,7 @@
     "@actions/github": "^5.0.3",
     "@commitlint/cli": "^16.2.3",
     "@commitlint/config-conventional": "^16.2.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "browserify": "^16.5.1",
     "browserify-istanbul": "^3.0.1",
     "chai": "~4.2.0",
@@ -51,7 +52,8 @@
     "prettify-xml": "^1.2.0",
     "sinon": "~9.0.2",
     "time-grunt": "~2.0.0",
-    "typescript": "^4.9.5"
+    "typescript": "^4.9.5",
+    "ws": "^8.22.0"
   },
   "engines": {
     "node": ">=10.0.0"
@@ -62,6 +64,7 @@
   },
   "scripts": {
     "generate:typescript": "tsc",
+    "mcp-bridge": "node tools/mcp-bridge/bridge.js",
     "postinstall": "npm run generate:typescript && node -e \"require('grunt').tasks(['dist']);\"",
     "prepare": "husky install",
     "husky:pre-commit": "grunt test",

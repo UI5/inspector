@@ -1,20 +1,23 @@
 'use strict';
 
 var ReproductionPromptBuilder = require('../ai/ReproductionPromptBuilder.js');
+var ReproductionHtmlBuilder = require('../ai/ReproductionHtmlBuilder.js');
 var IssueFocuser = require('../ai/IssueFocuser.js');
 
 /**
  * View for the "Reproduce" tab. Lets the user crawl the inspected application into a snapshot and
- * turn it into a copy-pasteable reproduction prompt for the snippet tool. The actual page crawl is
- * delegated to the host via `onRequestSnapshot`; the view owns rendering, the privacy toggle, and
- * clipboard copy.
+ * turn it into either a copy-pasteable LLM prompt or a standalone runnable HTML file. The actual
+ * page crawl is delegated to the host via `onRequestSnapshot`; the view owns rendering, the privacy
+ * toggle, and clipboard copy.
  *
  * @param {string} containerId
  * @param {Object} [options]
- * @param {Function} [options.onRequestSnapshot] - Called when the user clicks Generate. The host
- *     posts the crawl request to the page and later calls {@link #showSnapshot}.
+ * @param {Function} [options.onRequestSnapshot] - Called when the user clicks either Generate button.
  * @param {ReproductionPromptBuilder} [options.promptBuilder] - Test seam.
+ * @param {ReproductionHtmlBuilder} [options.htmlBuilder] - Test seam.
  * @param {IssueFocuser} [options.issueFocuser] - Test seam for AI-driven issue focusing.
+ * @param {Object} [options.verifier] - ReproductionVerifier. When present, "Generate app code"
+ *     validates the generated HTML via the Playwright + Snippix MCP servers and reports the verdict.
  * @constructor
  */
 function ReproductionView(containerId, options) {
@@ -22,8 +25,14 @@ function ReproductionView(containerId, options) {
     this._container = document.getElementById(containerId);
     this._onRequestSnapshot = options.onRequestSnapshot || function () {};
     this._promptBuilder = options.promptBuilder || new ReproductionPromptBuilder();
+    this._htmlBuilder = options.htmlBuilder || new ReproductionHtmlBuilder();
     this._issueFocuser = options.issueFocuser || new IssueFocuser();
+    // Optional ReproductionVerifier. When wired, "Generate app code" additionally validates the
+    // generated HTML renders clean via the Playwright MCP server and stores it via the Snippix MCP
+    // server, reporting the verdict in the status line. Absent in isolated tests / without a bridge.
+    this._verifier = options.verifier || null;
     this._snapshot = null;
+    this._mode = 'prompt'; // 'prompt' | 'html'
     // Set when an AI focus run succeeds; a clone of `_snapshot` with a pruned tree. Cleared when the
     // issue text changes or a new snapshot arrives so stale focuses never linger.
     this._focusedSnapshot = null;
@@ -46,7 +55,8 @@ ReproductionView.prototype._render = function () {
                     'placeholder="e.g. Pressing Save on the order form throws a binding error"></textarea>' +
             '</div>' +
             '<div class="reproduction-toolbar">' +
-                '<button class="reproduction-generate" type="button">Generate reproduction prompt</button>' +
+                '<button class="reproduction-generate" type="button">Generate prompt</button>' +
+                '<button class="reproduction-generate-html" type="button">Generate app code</button>' +
                 '<button class="reproduction-focus" type="button">Focus with AI</button>' +
                 '<label class="reproduction-realdata">' +
                     '<input class="reproduction-realdata-input" type="checkbox"> Include real data' +
@@ -55,11 +65,12 @@ ReproductionView.prototype._render = function () {
                 '<span class="reproduction-status" role="status"></span>' +
             '</div>' +
             '<textarea class="reproduction-output" readonly ' +
-                'placeholder="Click \u201CGenerate reproduction prompt\u201D to crawl the application and build a prompt for the snippet tool."></textarea>' +
+                'placeholder="Click \u201CGenerate prompt\u201D or \u201CGenerate app code\u201D to crawl the application."></textarea>' +
         '</div>';
 
     this._issueInput = this._container.querySelector('.reproduction-issue-input');
     this._generateButton = this._container.querySelector('.reproduction-generate');
+    this._generateHtmlButton = this._container.querySelector('.reproduction-generate-html');
     this._focusButton = this._container.querySelector('.reproduction-focus');
     this._realDataInput = this._container.querySelector('.reproduction-realdata-input');
     this._copyButton = this._container.querySelector('.reproduction-copy');
@@ -74,8 +85,18 @@ ReproductionView.prototype._attachEventListeners = function () {
     var self = this;
 
     this._generateButton.addEventListener('click', function () {
+        self._mode = 'prompt';
         self._setStatus('Crawling application…');
         self._generateButton.disabled = true;
+        self._generateHtmlButton.disabled = true;
+        self._onRequestSnapshot();
+    });
+
+    this._generateHtmlButton.addEventListener('click', function () {
+        self._mode = 'html';
+        self._setStatus('Crawling application…');
+        self._generateButton.disabled = true;
+        self._generateHtmlButton.disabled = true;
         self._onRequestSnapshot();
     });
 
@@ -114,6 +135,7 @@ ReproductionView.prototype._attachEventListeners = function () {
  */
 ReproductionView.prototype.showSnapshot = function (snapshot, error) {
     this._generateButton.disabled = false;
+    this._generateHtmlButton.disabled = false;
     this._focusedSnapshot = null;
     this._focusInfo = null;
 
@@ -122,17 +144,21 @@ ReproductionView.prototype.showSnapshot = function (snapshot, error) {
         this._copyButton.disabled = true;
         this._output.value = '';
         this._setStatus(error || 'Could not crawl the application.');
-        return;
+        return null;
     }
 
     this._snapshot = snapshot;
-    this._rebuild();
+    return this._rebuild();
 };
 
 /**
  * @private
  */
 ReproductionView.prototype._rebuild = function () {
+    if (this._mode === 'html') {
+        return this._rebuildHtml();
+    }
+
     var active = this._focusedSnapshot || this._snapshot;
     var prompt = this._promptBuilder.build(active, {
         includeRealData: this._realDataInput.checked,
@@ -145,12 +171,73 @@ ReproductionView.prototype._rebuild = function () {
 
     if (this._focusedSnapshot && this._focusInfo) {
         this._setStatus('AI-focused to ' + this._focusInfo.focusedIds.length + ' controls — ' + lineCount + ' lines.');
-        return;
+        return null;
     }
 
     var count = this._snapshot.stats ? this._snapshot.stats.controlCount : 0;
     var suffix = this._snapshot.stats && this._snapshot.stats.truncated ? ' (truncated)' : '';
     this._setStatus('Prompt ready — ' + count + ' controls' + suffix + ', ' + lineCount + ' lines.');
+    return null;
+};
+
+/**
+ * Build a standalone runnable HTML app from the snapshot and show it in the output field. When a
+ * verifier is wired, additionally validate the app renders clean (Playwright MCP) and store it
+ * (Snippix MCP), reporting the verdict + Snippix URL in the status line. Returns a promise (or null
+ * when no verifier) so tests can await the async validation.
+ * @private
+ * @returns {Promise|null}
+ */
+ReproductionView.prototype._rebuildHtml = function () {
+    var self = this;
+    var active = this._focusedSnapshot || this._snapshot;
+    var html = this._htmlBuilder.build(active);
+    this._output.value = html;
+    this._copyButton.disabled = false;
+
+    var lineCount = html ? html.split('\n').length : 0;
+    var count = this._snapshot.stats ? this._snapshot.stats.controlCount : 0;
+    var suffix = this._snapshot.stats && this._snapshot.stats.truncated ? ' (truncated)' : '';
+    var ready = 'App code ready — ' + count + ' controls' + suffix + ', ' + lineCount + ' lines.';
+
+    if (!this._verifier) {
+        this._setStatus(ready);
+        return null;
+    }
+
+    this._setStatus(ready + ' Validating (Playwright + Snippix)…');
+    return this._verifier.verifyAndSave(html).then(function (result) {
+        self._setStatus(ready + ' ' + self._validationStatus(result));
+    }, function () {
+        self._setStatus(ready + ' Validation unavailable (is the MCP bridge running?).');
+    });
+};
+
+/**
+ * Compose the validation status from a verifyAndSave result: render verdict + Snippix link.
+ * @private
+ * @param {{verification: Object, snippet: Object}} result
+ * @returns {string}
+ */
+ReproductionView.prototype._validationStatus = function (result) {
+    var verification = (result && result.verification) || {};
+    var snippet = (result && result.snippet) || {};
+    var parts = [];
+    if (verification.ok === true) {
+        parts.push('Rendered with no console errors');
+    } else if (verification.ok === false) {
+        parts.push(verification.errors.length + ' console error(s): ' + verification.errors.join(' | '));
+    } else {
+        parts.push('Render check skipped (' + (verification.reason || 'unavailable') + ')');
+    }
+    if (snippet.ok && snippet.url) {
+        parts.push('Snippix: ' + snippet.url);
+    } else if (snippet.ok === false) {
+        parts.push('Snippix save failed (' + (snippet.reason || 'error') + ')');
+    } else {
+        parts.push('Snippix save skipped (' + (snippet.reason || 'unavailable') + ')');
+    }
+    return parts.join(' — ');
 };
 
 /**
@@ -177,12 +264,14 @@ ReproductionView.prototype._focusWithAI = function () {
     this._isFocusing = true;
     this._focusButton.disabled = true;
     this._generateButton.disabled = true;
+    this._generateHtmlButton.disabled = true;
     this._setStatus('Focusing with AI…');
 
     return this._issueFocuser.focus(this._snapshot, issue).then(function (result) {
         self._isFocusing = false;
         self._focusButton.disabled = false;
         self._generateButton.disabled = false;
+        self._generateHtmlButton.disabled = false;
 
         if (result && result.usedAI) {
             self._focusedSnapshot = Object.assign({}, self._snapshot, { tree: result.tree });
@@ -199,6 +288,7 @@ ReproductionView.prototype._focusWithAI = function () {
         self._isFocusing = false;
         self._focusButton.disabled = false;
         self._generateButton.disabled = false;
+        self._generateHtmlButton.disabled = false;
         self._setStatus('AI focus failed — using the full outline.');
     });
 };

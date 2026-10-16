@@ -476,6 +476,85 @@
         });
     }
 
+    // Local MCP bridge daemon (see tools/mcp-bridge). The devtools-side McpBridgeClient speaks a
+    // {requestId, type, data} protocol over a `mcp-bridge` runtime port; this handler pipes that to
+    // the daemon's WebSocket and relays replies straight back. It buffers requests until the socket
+    // opens and converts socket failure/close into prompt per-request error replies, so the client
+    // (and the reproduction "Generate app code" validation) degrades cleanly when the daemon is off.
+    const MCP_BRIDGE_URL = 'ws://127.0.0.1:7391';
+
+    function handleMcpBridge(port) {
+        const pending = new Set();
+        let outbox = [];
+        let socket;
+        let closed = false;
+
+        const failAll = (reason) => {
+            pending.forEach((requestId) => {
+                port.postMessage({ requestId, type: 'error', message: reason });
+            });
+            pending.clear();
+            outbox = [];
+        };
+
+        try {
+            socket = new WebSocket(MCP_BRIDGE_URL);
+        } catch (e) {
+            // Reject lazily: requests arrive on the port, and the client's own timeout covers this.
+            port.onMessage.addListener((message) => {
+                port.postMessage({ requestId: message.requestId, type: 'error', message: 'MCP bridge not reachable.' });
+            });
+            return;
+        }
+
+        socket.addEventListener('open', () => {
+            outbox.forEach((raw) => socket.send(raw));
+            outbox = [];
+        });
+
+        socket.addEventListener('message', (event) => {
+            let reply;
+            try {
+                reply = JSON.parse(event.data);
+            } catch (e) {
+                return;
+            }
+            pending.delete(reply.requestId);
+            port.postMessage(reply);
+        });
+
+        socket.addEventListener('error', () => {
+            if (!closed) {
+                failAll('MCP bridge connection failed (is the daemon running?).');
+            }
+        });
+
+        socket.addEventListener('close', () => {
+            if (!closed) {
+                failAll('MCP bridge connection closed.');
+            }
+        });
+
+        port.onMessage.addListener((message) => {
+            pending.add(message.requestId);
+            const raw = JSON.stringify(message);
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(raw);
+            } else {
+                outbox.push(raw);
+            }
+        });
+
+        port.onDisconnect.addListener(() => {
+            closed = true;
+            try {
+                socket.close();
+            } catch (e) {
+                // already closed
+            }
+        });
+    }
+
     // Listen for long-lived connections for Prompt API
     chrome.runtime.onConnect.addListener((port) => {
         if (port.name === 'prompt-api') {
@@ -501,6 +580,8 @@
                         break;
                 }
             });
+        } else if (port.name === 'mcp-bridge') {
+            handleMcpBridge(port);
         }
     });
 

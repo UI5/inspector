@@ -282,4 +282,80 @@ describe('ReproductionPromptBuilder', function () {
             prompt.should.contain('outline truncated to fit the editor line budget');
         });
     });
+
+    describe('#build() aggregation & smart-control annotation', function () {
+        it('should render the aggregation name in brackets after the control id', function () {
+            const node = controlNode({ id: 'btn', type: 'sap.m.Button', aggregation: 'content' });
+            const prompt = builder.build(snapshotWith([node]));
+
+            prompt.should.contain('- sap.m.Button #btn [content]');
+        });
+
+        it('should mark smart-generated controls', function () {
+            const node = controlNode({ id: 'smart-inner', type: 'sap.m.Table', isSmartGenerated: true });
+            const prompt = builder.build(snapshotWith([node]));
+
+            prompt.should.contain('(smart-generated)');
+        });
+
+        it('should omit aggregation brackets when aggregation is undefined', function () {
+            const node = controlNode({ id: 'btn', type: 'sap.m.Button', aggregation: undefined });
+            const prompt = builder.build(snapshotWith([node]));
+
+            prompt.should.contain('- sap.m.Button #btn');
+            prompt.should.not.contain('[undefined]');
+        });
+    });
+
+    describe('#build() multi-frame snapshot', function () {
+        function frameSnapshot(frames) {
+            return {
+                meta: { framework: 'OpenUI5', version: '1.120.0', theme: 'sap_horizon', locale: 'en', libraries: ['sap.m'] },
+                consoleErrors: [],
+                frames: frames,
+                tree: frames[0] ? frames[0].tree : [],
+                stats: { controlCount: 1, truncated: false }
+            };
+        }
+
+        it('should render frame sub-headings when multiple frames are present', function () {
+            const snapshot = frameSnapshot([
+                { frameId: 0, url: 'https://app/', tree: [controlNode({ id: 'root', type: 'sap.m.Shell' })] },
+                { frameId: 1, url: 'https://app/iframe', tree: [controlNode({ id: 'inner', type: 'sap.m.Page' })] }
+            ]);
+            const prompt = builder.build(snapshot);
+
+            prompt.should.contain('### main frame');
+            prompt.should.contain('### frame 1');
+            prompt.should.contain('sap.m.Shell #root');
+            prompt.should.contain('sap.m.Page #inner');
+        });
+
+        it('should include the frame URL in the sub-heading', function () {
+            const snapshot = frameSnapshot([
+                { frameId: 0, url: 'https://app/', tree: [] },
+                { frameId: 1, url: 'https://app/nested', tree: [] }
+            ]);
+            const prompt = builder.build(snapshot);
+
+            prompt.should.contain('https://app/nested');
+        });
+
+        it('should use single-frame path when only one frame is present', function () {
+            const snapshot = frameSnapshot([
+                { frameId: 0, url: 'https://app/', tree: [controlNode({ id: 'btn' })] }
+            ]);
+            const prompt = builder.build(snapshot);
+
+            // No frame sub-headings for a single frame
+            prompt.should.not.contain('### main frame');
+            prompt.should.contain('## Control tree');
+        });
+
+        it('should fall back to snapshot.tree when no frames array is present', function () {
+            const prompt = builder.build(snapshotWith([controlNode({ id: 'btn' })]));
+            prompt.should.contain('sap.m.Button #btn');
+        });
+    });
 });
+

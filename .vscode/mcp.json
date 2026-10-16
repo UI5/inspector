@@ -1,0 +1,23 @@
+{
+  "servers": {
+    "ui5": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@ui5/mcp-server@0.3.2"]
+    },
+    "ui5-webcomponents": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@ui5/webcomponents-mcp-server@0.1.2"]
+    },
+    "snippix": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/../sapui5.misc/tools/_snippix/mcp/index.js"],
+      "env": {
+        "SNIPPIX_BASE_URL": "https://snippix.only.sap/snippix",
+        "SNIPPIX_REJECT_UNAUTHORIZED": "false"
+      }
+    }
+  }
+}

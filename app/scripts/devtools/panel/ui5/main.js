@@ -3,11 +3,11 @@
     'use strict';
 
     // This controller function was already at the configured maxstatements
-    // ceiling (60); adding the App Info merge helpers (WebC + classic UI5)
-    // tips it over. Raise the scoped limit rather than fragment the tightly
-    // coupled panel wiring — same approach as the maxcomplexity directives
-    // elsewhere in the codebase.
-    /* jshint maxstatements: 70 */
+    // ceiling (60); adding the App Info merge helpers (WebC + classic UI5) and
+    // the reproduction verifier/bridge wiring tips it over. Raise the scoped
+    // limit rather than fragment the tightly coupled panel wiring — same
+    // approach as the maxcomplexity directives elsewhere in the codebase.
+    /* jshint maxstatements: 72 */
 
     // ================================================================================
     // Main controller for 'UI5' tab in devtools
@@ -629,14 +629,52 @@
         });
     }
 
-    // Reproduction prompt generator. On Generate it asks the injected script to crawl the
-    // inspected frame; the snapshot arrives via the 'on-reproduction-snapshot' message below.
+    // Pending multi-frame snapshot collection state. Tracks which frames we are waiting for
+    // and accumulates per-frame results before merging them for the ReproductionView.
+    var pendingReproFrames = null; // null = no collection in flight
+    var reproFrameSnapshots = {};
+
+    // Reproduction prompt generator. On Generate it crawls ALL UI5 frames (not just the
+    // selected one) so the snapshot captures the full control tree the Inspector shows,
+    // including controls that live inside iframes with their own UI5 instance. A verifier is
+    // wired so "Generate app code" can validate the result renders clean (Playwright MCP) and
+    // store it (Snippix MCP) via the local MCP bridge — best-effort, skipped when no bridge runs.
+    var ReproductionVerifier = require('../../../modules/ai/ReproductionVerifier.js');
+    var McpBridgeClient = require('../../../modules/ai/McpBridgeClient.js');
     var reproductionView = new ReproductionView('reproduction-view', {
+        verifier: new ReproductionVerifier({ bridgeClient: new McpBridgeClient() }),
         onRequestSnapshot: function () {
-            port.postMessage({
-                action: 'get-reproduction-snapshot',
-                frameId: framesSelect.getSelectedId()
+            var ui5FrameIds = Object.keys(frameData).filter(function (fid) {
+                return frameData[fid] && frameData[fid].isUI5Detected;
+            }).map(Number);
+
+            if (!ui5FrameIds.length) {
+                // Nothing to crawl — tell the view so it leaves the "Crawling…" state.
+                reproductionView.showSnapshot(null, 'No UI5 application detected on this page.');
+                return;
+            }
+
+            pendingReproFrames = ui5FrameIds.slice();
+            reproFrameSnapshots = {};
+            var requestedFrames = pendingReproFrames;
+
+            ui5FrameIds.forEach(function (frameId) {
+                port.postMessage({
+                    action: 'get-reproduction-snapshot',
+                    frameId: frameId
+                });
             });
+
+            // Watchdog: if a frame never responds (e.g. a dropped message), unblock the view rather
+            // than hang in "Crawling…" forever. Identity check on the array ensures a later crawl is
+            // not aborted by this stale timer.
+            setTimeout(function () {
+                if (pendingReproFrames === requestedFrames && pendingReproFrames.length > 0) {
+                    pendingReproFrames = null;
+                    reproFrameSnapshots = {};
+                    reproductionView.showSnapshot(null, 'Crawl timed out — the page did not respond.');
+                }
+            }, 20000);
         }
     });
 
@@ -999,11 +1037,83 @@
         },
 
         /**
-         * Hand the reproduction crawl result to the Reproduce view.
+         * Hand the reproduction crawl result to the Reproduce view. When multiple frames are
+         * being collected, accumulate until all have responded then merge into one snapshot.
          * @param {Object} message
+         * @param {Object} messageSender
          */
-        'on-reproduction-snapshot': function (message) {
-            reproductionView.showSnapshot(message.snapshot, message.error);
+        'on-reproduction-snapshot': function (message, messageSender) {
+            if (!pendingReproFrames) {
+                // Single-frame path (should not occur in normal flow but kept as a fallback).
+                reproductionView.showSnapshot(message.snapshot, message.error);
+                return;
+            }
+
+            var frameId = messageSender.frameId;
+            reproFrameSnapshots[frameId] = {
+                frameId: frameId,
+                url: (frameData[frameId] && frameData[frameId].url) || '',
+                snapshot: message.snapshot,
+                error: message.error
+            };
+
+            var idx = pendingReproFrames.indexOf(frameId);
+            if (idx !== -1) {
+                pendingReproFrames.splice(idx, 1);
+            }
+
+            if (pendingReproFrames.length > 0) {
+                return; // still waiting for more frames
+            }
+
+            // All frames have responded. Build a merged snapshot.
+            var frameIds = Object.keys(reproFrameSnapshots).map(Number).sort(function (a, b) { return a - b; });
+            var mainFrameResult = reproFrameSnapshots[0] || reproFrameSnapshots[frameIds[0]];
+            var baseSnapshot = (mainFrameResult && mainFrameResult.snapshot) || null;
+
+            if (!baseSnapshot) {
+                var firstError = mainFrameResult && mainFrameResult.error;
+                pendingReproFrames = null;
+                reproFrameSnapshots = {};
+                reproductionView.showSnapshot(null, firstError || 'Failed to crawl application');
+                return;
+            }
+
+            // Embed per-frame trees in the merged snapshot. Frame 0 contributes the top-level
+            // meta and consoleErrors; all frames contribute a frames[] entry for the prompt builder.
+            var allConsoleErrors = [];
+            var frames = frameIds.map(function (fid) {
+                var entry = reproFrameSnapshots[fid];
+                var snap = entry && entry.snapshot;
+                if (snap && snap.consoleErrors) {
+                    allConsoleErrors = allConsoleErrors.concat(snap.consoleErrors);
+                }
+                return {
+                    frameId: fid,
+                    url: entry ? entry.url : '',
+                    tree: (snap && snap.tree) || [],
+                    stats: (snap && snap.stats) || { controlCount: 0, truncated: false }
+                };
+            });
+
+            var mergedStats = frames.reduce(function (acc, f) {
+                return {
+                    controlCount: acc.controlCount + f.stats.controlCount,
+                    truncated: acc.truncated || f.stats.truncated
+                };
+            }, { controlCount: 0, truncated: false });
+
+            var merged = Object.assign({}, baseSnapshot, {
+                consoleErrors: allConsoleErrors,
+                frames: frames,
+                // Keep top-level tree as the main frame's tree for single-frame callers.
+                tree: frames[0] ? frames[0].tree : baseSnapshot.tree,
+                stats: mergedStats
+            });
+
+            pendingReproFrames = null;
+            reproFrameSnapshots = {};
+            reproductionView.showSnapshot(merged);
         }
     };
 
