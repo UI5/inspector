@@ -28,7 +28,7 @@
         }
     ],
     "content_security_policy": {
-        "extension_pages": "default-src 'self'; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com; img-src 'self' data:; style-src 'unsafe-inline';"
+        "extension_pages": "default-src 'self'; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com ws://127.0.0.1:7391 ws://localhost:7391; img-src 'self' data:; style-src 'unsafe-inline';"
     },
     "description": "With the UI5 Inspector, you can easily debug and support your OpenUI5 or SAPUI5-based apps.",
     "devtools_page": "/html/devtools/index.html",
