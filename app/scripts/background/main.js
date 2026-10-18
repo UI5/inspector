@@ -478,16 +478,16 @@
 
     // Local MCP bridge daemon (see tools/mcp-bridge). The devtools-side McpBridgeClient speaks a
     // {requestId, type, data} protocol over a `mcp-bridge` runtime port; this handler pipes that to
-    // the daemon's WebSocket and relays replies straight back. It buffers requests until the socket
-    // opens and converts socket failure/close into prompt per-request error replies, so the client
-    // (and the reproduction "Generate app code" validation) degrades cleanly when the daemon is off.
+    // the daemon's WebSocket and relays replies straight back. The port is long-lived, so the socket
+    // is (re)connected on demand: if the daemon was down on an earlier request, a later request opens
+    // a fresh socket — starting the daemon after the extension loaded just works, no reload needed.
     const MCP_BRIDGE_URL = 'ws://127.0.0.1:7391';
 
     function handleMcpBridge(port) {
         const pending = new Set();
         let outbox = [];
-        let socket;
-        let closed = false;
+        let socket = null;
+        let portClosed = false;
 
         const failAll = (reason) => {
             pending.forEach((requestId) => {
@@ -497,65 +497,66 @@
             outbox = [];
         };
 
-        try {
-            socket = new WebSocket(MCP_BRIDGE_URL);
-        } catch (e) {
-            // Reject lazily: requests arrive on the port, and the client's own timeout covers this.
-            port.onMessage.addListener((message) => {
-                port.postMessage({ requestId: message.requestId, type: 'error', message: 'MCP bridge not reachable.' });
-            });
-            return;
-        }
-
-        socket.addEventListener('open', () => {
-            outbox.forEach((raw) => socket.send(raw));
-            outbox = [];
-        });
-
-        socket.addEventListener('message', (event) => {
-            let reply;
+        const connect = () => {
+            let s;
             try {
-                reply = JSON.parse(event.data);
+                s = new WebSocket(MCP_BRIDGE_URL);
             } catch (e) {
-                return;
+                failAll('MCP bridge not reachable (start it with: npm run mcp-bridge).');
+                return null;
             }
-            pending.delete(reply.requestId);
-            port.postMessage(reply);
-        });
-
-        socket.addEventListener('error', () => {
-            if (!closed) {
-                failAll('MCP bridge connection failed (is the daemon running?).');
-            }
-        });
-
-        socket.addEventListener('close', () => {
-            if (!closed) {
-                failAll('MCP bridge connection closed.');
-            }
-        });
+            s.addEventListener('open', () => {
+                outbox.forEach((raw) => s.send(raw));
+                outbox = [];
+            });
+            s.addEventListener('message', (event) => {
+                let reply;
+                try {
+                    reply = JSON.parse(event.data);
+                } catch (e) {
+                    return;
+                }
+                pending.delete(reply.requestId);
+                port.postMessage(reply);
+            });
+            s.addEventListener('error', () => {
+                if (!portClosed) {
+                    failAll('MCP bridge not running (start it with: npm run mcp-bridge).');
+                }
+            });
+            s.addEventListener('close', () => {
+                if (socket === s) {
+                    socket = null;
+                }
+                if (!portClosed) {
+                    failAll('MCP bridge not running (start it with: npm run mcp-bridge).');
+                }
+            });
+            return s;
+        };
 
         port.onMessage.addListener((message) => {
+            pending.add(message.requestId);
             const raw = JSON.stringify(message);
-            if (socket.readyState === WebSocket.OPEN) {
-                pending.add(message.requestId);
+            if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(raw);
-            } else if (socket.readyState === WebSocket.CONNECTING) {
-                pending.add(message.requestId);
-                outbox.push(raw);
-            } else {
-                // CLOSING/CLOSED: the daemon is unreachable. Reply at once with a clear reason rather
-                // than letting the client wait out its own timeout ("timed out").
-                port.postMessage({ requestId: message.requestId, type: 'error', message: 'MCP bridge not running (start it with: npm run mcp-bridge).' });
+                return;
+            }
+            // No live socket (first request, or the daemon died/started later): queue and (re)connect.
+            outbox.push(raw);
+            if (!socket || socket.readyState === WebSocket.CLOSING || socket.readyState === WebSocket.CLOSED) {
+                socket = connect();
             }
         });
 
         port.onDisconnect.addListener(() => {
-            closed = true;
-            try {
-                socket.close();
-            } catch (e) {
-                // already closed
+            portClosed = true;
+            if (socket) {
+                try {
+                    socket.close();
+                } catch (e) {
+                    // already closed
+                }
             }
         });
     }

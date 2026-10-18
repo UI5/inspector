@@ -355,6 +355,18 @@ ReproductionHtmlBuilder.prototype._emitNode = function (node, depth, prefixMap, 
 
     if (!node.type) { return; }
 
+    // sap.ui.core.ComponentContainer wraps a Component whose content cannot be declared in an XML
+    // fragment; the crawler captures its inner control under a private `rootControl` aggregation.
+    // Emitting `<core:ComponentContainer><core:rootControl>…` makes UI5 reject the fragment
+    // ("Cannot add direct child without default aggregation defined"). Inline the captured children
+    // in the container's place instead — no container element, no aggregation wrapper.
+    if (node.type === 'sap.ui.core.ComponentContainer') {
+        (node.children || []).forEach(function (child) {
+            self._emitNode(child, depth, prefixMap, lines);
+        });
+        return;
+    }
+
     var indent = INDENT.repeat(depth);
     var tag = _qualifyType(node.type, prefixMap);
     var attrs = _buildAttributes(node, prefixMap);

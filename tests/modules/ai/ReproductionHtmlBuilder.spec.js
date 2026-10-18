@@ -279,6 +279,36 @@ describe('ReproductionHtmlBuilder', function () {
         });
     });
 
+    describe('#build() ComponentContainer inlining', function () {
+        it('should inline a ComponentContainer\'s content instead of emitting rootControl aggregation', function () {
+            // Regression: `<core:ComponentContainer><core:rootControl>…` made UI5 reject the fragment
+            // ("Cannot add direct child without default aggregation defined").
+            const inner = controlNode({ id: 'rootView', type: 'sap.m.Page', aggregation: 'rootControl' });
+            const container = controlNode({
+                id: 'comp', type: 'sap.ui.core.ComponentContainer', children: [inner]
+            });
+            const html = builder.build(snapshotWith([container]));
+
+            html.should.not.contain('ComponentContainer');
+            html.should.not.contain('rootControl');
+            // The inner content is emitted in the container's place.
+            html.should.contain('id="rootView"');
+        });
+
+        it('should still render controls nested below an inlined ComponentContainer', function () {
+            const button = controlNode({ id: 'btn', type: 'sap.m.Button' });
+            const page = controlNode({ id: 'rootView', type: 'sap.m.Page', aggregation: 'rootControl', children: [button] });
+            const container = controlNode({
+                id: 'comp', type: 'sap.ui.core.ComponentContainer', children: [page]
+            });
+            const html = builder.build(snapshotWith([container]));
+
+            html.should.not.contain('rootControl');
+            html.should.contain('id="rootView"');
+            html.should.contain('id="btn"');
+        });
+    });
+
     describe('#build() model collection', function () {
         it('should include a JSONModel entry for each unique binding model', function () {
             const node = controlNode({
