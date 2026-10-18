@@ -40,37 +40,84 @@ function loadSdk() {
 }
 
 /**
- * Read the MCP server definitions. Prefers a project-local mcp-bridge.config.json, then falls back
- * to ~/.claude.json's `mcpServers`. Returns a `{ name: { command, args, env } }` map.
+ * Expand `${workspaceFolder}` (VS Code's mcp.json convention) to the directory the bridge runs from.
+ */
+function _expandVars(value) {
+    if (typeof value === 'string') {
+        return value.split('${workspaceFolder}').join(process.cwd());
+    }
+    return value;
+}
+
+/**
+ * Normalize one server definition: expand variables in command, args and env.
+ */
+function _expandDef(def) {
+    var out = Object.assign({}, def);
+    if (out.command) {
+        out.command = _expandVars(out.command);
+    }
+    if (Array.isArray(out.args)) {
+        out.args = out.args.map(_expandVars);
+    }
+    if (out.env && typeof out.env === 'object') {
+        var env = {};
+        Object.keys(out.env).forEach(function (key) {
+            env[key] = _expandVars(out.env[key]);
+        });
+        out.env = env;
+    }
+    return out;
+}
+
+/**
+ * Read and merge the MCP server definitions from every known config location, first-wins by name:
+ * project-local mcp-bridge.config.json, then .vscode/mcp.json (VS Code's `servers` block, used for
+ * snippix/ui5 here), then ~/.claude.json's `mcpServers`. Returns a `{ name: { command, args, env } }`
+ * map with `${workspaceFolder}` expanded.
  */
 function readServerConfig() {
     var candidates = [
         path.resolve(process.cwd(), 'mcp-bridge.config.json'),
+        path.resolve(process.cwd(), '.vscode', 'mcp.json'),
         path.join(os.homedir(), '.claude.json')
     ];
-    for (var i = 0; i < candidates.length; i++) {
+    var merged = {};
+    candidates.forEach(function (file) {
+        var json;
         try {
-            var json = JSON.parse(fs.readFileSync(candidates[i], 'utf8'));
-            var servers = json.mcpServers || json.servers || json;
-            if (servers && typeof servers === 'object' && Object.keys(servers).length) {
-                console.log('[mcp-bridge] using server config from ' + candidates[i]);
-                return servers;
-            }
+            json = JSON.parse(fs.readFileSync(file, 'utf8'));
         } catch (e) {
-            // try next candidate
+            return; // missing or invalid — skip
         }
+        var servers = json.mcpServers || json.servers || {};
+        if (!servers || typeof servers !== 'object') {
+            return;
+        }
+        var added = [];
+        Object.keys(servers).forEach(function (name) {
+            if (!merged[name] && servers[name] && servers[name].command) {
+                merged[name] = _expandDef(servers[name]);
+                added.push(name);
+            }
+        });
+        if (added.length) {
+            console.log('[mcp-bridge] loaded from ' + file + ': ' + added.join(', '));
+        }
+    });
+    if (!Object.keys(merged).length) {
+        console.warn('[mcp-bridge] no MCP server config found (looked in mcp-bridge.config.json, .vscode/mcp.json, ~/.claude.json)');
     }
-    console.warn('[mcp-bridge] no MCP server config found (looked in mcp-bridge.config.json, ~/.claude.json)');
-    return {};
+    return merged;
 }
 
 /**
  * Launch and connect every configured stdio MCP server. Failures are logged and skipped so one bad
- * server never takes the bridge down.
+ * server never takes the bridge down. Fills the shared `clients` map as each server connects, so
+ * the WebSocket (started first) can serve whatever is ready without waiting for slow `npx` launches.
  */
-function connectServers(sdk, config) {
+function connectServers(sdk, config, clients) {
     var names = Object.keys(config);
-    var clients = {};
     return names.reduce(function (chain, name) {
         return chain.then(function () {
             var def = config[name] || {};
@@ -141,8 +188,7 @@ function handleRequest(clients, msg) {
 
 function startServer(clients) {
     var wss = new WebSocket.Server({ port: PORT, host: HOST });
-    console.log('[mcp-bridge] listening on ws://' + HOST + ':' + PORT +
-        ' (servers: ' + (Object.keys(clients).join(', ') || 'none') + ')');
+    console.log('[mcp-bridge] listening on ws://' + HOST + ':' + PORT + ' — connecting MCP servers…');
 
     wss.on('connection', function (ws) {
         ws.on('message', function (data) {
@@ -169,10 +215,14 @@ function startServer(clients) {
     });
 }
 
+// Start listening immediately so the extension can connect right away, then bring the MCP servers
+// online in the background — a slow `npx` launch must not keep the WebSocket from opening.
 loadSdk().then(function (sdk) {
-    return connectServers(sdk, readServerConfig());
-}).then(function (clients) {
+    var clients = {};
     startServer(clients);
+    return connectServers(sdk, readServerConfig(), clients);
+}).then(function (clients) {
+    console.log('[mcp-bridge] ready (servers: ' + (Object.keys(clients).join(', ') || 'none') + ')');
 }).catch(function (error) {
     console.error('[mcp-bridge] fatal:', error && error.message ? error.message : error);
     process.exit(1);

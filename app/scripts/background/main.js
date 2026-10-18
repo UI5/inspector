@@ -536,12 +536,17 @@
         });
 
         port.onMessage.addListener((message) => {
-            pending.add(message.requestId);
             const raw = JSON.stringify(message);
             if (socket.readyState === WebSocket.OPEN) {
+                pending.add(message.requestId);
                 socket.send(raw);
-            } else {
+            } else if (socket.readyState === WebSocket.CONNECTING) {
+                pending.add(message.requestId);
                 outbox.push(raw);
+            } else {
+                // CLOSING/CLOSED: the daemon is unreachable. Reply at once with a clear reason rather
+                // than letting the client wait out its own timeout ("timed out").
+                port.postMessage({ requestId: message.requestId, type: 'error', message: 'MCP bridge not running (start it with: npm run mcp-bridge).' });
             }
         });
 
