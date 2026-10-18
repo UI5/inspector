@@ -42,6 +42,51 @@ function _collectNamespaces(nodes) {
     return counts;
 }
 
+// Public UI5 runtime libraries resolvable from the standard CDN. Used to turn the control types in
+// the tree into a safe `data-sap-ui-libs` list. The crawler's `meta.libraries` is NOT used for the
+// bootstrap because it reflects EVERY loaded library of the inspected app — including internal /
+// adapter libraries (e.g. sap.cf.adapters, sap.ui.fl, sap.ushell.*) that are not on the public CDN.
+// Declaring those makes UI5 request a missing `.../library.js` and the reproduction fails to boot.
+var _KNOWN_LIBRARIES = [
+    'sap.m', 'sap.f', 'sap.tnt', 'sap.uxap', 'sap.fe',
+    'sap.ui.core', 'sap.ui.layout', 'sap.ui.table', 'sap.ui.unified', 'sap.ui.commons',
+    'sap.ui.comp', 'sap.ui.mdc', 'sap.ui.generic.app', 'sap.ui.integration', 'sap.ui.export',
+    'sap.ui.richtexteditor', 'sap.ui.codeeditor', 'sap.ui.documentation', 'sap.ui.suite',
+    'sap.ui.webc.main', 'sap.ui.webc.fiori',
+    'sap.suite.ui.commons', 'sap.suite.ui.generic.template', 'sap.suite.ui.microchart',
+    'sap.chart', 'sap.viz', 'sap.ovp', 'sap.gantt', 'sap.ui.vk', 'sap.ui.vbm',
+    'sap.me', 'sap.ndc', 'sap.ca.ui', 'sap.collaboration'
+];
+
+// Map a control type to the public library it belongs to (longest matching known-library prefix),
+// or '' when none matches (an internal/unknown control — left to UI5's on-demand loading).
+function _libraryForType(type) {
+    var best = '';
+    _KNOWN_LIBRARIES.forEach(function (lib) {
+        if ((type === lib || type.indexOf(lib + '.') === 0) && lib.length > best.length) {
+            best = lib;
+        }
+    });
+    return best;
+}
+
+// The set of public libraries actually used by controls in the tree, in a stable order.
+function _collectLibraries(nodes) {
+    var seen = Object.create(null);
+    function walk(list) {
+        if (!Array.isArray(list)) { return; }
+        list.forEach(function (n) {
+            if (n.isControl && n.type) {
+                var lib = _libraryForType(n.type);
+                if (lib) { seen[lib] = true; }
+            }
+            walk(n.children);
+        });
+    }
+    walk(nodes);
+    return Object.keys(seen);
+}
+
 function _buildPrefixMap(nsCounts) {
     var namespaces = Object.keys(nsCounts);
     namespaces.sort(function (a, b) {
@@ -378,7 +423,17 @@ ReproductionHtmlBuilder.prototype.build = function (snapshot, options) {
 
     var xmlFragment = this._buildXmlFragment(tree);
     var models = _collectModels(tree);
-    return this._buildHtml(meta, xmlFragment, models, options);
+
+    // Bootstrap only the public libraries the tree actually uses — never the inspected app's full
+    // loadedLibraries, which can include internal/adapter libs that 404 on the public CDN. Fall back
+    // to sap.m so an empty/unknown tree still boots a themed UI library.
+    var libraries = _collectLibraries(tree);
+    if (!libraries.length) {
+        libraries = ['sap.m'];
+    }
+    var safeMeta = Object.assign({}, meta, { libraries: libraries });
+
+    return this._buildHtml(safeMeta, xmlFragment, models, options);
 };
 
 module.exports = ReproductionHtmlBuilder;

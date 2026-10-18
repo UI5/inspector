@@ -62,10 +62,39 @@ describe('ReproductionHtmlBuilder', function () {
             html.should.contain('https://my.cdn/sap-ui-core.js');
         });
 
-        it('should embed the libraries from meta', function () {
-            const html = builder.build(snapshotWith([]));
+        it('should derive data-sap-ui-libs from the public libraries the controls actually use', function () {
+            const html = builder.build(snapshotWith([
+                controlNode({ id: 'b', type: 'sap.m.Button' }),
+                controlNode({ id: 'f', type: 'sap.ui.layout.form.Form' })
+            ]));
+            html.should.contain('data-sap-ui-libs="');
             html.should.contain('sap.m');
             html.should.contain('sap.ui.layout');
+        });
+
+        it('should NOT declare internal/adapter libraries that are not on the public CDN', function () {
+            // Regression: meta.libraries listed every loaded library (incl. sap.cf.adapters), which
+            // made the generated app 404 on sap/cf/adapters/library.js and fail to boot in Snippix.
+            const snapshot = snapshotWith([controlNode({ id: 'b', type: 'sap.m.Button' })], {
+                libraries: ['sap.m', 'sap.cf.adapters', 'sap.ui.fl', 'sap.ushell']
+            });
+            const html = builder.build(snapshot);
+            html.should.contain('sap.m');
+            html.should.not.contain('sap.cf.adapters');
+            html.should.not.contain('sap.ui.fl');
+            html.should.not.contain('sap.ushell');
+        });
+
+        it('should fall back to sap.m when the tree has no recognizable public controls', function () {
+            const html = builder.build(snapshotWith([]));
+            html.should.contain('data-sap-ui-libs="sap.m"');
+        });
+
+        it('should map smart controls to their sap.ui.comp library', function () {
+            const html = builder.build(snapshotWith([
+                controlNode({ id: 'st', type: 'sap.ui.comp.smarttable.SmartTable' })
+            ]));
+            html.should.contain('sap.ui.comp');
         });
 
         it('should embed the theme from meta', function () {
