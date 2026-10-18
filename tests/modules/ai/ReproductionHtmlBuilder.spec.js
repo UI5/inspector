@@ -85,8 +85,20 @@ describe('ReproductionHtmlBuilder', function () {
             html.should.not.contain('sap.ushell');
         });
 
-        it('should fall back to sap.m when the tree has no recognizable public controls', function () {
-            const html = builder.build(snapshotWith([]));
+        it('should keep a public library the app loaded even when no control in the tree uses it', function () {
+            // Fidelity: a public lib may be needed only for a formatter/type used in a binding, with
+            // no control of its own in the tree. Keep it (it is on the CDN) rather than drop it.
+            const snapshot = snapshotWith([controlNode({ id: 'b', type: 'sap.m.Button' })], {
+                libraries: ['sap.m', 'sap.ui.unified']
+            });
+            const html = builder.build(snapshot);
+            html.should.contain('sap.m');
+            html.should.contain('sap.ui.unified');
+        });
+
+        it('should fall back to sap.m when neither the tree nor meta yield a public library', function () {
+            const snapshot = snapshotWith([], { libraries: ['sap.cf.adapters', 'sap.ui.fl'] });
+            const html = builder.build(snapshot);
             html.should.contain('data-sap-ui-libs="sap.m"');
         });
 

@@ -87,6 +87,25 @@ function _collectLibraries(nodes) {
     return Object.keys(seen);
 }
 
+// The libraries to preload in the generated bootstrap: every PUBLIC library the inspected app had
+// loaded (so a public lib needed only for a formatter/type, with no control in the tree, is still
+// kept — maximizing fidelity), unioned with the libraries the control tree actually uses. Internal/
+// adapter libraries that are not on the public CDN are excluded because they 404 and cannot be
+// reproduced in a standalone app anyway. Falls back to sap.m so an empty tree still boots.
+function _safeLibraries(nodes, metaLibraries) {
+    var seen = Object.create(null);
+    _collectLibraries(nodes).forEach(function (lib) {
+        seen[lib] = true;
+    });
+    (metaLibraries || []).forEach(function (lib) {
+        if (_KNOWN_LIBRARIES.indexOf(lib) !== -1) {
+            seen[lib] = true;
+        }
+    });
+    var libs = Object.keys(seen);
+    return libs.length ? libs : ['sap.m'];
+}
+
 function _buildPrefixMap(nsCounts) {
     var namespaces = Object.keys(nsCounts);
     namespaces.sort(function (a, b) {
@@ -424,13 +443,9 @@ ReproductionHtmlBuilder.prototype.build = function (snapshot, options) {
     var xmlFragment = this._buildXmlFragment(tree);
     var models = _collectModels(tree);
 
-    // Bootstrap only the public libraries the tree actually uses — never the inspected app's full
-    // loadedLibraries, which can include internal/adapter libs that 404 on the public CDN. Fall back
-    // to sap.m so an empty/unknown tree still boots a themed UI library.
-    var libraries = _collectLibraries(tree);
-    if (!libraries.length) {
-        libraries = ['sap.m'];
-    }
+    // Bootstrap the public libraries the app loaded, unioned with those the control tree uses —
+    // never the raw loadedLibraries, which can include internal/adapter libs that 404 on the CDN.
+    var libraries = _safeLibraries(tree, meta.libraries);
     var safeMeta = Object.assign({}, meta, { libraries: libraries });
 
     return this._buildHtml(safeMeta, xmlFragment, models, options);
