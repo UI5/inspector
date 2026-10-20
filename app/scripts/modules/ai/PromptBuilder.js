@@ -48,36 +48,53 @@ function _stringifyBindingValue(value) {
 /**
  * @private
  */
-function _renderAggregationLine(name, children) {
-    if (!Array.isArray(children) || children.length === 0) {
+// Extract the children array from either a raw array (test fixtures) or the
+// DataView envelope that both _formatAggregationValues and webcMain's
+// _formatAggregations produce: { options, data: { 'content (id)': Array|DataView|null } }.
+// At runtime the innermost content is an array of element-ID strings (see
+// ToolsAPI._getAggregationContent and WebComponentsToolsAPI._getSlottedContent),
+// not objects.
+function _extractAggregationChildren(entry) {
+    if (Array.isArray(entry)) {
+        return entry;
+    }
+    if (entry && entry.data) {
+        const contentId = entry.data['content (id)'];
+        // Classic controls wrap a populated array in a nested DataView object.
+        if (contentId && contentId.data && Array.isArray(contentId.data)) {
+            return contentId.data;
+        }
+        // Web component slots store the raw array directly.
+        if (Array.isArray(contentId)) {
+            return contentId;
+        }
+    }
+    return [];
+}
+
+// Normalize a child entry to its display ID. Runtime data is an array of ID
+// strings; the object form ({ id, type }) is tolerated for forward safety.
+function _childId(child) {
+    if (typeof child === 'string') {
+        return child;
+    }
+    return (child && child.id) || '?';
+}
+
+function _renderAggregationLine(name, entry) {
+    const children = _extractAggregationChildren(entry);
+    if (children.length === 0) {
         return '- ' + name + ': empty';
     }
 
     const count = children.length;
 
     if (count <= 3) {
-        const ids = children.map(function (child) {
-            return (child && child.id) || '?';
-        });
+        const ids = children.map(_childId);
         return '- ' + name + ': ' + count + ' children — ' + ids.join(', ');
     }
 
-    // Preserve insertion order.
-    const histogram = Object.create(null);
-    const order = [];
-    for (let i = 0; i < children.length; i++) {
-        const type = (children[i] && children[i].type) || '?';
-        if (!Object.prototype.hasOwnProperty.call(histogram, type)) {
-            histogram[type] = 0;
-            order.push(type);
-        }
-        histogram[type] += 1;
-    }
-    const parts = order.map(function (type) {
-        return type + ' × ' + histogram[type];
-    });
-
-    return '- ' + name + ': ' + count + ' children (' + parts.join(', ') + ')';
+    return '- ' + name + ': ' + count + ' children';
 }
 
 /**

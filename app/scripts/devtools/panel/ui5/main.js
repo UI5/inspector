@@ -765,6 +765,16 @@
             // current selection before applying its data.
             var token = ++controlSelectSeq;
 
+            var own = message.controlProperties && message.controlProperties.own;
+            var webcTree = frameData[frameId].controlTreeWebC;
+            // Prefer the per-component runtime version (multi-runtime pages can
+            // mix versions); fall back to the tree's primary runtime version
+            // when the element didn't report one. Resolved once here and used for
+            // both the AI context block and the enum lookup below, so the version
+            // shown to the assistant always matches the primed manifest.
+            var resolvedVersion = (own && own.meta && own.meta.version) ||
+                (webcTree && webcTree.versionInfo && webcTree.versionInfo.version);
+
             var render = function () {
                 // A newer selection (or a frame switch) has superseded this
                 // one while its manifest fetch was in flight — drop the stale
@@ -802,7 +812,7 @@
                         id: controlId,
                         isWebComponent: ownMeta.isWebComponent === true,
                         tag: ownMeta.tag,
-                        version: ownMeta.version,
+                        version: resolvedVersion,
                         properties: message.controlProperties,
                         bindings: message.controlBindings,
                         aggregations: message.controlAggregations,
@@ -812,21 +822,9 @@
                 });
             };
 
-            // For UI5 Web Components, resolve enum properties to dropdown values
-            // from the CDN manifest before rendering. The manifest fetch is
-            // async (cached after the first hit per version); on any failure we
-            // just render with plain-string values. Classic UI5 renders
-            // synchronously as before.
-            var own = message.controlProperties && message.controlProperties.own;
             if (own && own.meta && own.meta.isWebComponent) {
-                var webcTree = frameData[frameId].controlTreeWebC;
-                // Prefer the per-component runtime version (multi-runtime pages
-                // can mix versions); fall back to the tree's primary runtime
-                // version when the element didn't report one.
-                var version = (own.meta && own.meta.version) ||
-                    (webcTree && webcTree.versionInfo && webcTree.versionInfo.version);
-                webcEnumRegistry.prime(version).then(function () {
-                    _enrichWebcEnumTypes(own, version);
+                webcEnumRegistry.prime(resolvedVersion).then(function () {
+                    _enrichWebcEnumTypes(own, resolvedVersion);
                 }, function () { /* keep plain strings */ }).then(render);
             } else {
                 render();

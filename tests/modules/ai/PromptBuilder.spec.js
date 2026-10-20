@@ -979,10 +979,7 @@ describe('PromptBuilder', function () {
                         aggregations: {
                             own: {
                                 data: {
-                                    content: [
-                                        { id: 'btn1', type: 'sap.m.Button' },
-                                        { id: 'btn2', type: 'sap.m.Button' }
-                                    ]
+                                    content: ['btn1', 'btn2']
                                 }
                             }
                         }
@@ -994,13 +991,10 @@ describe('PromptBuilder', function () {
                 result.should.contain('- content: 2 children — btn1, btn2');
             });
 
-            it('should render a type histogram when the child count is > 3', function () {
+            it('should render a plain count when the child count is > 3', function () {
                 const children = [];
-                for (let i = 0; i < 20; i++) {
-                    children.push({ id: 't' + i, type: 'sap.m.Text' });
-                }
-                for (let i = 0; i < 4; i++) {
-                    children.push({ id: 'b' + i, type: 'sap.m.Button' });
+                for (let i = 0; i < 24; i++) {
+                    children.push('c' + i);
                 }
                 const inspectionContext = {
                     control: {
@@ -1015,7 +1009,7 @@ describe('PromptBuilder', function () {
 
                 const result = promptBuilder.buildUserPrompt('Q', inspectionContext);
 
-                result.should.contain('- content: 24 children (sap.m.Text × 20, sap.m.Button × 4)');
+                result.should.contain('- content: 24 children');
             });
 
             it('should omit the Aggregations section entirely when own aggregations are empty', function () {
@@ -1036,7 +1030,7 @@ describe('PromptBuilder', function () {
                 for (let i = 0; i < 100; i++) {
                     const children = [];
                     for (let j = 0; j < 200; j++) {
-                        children.push({ id: 'child' + i + '_' + j, type: 'sap.m.SomeReallyLongTypeName' });
+                        children.push('child' + i + '_' + j);
                     }
                     data['aggr' + i] = children;
                 }
@@ -1136,16 +1130,13 @@ describe('PromptBuilder', function () {
                             own: {
                                 data: {
                                     customHeader: [],
-                                    content: [
-                                        { id: 'btn1', type: 'sap.m.Button' },
-                                        { id: 'btn2', type: 'sap.m.Button' }
-                                    ],
+                                    content: ['btn1', 'btn2'],
                                     footer: (function () {
                                         const arr = [];
                                         for (let i = 0; i < 5; i++) {
-                                            arr.push({ id: 't' + i, type: 'sap.m.Text' });
+                                            arr.push('t' + i);
                                         }
-                                        arr.push({ id: 'b1', type: 'sap.m.Button' });
+                                        arr.push('b1');
                                         return arr;
                                     }())
                                 }
@@ -1162,7 +1153,7 @@ describe('PromptBuilder', function () {
                     'Aggregations:\n' +
                     '- customHeader: empty\n' +
                     '- content: 2 children — btn1, btn2\n' +
-                    '- footer: 6 children (sap.m.Text × 5, sap.m.Button × 1)\n\n' +
+                    '- footer: 6 children\n\n' +
                     'Now answer: Q';
 
                 promptBuilder.buildUserPrompt('Q', inspectionContext).should.equal(expected);
@@ -1466,7 +1457,7 @@ describe('PromptBuilder', function () {
                             }
                         },
                         aggregations: {
-                            own: { data: { icon: [{ id: 'ico1', type: 'ui5-icon' }] } }
+                            own: { data: { icon: ['ico1'] } }
                         },
                         bindings: { text: { path: '/label', value: 'Save', model: 'default' } }
                     }
@@ -1532,7 +1523,7 @@ describe('PromptBuilder', function () {
                         isWebComponent: true,
                         tag: 'ui5-list',
                         version: '2.4.0',
-                        aggregations: { own: { data: { items: [{ id: 'i1', type: 'ui5-li' }] } } }
+                        aggregations: { own: { data: { items: ['i1'] } } }
                     }
                 };
 
@@ -1540,6 +1531,70 @@ describe('PromptBuilder', function () {
 
                 result.should.contain('Slots:');
                 result.should.not.contain('Aggregations:');
+            });
+
+            it('should render slot child IDs from the real webcMain DataView envelope shape', function () {
+                // webcMain._formatAggregations wraps each slot in
+                // { options, data: { 'content (id)': <array of id strings>, 'slot type': str } }.
+                // The content array holds element-ID strings (WebComponentsToolsAPI._getSlottedContent).
+                const ctx = {
+                    control: {
+                        isWebComponent: true,
+                        tag: 'ui5-list',
+                        version: '2.4.0',
+                        aggregations: {
+                            own: {
+                                data: {
+                                    items: {
+                                        options: { title: 'items', expandable: true, expanded: true, editableValues: false, showTypeInfo: true },
+                                        data: { 'content (id)': ['li1', 'li2'], 'slot type': 'HTMLElement' }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', ctx);
+                const slots = _extractSection(result, 'Slots:');
+
+                slots.should.contain('items');
+                slots.should.contain('li1');
+                slots.should.contain('li2');
+            });
+
+            it('should render classic aggregation child IDs from the real controlUtils DataView envelope shape', function () {
+                // controlUtils._formatAggregationValues wraps a populated array in a nested DataView:
+                // { options, data: { 'content (id)': { options, data: <array of id strings> }, 'aggregation type': str } }.
+                // The content array holds element-ID strings (ToolsAPI._getAggregationContent).
+                const ctx = {
+                    control: {
+                        type: 'sap.m.Page',
+                        aggregations: {
+                            own: {
+                                data: {
+                                    content: {
+                                        options: { title: 'content', expandable: true, expanded: true, editableValues: false, showTypeInfo: true },
+                                        data: {
+                                            'content (id)': {
+                                                options: { expandable: true, expanded: false, editableValues: false, showTypeInfo: true },
+                                                data: ['btn1', 'btn2']
+                                            },
+                                            'aggregation type': 'sap.ui.core.Control'
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const result = promptBuilder.buildUserPrompt('Q', ctx);
+                const agg = _extractSection(result, 'Aggregations:');
+
+                agg.should.contain('content');
+                agg.should.contain('btn1');
+                agg.should.contain('btn2');
             });
 
             it('should fall back to Unknown for missing tag and version', function () {
