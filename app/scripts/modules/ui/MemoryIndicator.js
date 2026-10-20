@@ -46,9 +46,9 @@ MemoryIndicator.prototype._render = function () {
             </div>
             <div class="memory-popover-detail"></div>
             <p class="memory-popover-explainer">
-                The AI keeps your conversation in working memory.
-                When it's full, start a new chat to continue.
-                This has nothing to do with payments or subscriptions.
+                Each reply fills part of the AI's per-conversation memory window.
+                It starts at 0% and does not reset on a schedule — only Start Fresh clears it.
+                No payment or subscription is involved.
             </p>
             <button class="memory-clear-btn">Start Fresh</button>
         </div>
