@@ -17,6 +17,7 @@ function EntriesLog () {
  * @returns {Object} HTML Node
  */
 EntriesLog.prototype.getEntryNode = function (entry) {
+    /* jshint maxcomplexity: 16 */
     let oNode;
     let aNodes = [];
 

@@ -6,7 +6,7 @@
     var pageAction = require('../modules/background/pageAction.js');
 
     var contextMenu = new ContextMenu({
-        title: 'Inspect UI5 control',
+        title: 'Inspect UI5 element',
         id: 'context-menu',
         contexts: ['all']
     });
@@ -75,6 +75,46 @@
                     chrome.scripting.executeScript({
                         target,
                         files: [message.file]
+                    });
+                });
+            });
+        },
+
+        'do-webc-injection': function (message) {
+            const frameId = message.frameId;
+            chrome.windows.getCurrent().then(w => {
+                chrome.tabs.query({ active: true, windowId: w.id }).then(tabs => {
+                    const target = {
+                        tabId: tabs[0].id
+                    };
+                    if (frameId !== undefined) {
+                        target.frameIds = [message.frameId];
+                    }
+                    // 1. Inject the isolated-world message bridge (mirrors
+                    //    content/main.js for classic UI5).
+                    chrome.scripting.executeScript({
+                        target,
+                        files: ['/scripts/content/webcMain.js']
+                    }).then(() => {
+                        // 2. Inject the tools API into the page's MAIN world so
+                        //    it can see the framework classes / isUI5Element.
+                        return chrome.scripting.executeScript({
+                            target,
+                            files: ['/vendor/WebComponentsToolsAPI.js'],
+                            world: 'MAIN'
+                        });
+                    }).then(() => {
+                        // 3. Inject the MAIN-world handler script.
+                        return chrome.scripting.executeScript({
+                            target,
+                            files: ['/scripts/injected/webcMain.js'],
+                            world: 'MAIN'
+                        });
+                    }).then(() => {
+                        chrome.runtime.sendMessage({
+                            action: 'on-webc-script-injection',
+                            frameId: frameId
+                        });
                     });
                 });
             });

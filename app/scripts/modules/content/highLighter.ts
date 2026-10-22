@@ -1,84 +1,84 @@
 'use strict';
 
 /**
- * Singleton helper to highlight controls DOM elements
+ * Factory for highlighter overlays. Each call returns an independent
+ * instance with its own wrapper element, so multiple instances (e.g. one
+ * for classic UI5, one for UI5 Web Components) can coexist on a page.
+ *
+ * @param {Object} [options]
+ * @param {string} [options.wrapperId='ui5-highlighter'] - DOM id of the
+ *     wrapper div. Use distinct ids when more than one highlighter shares
+ *     a page so they don't collide.
  */
-var Highlighter = {
-    // Reference for the highlighter DOM element
-    _highLighterDomEl: null,
+function createHighlighter(options) {
+    var wrapperId = (options && options.wrapperId) || 'ui5-highlighter';
+    var wrapper = null;
 
-    /**
-     * Hide the highlighter.
-     * @public
-     */
-    hide: function () {
-        this._highLighterDomEl && (this._highLighterDomEl.style.display = 'none');
-    },
+    function _create() {
+        var inner = document.createElement('div');
+        inner.style.cssText = 'box-sizing: border-box;border:1px solid blue;background: rgba(20, 20, 200, 0.4);position: absolute';
 
-    /**
-     * Show the highlighter.
-     * @private
-     */
-    _show: function () {
-        this._highLighterDomEl && (this._highLighterDomEl.style.display = 'block');
-    },
+        var w = document.createElement('div');
+        w.id = wrapperId;
+        w.style.cssText = 'position: fixed;top:0;right:0;bottom:0;left:0;z-index: 1000;overflow: hidden;pointer-events: none;';
+        w.appendChild(inner);
 
-    /**
-     * Create DOM element for visual highlighting.
-     * @private
-     */
-    _create: function () {
-        var highLighter = document.createElement('div');
-        highLighter.style.cssText = 'box-sizing: border-box;border:1px solid blue;background: rgba(20, 20, 200, 0.4);position: absolute';
+        document.body.appendChild(w);
 
-        var highLighterWrapper = document.createElement('div');
-        highLighterWrapper.id = 'ui5-highlighter';
-        highLighterWrapper.style.cssText = 'position: fixed;top:0;right:0;bottom:0;left:0;z-index: 1000;overflow: hidden;';
-        highLighterWrapper.appendChild(highLighter);
-
-        document.body.appendChild(highLighterWrapper);
-
-        // Save reference for later usage
-        this._highLighterDomEl = document.getElementById('ui5-highlighter');
-
-        // Add event handler
-        this._highLighterDomEl.onmouseover = this.hide.bind(this);
-    },
-
-    /**
-     * Set the position of the visual highlighter.
-     * @param {string} elementId - The id of the DOM element that need to be highlighted
-     * @returns {exports}
-     */
-    setDimensions: function (elementId) {
-        var highlighter;
-        var targetDomElement;
-        var targetRect;
-
-        // the hightlighter DOM element may already have been created in a previous DevTools session
-        // (followed by closing and reopening the DevTools)
-        this._highLighterDomEl || (this._highLighterDomEl = document.getElementById('ui5-highlighter'));
-
-        if (!this._highLighterDomEl) {
-            this._create();
-        } else {
-            this._show();
-        }
-
-        highlighter = this._highLighterDomEl.firstElementChild;
-        targetDomElement = document.getElementById(elementId);
-
-        if (targetDomElement) {
-            targetRect = targetDomElement.getBoundingClientRect();
-
-            highlighter.style.top = targetRect.top + 'px';
-            highlighter.style.left = targetRect.left + 'px';
-            highlighter.style.height = targetRect.height + 'px';
-            highlighter.style.width = targetRect.width + 'px';
-        }
-
-        return this;
+        // Hide on mouseover so the user can interact with the page underneath
+        w.onmouseover = hide;
+        wrapper = w;
     }
-};
 
-module.exports = Highlighter;
+    function _ensure() {
+        // Pick up an existing wrapper from a previous DevTools session
+        // (e.g. user closed and reopened DevTools)
+        if (!wrapper || !wrapper.isConnected) {
+            wrapper = document.getElementById(wrapperId);
+        }
+        if (!wrapper) {
+            _create();
+        }
+    }
+
+    /**
+     * Position the overlay over the given element. The element is resolved
+     * by the caller — this module does not look ids up, since classic UI5
+     * uses DOM ids and web components use a framework-assigned _id.
+     * @param {Element} element
+     */
+    function setDimensions(element) {
+        _ensure();
+
+        var inner = wrapper.firstElementChild;
+
+        if (!element) {
+            // No target — leave the wrapper visible but clear the inner box,
+            // matching the legacy behavior.
+            return;
+        }
+
+        wrapper.style.display = 'block';
+
+        var rect = element.getBoundingClientRect();
+        inner.style.top = rect.top + 'px';
+        inner.style.left = rect.left + 'px';
+        inner.style.height = rect.height + 'px';
+        inner.style.width = rect.width + 'px';
+    }
+
+    function hide() {
+        if (wrapper) {
+            wrapper.style.display = 'none';
+        }
+    }
+
+    return {
+        setDimensions: setDimensions,
+        hide: hide
+    };
+}
+
+module.exports = {
+    create: createHighlighter
+};

@@ -2,6 +2,13 @@
 (function () {
     'use strict';
 
+    // This controller function was already at the configured maxstatements
+    // ceiling (60); adding the App Info merge helpers (WebC + classic UI5)
+    // tips it over. Raise the scoped limit rather than fragment the tightly
+    // coupled panel wiring — same approach as the maxcomplexity directives
+    // elsewhere in the codebase.
+    /* jshint maxstatements: 70 */
+
     // ================================================================================
     // Main controller for 'UI5' tab in devtools
     // ================================================================================
@@ -24,6 +31,8 @@
     var ControllerDetailView = require('../../../modules/ui/ControllerDetailView.js');
     var OElementsRegistryMasterView = require('../../../modules/ui/OElementsRegistryMasterView.js');
     var AIChat = require('../../../modules/ui/AIChat.js');
+    var WebCEnumRegistry = require('../../../modules/webc/WebCEnumRegistry.js');
+
 
     // Apply theme
     // ================================================================================
@@ -52,6 +61,44 @@
     var framesSelect;
     var displayFrameData;
     var updateSupportabilityOverlay;
+    // Resolves UI5 Web Components enum properties to dropdown values by
+    // fetching the CDN manifest for the detected framework version. Runs here
+    // (extension context) rather than in the page, whose CSP often blocks the
+    // CDN hosts.
+    var webcEnumRegistry = new WebCEnumRegistry();
+
+    // Monotonic counter bumped on every control selection for the displayed
+    // frame. Web Components rendering is deferred behind an async manifest
+    // fetch, so this lets a deferred render detect that a newer selection has
+    // superseded it and bail instead of clobbering the current one.
+    var controlSelectSeq = 0;
+
+    // Rewrite a Web Components property section's `types` in place: where a
+    // property is a known enum (per the primed CDN manifest), replace its
+    // plain string type with the `{label: value}` map the DataView needs to
+    // render a <select>. Unknown properties keep their string type (editable
+    // text field). Safe to call when nothing is primed — it just no-ops.
+    function _enrichWebcEnumTypes(own, version) {
+        if (!own || !own.types || !own.meta || !own.meta.tag) {
+            return;
+        }
+        var tag = own.meta.tag;
+        Object.keys(own.types).forEach(function (property) {
+            // Only convert declared string types; leave booleans, objects and
+            // already-resolved enum maps untouched.
+            if (typeof own.types[property] !== 'string') {
+                return;
+            }
+            var values = webcEnumRegistry.getEnumValues(version, tag, property);
+            if (values) {
+                own.types[property] = values;
+            }
+        });
+    }
+    // Synthetic root inserted under the merged tree (mixed pages) to group all
+    // WebC controls under one expandable header. Its id ('__webc_root__') is
+    // reserved: selecting or hovering it in the tree must be a no-op since it
+    // has no corresponding element on the page.
     var sharedDataViewOptions = {
 
         /**
@@ -83,6 +130,10 @@
          * @param {string} selectedElementId
          */
         onSelectionChanged: function (selectedElementId) {
+            // The synthetic WebC group root has no real element; skip.
+            if (selectedElementId === '__webc_root__') {
+                return;
+            }
             port.postMessage({
                 action: 'do-control-select',
                 target: selectedElementId,
@@ -96,6 +147,10 @@
          * @param {string} hoveredElementId
          */
         onHoverChanged: function (hoveredElementId) {
+            // The synthetic WebC group root has no real element; skip.
+            if (hoveredElementId === '__webc_root__') {
+                return;
+            }
             port.postMessage({
                 action: 'on-control-tree-hover',
                 target: hoveredElementId,
@@ -385,6 +440,77 @@
         }
     }, sharedDataViewOptions));
 
+    function _getMergedControlTree(frameId) {
+        var fd = frameData[frameId];
+        if (!fd) {
+            return {};
+        }
+        var ui5Tree = fd.controlTreeUI5;
+        var webcTree = fd.controlTreeWebC;
+
+        if (ui5Tree && webcTree) {
+            return {
+                versionInfo: ui5Tree.versionInfo,
+                controls: ui5Tree.controls.concat([{
+                    id: '__webc_root__',
+                    name: '[' + webcTree.versionInfo.framework + ' v' + webcTree.versionInfo.version + ']',
+                    type: 'ui5-web-component',
+                    content: webcTree.controls
+                }])
+            };
+        }
+
+        if (webcTree) {
+            return webcTree;
+        }
+
+        return ui5Tree || {};
+    }
+
+    // Merge the classic UI5 and Web Components application-info section maps
+    // for the App Info tab. On mixed pages both frameworks contribute sections;
+    // classic UI5 keeps its original top-level sections and the Web Components
+    // info arrives as a single self-labelled "UI5 Web Components" group (see
+    // webcMain.js _buildApplicationInfo), so the two read as distinct without
+    // any title rewriting and their keys never collide. Classic sections are
+    // inserted first so they render above the Web Components group. On
+    // single-framework pages the relevant map is returned unchanged.
+    function _getMergedApplicationInfo(frameId) {
+        var fd = frameData[frameId];
+        if (!fd) {
+            return {};
+        }
+        var ui5Info = fd.applicationInformationUI5;
+        var webcInfo = fd.applicationInformationWebC;
+
+        if (ui5Info && webcInfo) {
+            var merged = {};
+            var key;
+            for (key in ui5Info) {
+                merged[key] = ui5Info[key];
+            }
+            for (key in webcInfo) {
+                merged[key] = webcInfo[key];
+            }
+            return merged;
+        }
+
+        return webcInfo || ui5Info || {};
+    }
+
+    // Recompute the merged App Info map for a frame, cache it on frameData
+    // (used by displayFrameData and the AI chat context), and push it to the
+    // App Info tab when that frame is currently selected.
+    function _refreshAppInfo(frameId) {
+        var merged = _getMergedApplicationInfo(frameId);
+        if (frameData[frameId]) {
+            frameData[frameId].applicationInformation = merged;
+        }
+        if (framesSelect.getSelectedId() === frameId) {
+            appInfo.setData(merged);
+        }
+    }
+
     displayFrameData = function (options) {
         var frameId = options.selectedId;
         var oldFrameId = options.oldSelectedId;
@@ -394,9 +520,9 @@
         updateSupportabilityOverlay();
 
         if (UI5Data) {
-            controlTree.setData(UI5Data.controlTree);
+            controlTree.setData(_getMergedControlTree(frameId));
             UI5Data.selectedElementId && controlTree.setSelectedElement(UI5Data.selectedElementId);
-            appInfo.setData(UI5Data.applicationInformation);
+            appInfo.setData(_getMergedApplicationInfo(frameId));
             UI5Data.elementRegistry && oElementsRegistryMasterView.setData(UI5Data.elementRegistry);
 
             controlProperties.setData(UI5Data.controlProperties || {});
@@ -435,13 +561,21 @@
         var overlayNoUI5Section = overlay.querySelector('[no-ui5-version]');
         var overlayUnsupportedVersionSection = overlay.querySelector('[unsupported-version]');
 
-        var showOverlay = !currentFrameData.isUI5Detected || !currentFrameData.isVersionSupported;
-        var showNoUI5Overlay = !currentFrameData.isUI5Detected;
-        var showUnsupportedVersionOverlay = currentFrameData.isUI5Detected && !currentFrameData.isVersionSupported;
+        var hasAnyFramework = currentFrameData.isUI5Detected || currentFrameData.isWebCDetected;
+        var showOverlay = !hasAnyFramework || (!currentFrameData.isVersionSupported && !currentFrameData.isWebCDetected);
+        var showNoUI5Overlay = !hasAnyFramework;
+        var showUnsupportedVersionOverlay = hasAnyFramework && !currentFrameData.isVersionSupported && !currentFrameData.isWebCDetected;
 
         overlay.hidden = !showOverlay;
         overlayNoUI5Section.style.display = showNoUI5Overlay ? 'block' : 'none';
         overlayUnsupportedVersionSection.style.display = showUnsupportedVersionOverlay ? 'block' : 'none';
+
+        // Pure WebC (no classic UI5): rename "Aggregations" tab to "Slots"
+        var aggregationsTab = document.getElementById('tab-aggregations');
+        if (aggregationsTab) {
+            var isPureWebC = currentFrameData.isWebCDetected && !currentFrameData.isUI5Detected;
+            aggregationsTab.textContent = isPureWebC ? 'Slots' : 'Aggregations';
+        }
     };
 
     framesSelect = new FrameSelect('frame-select', {
@@ -543,17 +677,21 @@
         'on-receiving-initial-data': function (message, messageSender) {
             var frameId = messageSender.frameId;
             frameData[frameId].controlTree = message.controlTree;
-            frameData[frameId].applicationInformation = message.applicationInformation;
+            frameData[frameId].controlTreeUI5 = message.controlTree;
+            frameData[frameId].applicationInformationUI5 = message.applicationInformation;
             frameData[frameId].elementRegistry = message.elementRegistry;
 
             if (framesSelect.getSelectedId() === frameId) {
-                controlTree.setData(message.controlTree);
+                controlTree.setData(_getMergedControlTree(frameId));
 
                 // Set URL for AI Chat history
                 aiChat.setUrl(frameData[frameId].url);
-                appInfo.setData(message.applicationInformation);
                 oElementsRegistryMasterView.setData(message.elementRegistry);
             }
+
+            // Merge with any Web Components info already collected for this
+            // frame and refresh the App Info tab (see _getMergedApplicationInfo).
+            _refreshAppInfo(frameId);
         },
 
         /**
@@ -576,8 +714,9 @@
             var frameId = messageSender.frameId;
             var frameIds = Object.keys(frameData).map( x => parseInt(x));
             frameData[frameId].controlTree = message.controlTree;
+            frameData[frameId].controlTreeUI5 = message.controlTree;
             if (framesSelect.getSelectedId() === frameId) {
-                controlTree.setData(message.controlTree);
+                controlTree.setData(_getMergedControlTree(frameId));
             }
 
             if (frameIds.length > 1) {
@@ -616,7 +755,23 @@
             frameData[frameId].controlAggregations = message.controlAggregations;
             frameData[frameId].controlEvents = message.controlEvents;
 
-            if (framesSelect.getSelectedId() === frameId) {
+            if (framesSelect.getSelectedId() !== frameId) {
+                return;
+            }
+
+            // Capture the selection token now; the deferred Web Components
+            // render below can resolve out of order (different runtime
+            // versions / fetch latencies), so it must verify it is still the
+            // current selection before applying its data.
+            var token = ++controlSelectSeq;
+
+            var render = function () {
+                // A newer selection (or a frame switch) has superseded this
+                // one while its manifest fetch was in flight — drop the stale
+                // render.
+                if (token !== controlSelectSeq || framesSelect.getSelectedId() !== frameId) {
+                    return;
+                }
                 controlProperties.setData(message.controlProperties);
                 controlBindingInfoLeftDataView.setData(message.controlBindings);
                 controlAggregations.setData(message.controlAggregations);
@@ -649,6 +804,26 @@
                     },
                     appInfo: frameData[frameId].applicationInformation
                 });
+            };
+
+            // For UI5 Web Components, resolve enum properties to dropdown values
+            // from the CDN manifest before rendering. The manifest fetch is
+            // async (cached after the first hit per version); on any failure we
+            // just render with plain-string values. Classic UI5 renders
+            // synchronously as before.
+            var own = message.controlProperties && message.controlProperties.own;
+            if (own && own.meta && own.meta.isWebComponent) {
+                var webcTree = frameData[frameId].controlTreeWebC;
+                // Prefer the per-component runtime version (multi-runtime pages
+                // can mix versions); fall back to the tree's primary runtime
+                // version when the element didn't report one.
+                var version = (own.meta && own.meta.version) ||
+                    (webcTree && webcTree.versionInfo && webcTree.versionInfo.version);
+                webcEnumRegistry.prime(version).then(function () {
+                    _enrichWebcEnumTypes(own, version);
+                }, function () { /* keep plain strings */ }).then(render);
+            } else {
+                render();
             }
         },
 
@@ -716,6 +891,72 @@
             }
         },
 
+        'on-webc-detected': function (message, messageSender) {
+            var frameId = messageSender.frameId;
+            if (!frameData[frameId]) {
+                frameData[frameId] = { url: messageSender.url };
+            }
+            frameData[frameId].isWebCDetected = true;
+            framesSelect.setData(frameData);
+
+            if (framesSelect.getSelectedId() === frameId) {
+                updateSupportabilityOverlay();
+            }
+
+            port.postMessage({
+                action: 'do-webc-injection',
+                tabId: chrome.devtools.inspectedWindow.tabId,
+                frameId: frameId
+            });
+        },
+
+        'on-webc-not-detected': function () {
+        },
+
+        'on-webc-script-injection': function (message, messageSender) {
+            var frameId = message.frameId || (messageSender && messageSender.frameId);
+            port.postMessage({
+                action: 'get-initial-information-webc',
+                frameId: frameId
+            });
+        },
+
+        'on-receiving-initial-data-webc': function (message, messageSender) {
+            var frameId = messageSender.frameId;
+            if (!frameData[frameId]) {
+                frameData[frameId] = {};
+            }
+            frameData[frameId].controlTreeWebC = message.controlTree;
+            frameData[frameId].applicationInformationWebC = message.applicationInformation;
+
+            if (framesSelect.getSelectedId() === frameId) {
+                controlTree.setData(_getMergedControlTree(frameId));
+            }
+
+            // On mixed pages the classic UI5 sections and the Web Components
+            // sections are shown together in the App Info tab; on pure-WebC
+            // pages only the WebC sections are present (see
+            // _getMergedApplicationInfo).
+            _refreshAppInfo(frameId);
+        },
+
+        'on-application-dom-update-webc': function (message, messageSender) {
+            var frameId = messageSender.frameId;
+            if (!frameData[frameId]) {
+                frameData[frameId] = {};
+            }
+            frameData[frameId].controlTreeWebC = message.controlTree;
+            // Tag usage counts and the runtime list can change as the DOM
+            // mutates, so refresh the stored WebC app info too.
+            frameData[frameId].applicationInformationWebC = message.applicationInformation;
+
+            if (framesSelect.getSelectedId() === frameId) {
+                controlTree.setData(_getMergedControlTree(frameId));
+            }
+
+            _refreshAppInfo(frameId);
+        },
+
         'on-ping-frames': function(message) {
             var aLatestFrameIds = message.frameIds;
             var aFrameIds = Object.keys(frameData).map(x => parseInt(x));
@@ -758,6 +999,7 @@
     });
 
     port.postMessage({ action: 'do-ui5-detection' });
+    port.postMessage({ action: 'do-webc-detection' });
 
     // Restart everything when the URL is changed
     chrome.devtools.network.onNavigated.addListener(function () {
@@ -765,5 +1007,6 @@
         framesSelect.setSelectedId(0);
         framesSelect.setData(frameData);
         port.postMessage({ action: 'do-ui5-detection' });
+        port.postMessage({ action: 'do-webc-detection' });
     });
 }());

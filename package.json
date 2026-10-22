@@ -1,6 +1,6 @@
 {
   "name": "ui5inspector",
-  "version": "1.9.2",
+  "version": "1.10.0",
   "author": "SAP SE",
   "license": "Apache-2.0",
   "contributors": [
@@ -15,12 +15,6 @@
     "@actions/github": "^5.0.3",
     "@commitlint/cli": "^16.2.3",
     "@commitlint/config-conventional": "^16.2.1",
-    "@semantic-release/changelog": "^6.0.1",
-    "@semantic-release/commit-analyzer": "^9.0.2",
-    "@semantic-release/exec": "^6.0.3",
-    "@semantic-release/git": "^10.0.1",
-    "@semantic-release/github": "^8.1.0",
-    "@semantic-release/release-notes-generator": "^10.0.3",
     "browserify": "^16.5.1",
     "browserify-istanbul": "^3.0.1",
     "chai": "~4.2.0",
@@ -33,7 +27,7 @@
     "grunt-contrib-compress": "~1.6.0",
     "grunt-contrib-connect": "~2.1.0",
     "grunt-contrib-copy": "~1.0.0",
-    "grunt-contrib-jshint": "~2.1.0",
+    "grunt-contrib-jshint": "~3.2.0",
     "grunt-contrib-less": "~2.0.0",
     "grunt-contrib-watch": "~1.1.0",
     "grunt-coveralls": "^2.0.0",
@@ -55,7 +49,6 @@
     "load-grunt-tasks": "~5.1.0",
     "mocha": "^11.1.0",
     "prettify-xml": "^1.2.0",
-    "semantic-release": "^25.0.3",
     "sinon": "~9.0.2",
     "time-grunt": "~2.0.0",
     "typescript": "^4.9.5"

@@ -136,6 +136,7 @@ function _createCloseButton(splitterInstance) {
  * @constructor
  */
 function SplitContainer(domId, options) {
+    /* jshint maxcomplexity: 16 */
     this._setReferences(domId);
 
     /**
