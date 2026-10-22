@@ -11,7 +11,19 @@
         contexts: ['all']
     });
 
-    var isUI5PanelShown = false;
+    /**
+     * Persist the UI5 panel visibility state in session storage so it survives
+     * service-worker eviction and respawn cycles.
+     */
+    function setPanelShown(shown) {
+        return chrome.storage.session.set({ isUI5PanelShown: shown });
+    }
+
+    function getPanelShown() {
+        return chrome.storage.session.get('isUI5PanelShown').then(function (result) {
+            return result.isUI5PanelShown === true;
+        });
+    }
 
     /**
      * This method will be fired when an instance is clicked. The idea is to be overwritten from the instance.
@@ -135,7 +147,7 @@
          * @param {Object} message
          */
         'on-ui5-devtool-show': function (message) {
-            isUI5PanelShown = true;
+            setPanelShown(true);
             contextMenu.create();
         },
 
@@ -144,7 +156,7 @@
          * @param {Object} message
          */
         'on-ui5-devtool-hide': function (message) {
-            isUI5PanelShown = false;
+            setPanelShown(false);
             contextMenu.removeAll();
         },
 
@@ -485,10 +497,12 @@
         if (port.name === 'devtools') {
             port.onDisconnect.addListener(function () {
                 utils.sendToAll({ action: 'on-hide-highlight' });
-                if (isUI5PanelShown) {
-                    contextMenu.removeAll();
-                    isUI5PanelShown = false;
-                }
+                getPanelShown().then(function (shown) {
+                    if (shown) {
+                        contextMenu.removeAll();
+                        setPanelShown(false);
+                    }
+                });
             });
             return;
         }
@@ -518,5 +532,37 @@
             });
         }
     });
+
+    // ================================================================================
+    // Startup reconciliation (runs on every worker spawn)
+    // ================================================================================
+    // If the worker was evicted while the UI5 panel was NOT shown (or storage is
+    // unset), remove any orphaned context-menu left by a previous worker generation.
+    // If storage says the panel IS shown, the menu must remain intact.
+    //
+    // reconcileContextMenu is exposed on window.__ui5InspectorReconcile so unit
+    // tests can seed chrome.storage.session and call it directly, verifying both
+    // branches of the conditional independently.  The guard keeps the assignment
+    // out of non-browser environments.
+    // No guard is needed against an on-ui5-devtool-show message racing this
+    // read: the storage.get resolves as a microtask on worker spawn, whereas a
+    // show message requires the DevTools page to detect the worker is back,
+    // reconnect, and have the user switch to the UI5 panel — multiple IPC hops,
+    // all far slower. panel.onShown does not re-fire automatically on respawn,
+    // so a panel that was open before eviction leaves storage === true and the
+    // menu is correctly preserved.
+    function reconcileContextMenu() {
+        return getPanelShown().then(function (shown) {
+            if (!shown) {
+                contextMenu.removeAll();
+            }
+        });
+    }
+
+    if (typeof window !== 'undefined') {
+        window.__ui5InspectorReconcile = reconcileContextMenu;
+    }
+
+    reconcileContextMenu();
 
 }());
