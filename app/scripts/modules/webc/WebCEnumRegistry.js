@@ -124,6 +124,25 @@ WebCEnumRegistry.storageKey = function (version) {
 };
 
 /**
+ * Normalize a runtime-reported version to its leading semver core. Page runtime
+ * metadata is not always a clean version — e.g. React wrappers can report
+ * "2.0.0/../../react@18.2.0". Extract the leading major.minor.patch(-prerelease)
+ * and drop any trailing path/package junk. Returns '' when the string does not
+ * start with a semver core, so malformed input can never reach a CDN URL or a
+ * storage key.
+ *
+ * @param {string} version
+ * @returns {string}
+ */
+WebCEnumRegistry.normalizeVersion = function (version) {
+    if (typeof version !== 'string') {
+        return '';
+    }
+    var match = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.+-]+)?/.exec(version.trim());
+    return match ? match[0] : '';
+};
+
+/**
  * Parse a single attribute `type.text` into an enum value map, or null if it
  * is not an enum (i.e. not a union of two-or-more quoted string literals).
  *
@@ -360,6 +379,14 @@ WebCEnumRegistry.prototype.prime = function (version) {
     if (!version || !this._fetch) {
         return Promise.resolve(Object.create(null));
     }
+    // Treat the page-reported version as untrusted: strip any trailing
+    // path/package junk down to a clean semver core before it is pattern-checked,
+    // fetched, memoized or stored. An unusable value normalizes to '' and falls
+    // into the guard below (no fetch).
+    version = WebCEnumRegistry.normalizeVersion(version);
+    if (!version) {
+        return Promise.resolve(Object.create(null));
+    }
     if (!WebCEnumRegistry.VERSION_PATTERN.test(version)) {
         return Promise.resolve(Object.create(null));
     }
@@ -424,6 +451,7 @@ WebCEnumRegistry.prototype.prime = function (version) {
  * @returns {Object|null} `{label: value}` map or null
  */
 WebCEnumRegistry.prototype.getEnumValues = function (version, tag, property) {
+    version = WebCEnumRegistry.normalizeVersion(version);
     var map = this._memory[version];
     if (!map || !map[tag]) {
         return null;

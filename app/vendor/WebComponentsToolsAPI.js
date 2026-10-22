@@ -10,6 +10,19 @@
         return element && element.isUI5Element === true;
     }
 
+    // Normalize a runtime-reported version to its leading semver core. Page
+    // runtime metadata is not always a clean version — e.g. React wrappers can
+    // report "2.0.0/../../react@18.2.0". Extract the leading
+    // major.minor.patch(-prerelease) and drop any trailing path/package junk.
+    // Returns '' when the string does not start with a semver core.
+    function _normalizeVersion(version) {
+        if (typeof version !== 'string') {
+            return '';
+        }
+        var match = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.+-]+)?/.exec(version.trim());
+        return match ? match[0] : '';
+    }
+
     function _getVersion() {
         if (cachedVersion !== null) {
             return cachedVersion;
@@ -25,7 +38,7 @@
             // on the meta element (an Array of runtime objects).
             // See packages/base/src/Runtimes.ts.
             if (meta.Runtimes && meta.Runtimes.length > 0 && meta.Runtimes[0].version) {
-                cachedVersion = meta.Runtimes[0].version;
+                cachedVersion = _normalizeVersion(meta.Runtimes[0].version);
             }
         } catch (e) {
             // best-effort
@@ -259,7 +272,10 @@
         _getRuntimes().forEach(function (rt) {
             var rtSuffix = _safe(function () { return rt.scopingSuffix; }, '');
             if (rtSuffix && rtSuffix === suffix) {
-                version = _safe(function () { return rt.version; }, version) || version;
+                var candidate = _normalizeVersion(_safe(function () { return rt.version; }, ''));
+                if (candidate) {
+                    version = candidate;
+                }
             }
         });
         return version;
