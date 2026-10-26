@@ -609,24 +609,47 @@
         }
     });
 
-    // Tear down the AI session when the panel page is unloaded so the background
-    // service worker disconnects the prompt-api port and destroys the model session.
-    window.addEventListener('beforeunload', function () {
-        aiChat.destroy();
-    });
+    // Wire up panel-level event listeners. Grouped into a single function so the
+    // top-level panel setup stays within the per-function statement budget.
+    function wirePanelEventListeners() {
+        // Tear down the AI session when the panel page is unloaded so the background
+        // service worker disconnects the prompt-api port and destroys the model session.
+        window.addEventListener('beforeunload', function () {
+            aiChat.destroy();
+        });
 
-    // Notify the AI tab when it becomes active so the transcript scrolls to the
-    // latest turn. Deferred via requestAnimationFrame so the scroll runs after the
-    // TabBar click handler has flipped the `selected` attribute and the content is
-    // visible (scrollHeight on a hidden element is meaningless).
-    var aiTabElement = document.getElementById('ai-tab');
-    if (aiTabElement) {
-        aiTabElement.addEventListener('click', function () {
-            window.requestAnimationFrame(function () {
-                aiChat.onTabActivated();
+        // Clear any element highlight on the inspected page as soon as the cursor
+        // leaves the inspector panel. Hover inside the tree / registry shows the
+        // highlight; leaving the panel entirely must remove it. Using mouseleave on
+        // the root element means it fires once when the pointer exits the panel,
+        // regardless of which view produced the highlight. This complements — does
+        // not replace — the panel-hide / DevTools-close emitters, which still cover
+        // keyboard panel switches and highlights left showing when DevTools closes.
+        document.documentElement.addEventListener('mouseleave', function () {
+            if (!framesSelect) {
+                return;
+            }
+            port.postMessage({
+                action: 'on-hide-highlight',
+                frameId: framesSelect.getSelectedId()
             });
         });
+
+        // Notify the AI tab when it becomes active so the transcript scrolls to the
+        // latest turn. Deferred via requestAnimationFrame so the scroll runs after the
+        // TabBar click handler has flipped the `selected` attribute and the content is
+        // visible (scrollHeight on a hidden element is meaningless).
+        var aiTabElement = document.getElementById('ai-tab');
+        if (aiTabElement) {
+            aiTabElement.addEventListener('click', function () {
+                window.requestAnimationFrame(function () {
+                    aiChat.onTabActivated();
+                });
+            });
+        }
     }
+
+    wirePanelEventListeners();
 
     // ================================================================================
     // Communication
