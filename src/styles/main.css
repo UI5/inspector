@@ -137,6 +137,7 @@ th {
 	--hero-intro-btn-font-size: 1.5rem;
 	--hero-info-max-width: 61.5rem;
 	--hero-info-description-font-size: 1.25rem;
+	--hero-intro-hint-font-size: 0.875rem;
 
 	/* --- Example App --- */
 	--example-app-description-font-size: 1.25rem;
@@ -153,7 +154,7 @@ th {
 	--footer-subsection-link-font-size: 1.125rem;
 
 	/* --- Decorations --- */
-	--card-box-shadow: 0 0.25rem 2rem 0.25rem rgba(0,0,0,0.1);
+	--card-box-shadow: 0 0.25rem 2rem 0.25rem rgba(0, 0, 0, 0.1);
 }
 
 /******************************/
@@ -276,7 +277,14 @@ a {
 .navigation-bar__link:first-child {
 	font-size: var(--navigation-bar-font-size);
 	font-family: var(--font-bold);
-	margin-right: 2.375rem;
+	margin-right: 2rem;
+	padding: 0.7rem;
+	border-radius: 0.5rem;
+	transition: background-color 200ms ease;
+}
+
+.navigation-bar__link:first-child:hover {
+	background-color: rgba(0, 0, 0, 0.07);
 }
 
 .navigation-bar__link:last-child {
@@ -315,6 +323,17 @@ a {
 .hero-intro__btn {
 	font-size: var(--hero-intro-btn-font-size);
 	padding: 1.125rem 2.15rem;
+}
+
+.hero-intro__hint {
+	margin-top: 1rem;
+	font-family: var(--font-light);
+	font-size: var(--hero-intro-hint-font-size);
+	opacity: 0.8;
+}
+
+.hero-intro__hint:empty {
+	display: none;
 }
 
 .hero-info {
@@ -388,6 +407,15 @@ a {
 .example-app__description {
 	font-size: var(--example-app-description-font-size);
 	text-align: center;
+}
+
+.example-app__description a {
+	color: var(--primary-emphasize-color);
+	text-decoration: none;
+}
+
+.example-app__description a:hover {
+	text-decoration: underline;
 }
 
 /* -------- SECTION: MAIN FEATURES -------- */
@@ -510,7 +538,7 @@ a {
 	width: 2.1875rem;
 }
 
-.footer-subsection__list--copyright{
+.footer-subsection__list--copyright {
 	margin-bottom: 2rem;
 }
 
@@ -628,7 +656,7 @@ a {
 
 	.main-features::before {
 		background-size: 40rem, 25rem;
-    	background-position-y: 0, bottom;
+		background-position-y: 0, bottom;
 		background-position-x: -10rem, right;
 	}
 }
@@ -723,8 +751,8 @@ a {
 	}
 
 	/* ------------- FOOTER ------------- */
-	.footer__logo{
-		position:absolute
+	.footer__logo {
+		position: absolute
 	}
 
 	.footer-grid {
