@@ -1,13 +1,12 @@
 ![OpenUI5](docs/images/UI5_logo_wide.png)
 
 [![Built with Grunt](https://cdn.gruntjs.com/builtwith.png)](http://gruntjs.com/)
-[![Build Status](https://travis-ci.org/SAP/ui5-inspector.svg?branch=master)](https://travis-ci.org/SAP/ui5-inspector)
-[![Coverage Status](https://coveralls.io/repos/SAP/ui5-inspector/badge.svg?branch=master&service=github)](https://coveralls.io/github/SAP/ui5-inspector?branch=master)
+[![CI](https://github.com/UI5/inspector/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/UI5/inspector/actions/workflows/ci.yml)
 [![REUSE status](https://api.reuse.software/badge/github.com/UI5/inspector)](https://api.reuse.software/info/github.com/UI5/inspector)
 
 # About UI5 Inspector
 
-UI5 Inspector is a standard Chrome or Edge extension for debugging and getting to know UI5 applications.
+UI5 Inspector is a standard Chrome or Edge extension for debugging and getting to know applications built with OpenUI5, SAPUI5, or UI5 Web Components.
 
 It's free and open source: UI5 Inspector is licensed under the Apache License, Version 2.0.
 See [LICENSE.txt](https://github.com/UI5/inspector/blob/master/LICENSE.txt) for more information.
@@ -22,7 +21,7 @@ The latest released version can be downloaded and installed as follows:
 4. Check “Developer mode” setting and then choose "Load unpacked extension..."
 5. From the newly opened window select the folder to which the zip file was unpacked
 6. Restart Chrome or Edge
-7. Open a OpenUI5/SAPUI5 based web application like: [https://openui5.hana.ondemand.com/explored.html](https://openui5.hana.ondemand.com/explored.html)
+7. Open an OpenUI5 or SAPUI5 based web application, for example [OpenUI5](https://sdk.openui5.org/) or [SAPUI5](https://ui5.sap.com/)
 8. Open the Developer Tools from the menu or by pressing F12 or Ctrl+Shift+I
 9. Select the tab labeled 'UI5' in the Developer Tools
 
@@ -30,13 +29,13 @@ The latest released version can be downloaded and installed as follows:
 
 You can get the source code locally and contribute to the project.
 
-1. Clone the project locally: `git clone git@github.com:SAP/ui5-inspector.git`
+1. Clone the project locally: `git clone git@github.com:UI5/inspector.git`
 2. Install dependencies with the following commands: `npm install`
-3. In Chrome open as url: `chrome://extensions/`
+3. In Chrome open the url `chrome://extensions/` (or `edge://extensions/` in Edge)
 4. Check “Developer mode” and then click "Load unpacked extension..."
 5. From the newly opened window select the **dist** folder from the locally cloned project
-6. Restart Chrome
-7. Open a OpenUI5/SAPUI5 based web application like: [https://openui5.hana.ondemand.com/explored.html](https://openui5.hana.ondemand.com/explored.html)
+6. Restart Chrome or Edge
+7. Open an OpenUI5 or SAPUI5 based web application, for example [OpenUI5](https://sdk.openui5.org/) or [SAPUI5](https://ui5.sap.com/)
 8. Open the Developer Tools from the menu or by pressing F12 or Ctrl+Shift+I
 9. Select the tab labeled 'UI5' in the Developer Tools
 
