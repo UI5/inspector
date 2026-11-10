@@ -411,7 +411,7 @@ describe('AssistantController', function () {
             });
         });
 
-        it('should leave Conversation Memory untouched when streaming fails', function () {
+        it('should persist the user turn before streaming and leave the assistant turn absent when streaming fails', function () {
             const harness = createController();
 
             return initializedReady(harness).then(function () {
@@ -422,7 +422,24 @@ describe('AssistantController', function () {
                     return sendPromise.catch(function () {});
                 }).then(function () {
                     const stored = harness.conversationStore.data['https://example.com'];
-                    (stored === undefined || stored.length === 0).should.be.true;
+                    stored.should.deep.equal([{ role: 'user', content: 'Question that crashes' }]);
+                });
+            });
+        });
+
+        it('should add the user turn to _conversationMemory when streaming fails so history stays consistent with storage', function () {
+            const harness = createController();
+
+            return initializedReady(harness).then(function () {
+                const sendPromise = harness.controller.sendUserMessage('Question that crashes');
+
+                return awaitStreamController(harness.provider).then(function (streamCtrl) {
+                    streamCtrl.emitError(new Error('model crashed'));
+                    return sendPromise.catch(function () {});
+                }).then(function () {
+                    harness.controller._conversationMemory.should.deep.equal([
+                        { role: 'user', content: 'Question that crashes' }
+                    ]);
                 });
             });
         });
@@ -972,6 +989,32 @@ describe('AssistantController', function () {
                 });
                 downloadingStates.length.should.be.at.least(1);
                 downloadingStates[downloadingStates.length - 1].progress.should.equal(1.0);
+            });
+        });
+
+        it('should load Conversation Memory for the current URL after download completes so a URL set during downloading is not lost', function () {
+            const harness = createController();
+            harness.provider.availabilityResult = { status: 'downloadable', message: 'Needs download' };
+            harness.conversationStore.data['https://example.com'] = [
+                { role: 'user', content: 'hello' },
+                { role: 'assistant', content: 'hi' }
+            ];
+
+            harness.controller.setUrl('https://example.com');
+
+            return harness.controller.initialize().then(function () {
+                // Simulate URL set while model is downloading
+                harness.controller.setUrl('https://example.com');
+                return harness.controller.downloadModel();
+            }).then(function () {
+                const loaded = harness.events.filter(function (e) {
+                    return e.type === 'conversation-loaded';
+                });
+                loaded.length.should.be.at.least(1);
+                loaded[loaded.length - 1].turns.should.deep.equal([
+                    { role: 'user', content: 'hello' },
+                    { role: 'assistant', content: 'hi' }
+                ]);
             });
         });
     });

@@ -128,6 +128,9 @@ AssistantController.prototype._safeGetConsoleErrors = function () {
  * Send a user message: build the full messages array, stream the response via the provider,
  * persist both turns, and emit stream events. The current Inspection Context is injected.
  *
+ * Note: GeminiNanoProvider supports an AbortSignal option for cancellation, but no cancel button
+ * is wired in the UI yet — that is a follow-up.
+ *
  * @param {string} userMessage
  * @returns {Promise<{content: string}>}
  */
@@ -147,15 +150,15 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
         this._emit('stream-chunk', textDelta);
     };
 
-    return this._provider.sendMessage(messages, { onChunk: onChunk }).then((fullText) => {
+    return this._conversationStore.append(this._currentUrl, {
+        role: 'user',
+        content: userMessage
+    }).then(() => {
+        return this._provider.sendMessage(messages, { onChunk: onChunk });
+    }).then((fullText) => {
         return this._conversationStore.append(this._currentUrl, {
-            role: 'user',
-            content: userMessage
-        }).then(() => {
-            return this._conversationStore.append(this._currentUrl, {
-                role: 'assistant',
-                content: fullText
-            });
+            role: 'assistant',
+            content: fullText
         }).then(() => {
             this._conversationMemory.push({ role: 'user', content: userMessage });
             this._conversationMemory.push({ role: 'assistant', content: fullText });
@@ -168,6 +171,7 @@ AssistantController.prototype.sendUserMessage = function (userMessage) {
         });
     }, (err) => {
         this._isStreaming = false;
+        this._conversationMemory.push({ role: 'user', content: userMessage });
         this._setCapabilityState('streaming-failed', err && err.message ? err.message : 'Streaming failed', 0);
         this._emit('stream-failed', err);
         throw err;
@@ -201,8 +205,8 @@ AssistantController.prototype.setUrl = function (url) {
         return Promise.resolve();
     }
 
+    this._provider.destroy();
     return this._loadConversationMemory().then(() => {
-        this._provider.destroy();
         this._setCapabilityState('ready', 'Gemini Nano is ready', 0);
     });
 };
@@ -263,6 +267,8 @@ AssistantController.prototype.downloadModel = function () {
     this._setCapabilityState('downloading', 'Starting download...', 0);
     return this._provider.downloadModel((progress) => {
         this._setCapabilityState('downloading', 'Downloading model', progress);
+    }).then(() => {
+        return this._loadConversationMemory();
     }).then(() => {
         this._setCapabilityState('ready', 'Model ready', 1);
     }, (err) => {
