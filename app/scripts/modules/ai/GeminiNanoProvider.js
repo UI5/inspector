@@ -79,12 +79,6 @@ function toCanonicalCapabilityState(portStatus) {
     return 'unavailable';
 }
 
-function abortError() {
-    const err = new Error('Aborted');
-    err.name = 'AbortError';
-    return err;
-}
-
 function messagesEqual(a, b) {
     if (a === b) {
         return true;
@@ -190,24 +184,19 @@ GeminiNanoProvider.prototype._createSession = function (prefix) {
  * @private
  * @param {string} userContent
  * @param {Function} [onChunk]
- * @param {AbortSignal} [signal]
  * @returns {Promise<string>}
  */
-GeminiNanoProvider.prototype._streamMessage = function (userContent, onChunk, signal) {
+GeminiNanoProvider.prototype._streamMessage = function (userContent, onChunk) {
     return new Promise((resolve, reject) => {
         this._connect();
 
         let settled = false;
         let fullText = '';
-        let abortListener = null;
 
         const cleanup = () => {
             this._off('chunk');
             this._off('complete');
             this._off('error');
-            if (signal && abortListener) {
-                signal.removeEventListener('abort', abortListener);
-            }
         };
 
         const settle = (fn) => {
@@ -218,17 +207,6 @@ GeminiNanoProvider.prototype._streamMessage = function (userContent, onChunk, si
             cleanup();
             fn();
         };
-
-        if (signal) {
-            if (signal.aborted) {
-                reject(abortError());
-                return;
-            }
-            abortListener = () => {
-                settle(() => reject(abortError()));
-            };
-            signal.addEventListener('abort', abortListener);
-        }
 
         this._on('chunk', (message) => {
             if (settled) {
@@ -263,7 +241,7 @@ GeminiNanoProvider.prototype._streamMessage = function (userContent, onChunk, si
  * `onChunk(textDelta)` per streamed piece and resolves with the full response text.
  *
  * @param {Array<{role: string, content: string}>} messages
- * @param {{onChunk?: Function, signal?: AbortSignal}} [options]
+ * @param {{onChunk?: Function}} [options]
  * @returns {Promise<string>}
  */
 GeminiNanoProvider.prototype.sendMessage = function (messages, options) {
@@ -276,9 +254,6 @@ GeminiNanoProvider.prototype.sendMessage = function (messages, options) {
     if (!lastMessage || lastMessage.role !== 'user') {
         return Promise.reject(new Error('sendMessage: last message must be a user turn'));
     }
-    if (opts.signal && opts.signal.aborted) {
-        return Promise.reject(abortError());
-    }
 
     const prefix = messages.slice(0, -1);
 
@@ -287,7 +262,7 @@ GeminiNanoProvider.prototype.sendMessage = function (messages, options) {
         this._createSession(prefix);
 
     return ensureSession.then(() => {
-        return this._streamMessage(lastMessage.content, opts.onChunk, opts.signal);
+        return this._streamMessage(lastMessage.content, opts.onChunk);
     }).then((fullText) => {
         this._sessionPrefix = messages.concat([{ role: 'assistant', content: fullText }]);
         return fullText;

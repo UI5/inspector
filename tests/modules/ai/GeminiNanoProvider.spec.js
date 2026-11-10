@@ -395,47 +395,6 @@ describe('GeminiNanoProvider', function () {
         });
     });
 
-    describe('#sendMessage() — cancellation via AbortSignal', function () {
-        it('should reject immediately when the signal is already aborted', function () {
-            const harness = createProvider();
-            const controller = new AbortController();
-            controller.abort();
-
-            return harness.provider.sendMessage([
-                { role: 'system', content: 's' },
-                { role: 'user', content: 'u' }
-            ], { signal: controller.signal }).then(function () {
-                throw new Error('Expected sendMessage to reject when signal was pre-aborted');
-            }, function (err) {
-                err.name.should.equal('AbortError');
-            });
-        });
-
-        it('should reject with AbortError when the signal fires mid-stream', async function () {
-            const harness = createProvider();
-            const controller = new AbortController();
-
-            const sendPromise = harness.provider.sendMessage([
-                { role: 'system', content: 's' },
-                { role: 'user', content: 'u' }
-            ], { signal: controller.signal });
-
-            await Promise.resolve();
-            harness.fake.emit({ type: 'session-created' });
-            await Promise.resolve();
-            harness.fake.emit({ type: 'chunk', content: 'partial' });
-
-            controller.abort();
-
-            try {
-                await sendPromise;
-                throw new Error('Expected sendMessage to reject on abort');
-            } catch (err) {
-                err.name.should.equal('AbortError');
-            }
-        });
-    });
-
     describe('#getUsageInfo()', function () {
         it('should resolve with the usage data payload reported by the transport', function () {
             const harness = createProvider();
