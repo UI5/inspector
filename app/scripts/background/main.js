@@ -263,7 +263,7 @@
                 message = 'Gemini Nano is ready to use';
             } else if (availability === 'downloadable') {
                 status = 'needs-download';
-                message = 'Gemini Nano needs to be downloaded (~22GB)';
+                message = 'Gemini Nano needs to be downloaded. See requirements: https://developer.chrome.com/docs/ai/get-started';
             } else if (availability === 'downloading') {
                 status = 'downloading';
                 message = 'Gemini Nano is currently downloading';
