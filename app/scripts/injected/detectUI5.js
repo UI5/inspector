@@ -8,7 +8,8 @@
     function createResponseToContentScript() {
         var responseToContentScript = Object.create(null);
         var responseToContentScriptBody;
-        var frameworkInfo;
+        var frameworkName;
+        var frameworkVersion;
         var versionInfo;
 
         responseToContentScript.detail = Object.create(null);
@@ -18,23 +19,36 @@
             responseToContentScriptBody.action = 'on-ui5-detected';
             responseToContentScriptBody.framework = Object.create(null);
 
-            // Get framework version
-            try {
-                responseToContentScriptBody.framework.version = sap.ui.getCore().getConfiguration().getVersion().toString();
-            } catch (e) {
-                responseToContentScriptBody.framework.version = '';
-            }
-
-            // Get framework name
+            // Get framework name and version from getVersionInfo()
             try {
                 versionInfo = sap.ui.getVersionInfo();
-
-                // Use group artifact version for maven builds or name for other builds (like SAPUI5-on-ABAP)
-                frameworkInfo = versionInfo.gav ? versionInfo.gav : versionInfo.name;
-
-                responseToContentScriptBody.framework.name = frameworkInfo.indexOf('openui5') !== -1 ? 'OpenUI5' : 'SAPUI5';
             } catch (e) {
+                versionInfo = null;
+            }
+
+            // Framework name: prefer the dedicated framework/name property (already
+            // a clean label), fall back to GAV for Maven builds where name detection
+            // requires an indexOf check.
+            frameworkName = versionInfo && versionInfo.framework && versionInfo.framework.name;
+            if (frameworkName) {
+                responseToContentScriptBody.framework.name = frameworkName;
+            } else if (versionInfo && versionInfo.gav) {
+                responseToContentScriptBody.framework.name = versionInfo.gav.indexOf('openui5') !== -1 ? 'OpenUI5' : 'SAPUI5';
+            } else {
                 responseToContentScriptBody.framework.name = 'UI5';
+            }
+
+            // Framework version: prefer the version from getVersionInfo(),
+            // fall back to the core configuration when it is not available.
+            frameworkVersion = versionInfo && versionInfo.framework && versionInfo.framework.version;
+            if (frameworkVersion) {
+                responseToContentScriptBody.framework.version = frameworkVersion;
+            } else {
+                try {
+                    responseToContentScriptBody.framework.version = sap.ui.getCore().getConfiguration().getVersion().toString();
+                } catch (e) {
+                    responseToContentScriptBody.framework.version = '';
+                }
             }
 
             // Check if the version is supported
