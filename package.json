@@ -22,6 +22,7 @@
     "grunt": "^1.4.1",
     "grunt-banner": "~0.6.0",
     "grunt-browserify": "^6.0.0",
+    "grunt-cli": "~1.4.2",
     "grunt-contrib-clean": "~2.0.0",
     "grunt-contrib-compress": "~1.6.0",
     "grunt-contrib-connect": "~2.1.0",
@@ -60,9 +61,11 @@
   },
   "scripts": {
     "generate:typescript": "tsc",
+    "test": "grunt test",
+    "build": "grunt dist",
     "postinstall": "npm run generate:typescript && node -e \"require('grunt').tasks(['dist']);\"",
     "prepare": "husky install",
-    "husky:pre-commit": "grunt test",
+    "husky:pre-commit": "npm test",
     "husky:commit-msg": "commitlint -e"
   }
 }

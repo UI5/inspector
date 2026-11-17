@@ -21,4 +21,4 @@ jobs:
       - name: Install NPM dependencies
         run: npm ci
       - name: Run tests
-        run: grunt test
+        run: npm test
