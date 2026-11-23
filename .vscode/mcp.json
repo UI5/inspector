@@ -15,9 +15,14 @@
       "command": "node",
       "args": ["${workspaceFolder}/../sapui5.misc/tools/_snippix/mcp/index.js"],
       "env": {
-        "SNIPPIX_BASE_URL": "https://snippix.only.sap/snippix",
+        "SNIPPIX_BASE_URL": "http://localhost:3000/snippix",
         "SNIPPIX_REJECT_UNAUTHORIZED": "false"
       }
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@0.0.83", "--headless"]
     }
   }
 }

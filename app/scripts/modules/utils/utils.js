@@ -132,12 +132,29 @@ function _sendToAll(message, callback) {
     var options;
     chrome.windows.getCurrent().then(w => {
         chrome.tabs.query({ active: true, windowId: w.id }).then(tabs => {
+            if (!tabs.length) {
+                return;
+            }
             // options.frameId allows to send the message to
             // a specific frame instead of all frames in the tab
             if (frameId !== undefined) {
                 options = { frameId };
             }
-            chrome.tabs.sendMessage(tabs[0].id, message, options, callback);
+            // Without a callback, chrome.tabs.sendMessage returns a promise. Every runtime
+            // message is rebroadcast through here, so broadcasts routinely reach frames with no
+            // content-script listener (cross-origin iframes, not-yet-injected frames). That
+            // rejects with "Could not establish connection. Receiving end does not exist." — a
+            // benign, expected outcome for a broadcast, so swallow it rather than leave an
+            // unhandled rejection. With a callback, Chrome signals the same condition via
+            // chrome.runtime.lastError; read it so it is not logged as an unchecked error.
+            if (callback) {
+                chrome.tabs.sendMessage(tabs[0].id, message, options, function (response) {
+                    void chrome.runtime.lastError;
+                    callback(response);
+                });
+            } else {
+                chrome.tabs.sendMessage(tabs[0].id, message, options).catch(function () {});
+            }
         });
     });
 }

@@ -37,6 +37,18 @@ function ReproductionPromptBuilder() {
 }
 
 /**
+ * Decide whether a string is a UI5 icon URI (e.g. `sap-icon://home`). Icon URIs follow the
+ * `<font-name>://<icon-name>` pattern registered in UI5's IconPool. They are structural — they
+ * identify which icon to render, not any user data — and must be kept even when redacting.
+ * @private
+ * @param {string} value
+ * @returns {boolean}
+ */
+ReproductionPromptBuilder.prototype._isIconUri = function (value) {
+    return /^[A-Za-z][A-Za-z0-9_-]*:\/\/[A-Za-z0-9_-]+$/.test(value);
+};
+
+/**
  * Decide whether a short string value is a structural token (enum value, boolean-like, simple
  * identifier) that is safe to keep even when redacting. Anything with whitespace or longer than
  * 24 characters is treated as free-form data and masked.
@@ -81,7 +93,7 @@ ReproductionPromptBuilder.prototype._renderValue = function (value, options) {
     if (options.includeRealData) {
         return this._truncate(asString, options.maxValueLength);
     }
-    if (this._isStructuralToken(asString)) {
+    if (this._isIconUri(asString) || this._isStructuralToken(asString)) {
         return asString;
     }
     return REDACTED;
@@ -134,7 +146,7 @@ ReproductionPromptBuilder.prototype._renderNode = function (node, depth, options
             lines.push(detailIndent + name + ' ⟵ ' + self._renderBinding(bindings.properties[name], options));
         });
         Object.keys(bindings.aggregations || {}).forEach(function (name) {
-            var model = bindings.aggregations[name].model;
+            var model = self._bindingModelName(bindings.aggregations[name].model);
             lines.push(detailIndent + name + ' ⟵ aggregation binding' + (model ? ' (model: ' + model + ')' : ''));
         });
     }
@@ -201,13 +213,35 @@ ReproductionPromptBuilder.prototype._summarizeTypes = function (nodes) {
 };
 
 /**
+ * Derive a readable model name from a binding's `model`. ToolsAPI reports `model` as a descriptor
+ * OBJECT `{names, path, ...}` (the names of the models the parts bind to); older/simple data may use
+ * a plain string. Returns a comma-joined list of named models, or '' for the default model.
  * @private
- * @param {{path: string, model: string, mode: string, value: *}} binding
+ * @param {(string|Object)} model
+ * @returns {string}
+ */
+ReproductionPromptBuilder.prototype._bindingModelName = function (model) {
+    if (typeof model === 'string') {
+        return model;
+    }
+    if (model && Array.isArray(model.names)) {
+        return model.names.filter(function (name) {
+            return typeof name === 'string' && name;
+        }).join(',');
+    }
+    return '';
+};
+
+/**
+ * @private
+ * @param {{path: string, model: (string|Object), mode: string, value: *}} binding
  * @param {Object} options
  * @returns {string}
  */
 ReproductionPromptBuilder.prototype._renderBinding = function (binding, options) {
-    var location = binding.model ? binding.model + '>' + (binding.path || '') : (binding.path || '(composite)');
+    var modelName = this._bindingModelName(binding.model);
+    var path = binding.path || (binding.model && typeof binding.model === 'object' ? (binding.model.path || '') : '');
+    var location = modelName ? modelName + '>' + path : (path || '(composite)');
     var rendered = '{' + location + '}';
     if (binding.mode) {
         rendered += ' [' + binding.mode + ']';
@@ -371,7 +405,8 @@ ReproductionPromptBuilder.prototype._buildInstructions = function (hasIssue) {
         '2. If the app is complex (routing, several views, a Component), instead produce a Component-based skeleton: Component.js, manifest.json, one *.view.xml and *.controller.js per view.\n' +
         '3. Recreate the control tree exactly: keep the same control types, the same ids, and the same non-default properties shown in the outline.\n' +
         '4. For every binding, create a JSONModel under the named model with the same path shape, and fill it with representative mock data (real values were redacted for privacy).\n' +
-        reductionRule;
+        reductionRule + '\n' +
+        '6. Keep generated web-component control types VERBATIM, e.g. sap.f.gen.ui5.webcomponents_fiori.dist.ShellBar. Do NOT shorten them to a classic control such as sap.f.ShellBar — that is a different, incompatible control and will not reproduce the issue.';
 };
 
 /**

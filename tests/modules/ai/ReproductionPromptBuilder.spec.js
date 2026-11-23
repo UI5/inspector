@@ -111,6 +111,26 @@ describe('ReproductionPromptBuilder', function () {
             prompt.should.contain('items ⟵ aggregation binding (model: app)');
         });
 
+        it('should render an object-shaped binding model (ToolsAPI descriptor) as model>path, not [object Object]', function () {
+            const node = controlNode({
+                bindings: {
+                    properties: { visible: { path: '/header/visible', model: { names: ['shellModel'], path: '/header/visible' }, mode: 'OneWay' } },
+                    aggregations: { items: { model: { names: ['shellModel'] } } }
+                }
+            });
+            const prompt = builder.build(snapshotWith([node]));
+
+            prompt.should.not.contain('[object Object]');
+            prompt.should.contain('visible ⟵ {shellModel>/header/visible} [OneWay]');
+            prompt.should.contain('items ⟵ aggregation binding (model: shellModel)');
+        });
+
+        it('should instruct the model to keep generated web-component types verbatim', function () {
+            const prompt = builder.build(snapshotWith([controlNode()]));
+            prompt.should.contain('VERBATIM');
+            prompt.should.contain('sap.f.gen.ui5.webcomponents_fiori.dist.ShellBar');
+        });
+
         it('should truncate a very large tree outline', function () {
             const many = [];
             for (let i = 0; i < 50; i++) {
@@ -137,6 +157,18 @@ describe('ReproductionPromptBuilder', function () {
             const node = controlNode({ properties: [{ name: 'type', value: 'Emphasized', type: 'string' }] });
             const prompt = builder.build(snapshotWith([node]));
             prompt.should.contain('type = Emphasized');
+        });
+
+        it('should keep sap-icon:// URIs so icons are reproduced correctly', function () {
+            const node = controlNode({ properties: [{ name: 'icon', value: 'sap-icon://home', type: 'sap.ui.core.URI' }] });
+            const prompt = builder.build(snapshotWith([node]));
+            prompt.should.contain('icon = sap-icon://home');
+        });
+
+        it('should keep custom icon font URIs', function () {
+            const node = controlNode({ properties: [{ name: 'icon', value: 'sap-icon-tnm://my-icon', type: 'sap.ui.core.URI' }] });
+            const prompt = builder.build(snapshotWith([node]));
+            prompt.should.contain('icon = sap-icon-tnm://my-icon');
         });
 
         it('should mask free-form string values', function () {

@@ -47,19 +47,27 @@ describe('ReproductionVerifier', function () {
         });
     });
 
-    it('should navigate to the HTML as a data URL and wait before reading the console', function () {
+    it('should navigate to the bootstrap origin, write the HTML into the live page, then read the console', function () {
         const callTool = sinon.stub();
         callTool.withArgs('playwright', 'browser_console_messages').returns(Promise.resolve({ content: [{ type: 'text', text: '[LOG] ok' }] }));
         callTool.returns(Promise.resolve({ content: [] }));
+        const html = '<html><head><script id="sap-ui-bootstrap" src="https://ui5.sap.com/resources/sap-ui-core.js"></script></head><body>APP</body></html>';
         const verifier = new ReproductionVerifier({ bridgeClient: fakeBridge({ callTool: callTool }), pauseSeconds: 2 });
-        return verifier.verify('<html>APP</html>').then(function () {
+        return verifier.verify(html).then(function () {
+            // UI5 cannot boot from a data: URL, so the check navigates to the bootstrap's real origin…
             const nav = callTool.getCall(0);
             nav.args[1].should.equal('browser_navigate');
-            nav.args[2].url.should.contain('data:text/html;charset=utf-8,');
-            nav.args[2].url.should.contain(encodeURIComponent('<html>APP</html>'));
-            callTool.getCall(1).args[1].should.equal('browser_wait_for');
-            callTool.getCall(1).args[2].time.should.equal(2);
-            callTool.getCall(2).args[1].should.equal('browser_console_messages');
+            nav.args[2].url.should.equal('https://ui5.sap.com/resources/sap-ui-version.json');
+            nav.args[2].url.should.not.contain('data:');
+            // …then writes the reproduction into that live page via document.write…
+            const evalCall = callTool.getCall(1);
+            evalCall.args[1].should.equal('browser_evaluate');
+            evalCall.args[2].function.should.contain('document.write');
+            evalCall.args[2].function.should.contain('APP');
+            // …waits, then reads the console.
+            callTool.getCall(2).args[1].should.equal('browser_wait_for');
+            callTool.getCall(2).args[2].time.should.equal(2);
+            callTool.getCall(3).args[1].should.equal('browser_console_messages');
         });
     });
 
@@ -166,21 +174,17 @@ describe('ReproductionVerifier', function () {
         });
     });
 
-    describe('local-dist bootstrap rewrite', function () {
-        it('should rewrite the sap-ui-core.js bootstrap src to the local Snippix distribution before loading', function () {
+    describe('render-check origin', function () {
+        it('should derive the navigate origin from the HTML bootstrap src', function () {
             const callTool = sinon.stub();
             callTool.withArgs('playwright', 'browser_console_messages').returns(Promise.resolve({ content: [{ type: 'text', text: '[LOG] ok' }] }));
             callTool.returns(Promise.resolve({ content: [] }));
-            const verifier = new ReproductionVerifier({
-                bridgeClient: fakeBridge({ callTool: callTool }),
-                pauseSeconds: 0,
-                localDistBase: 'http://localhost:3000/sapui5/resources'
-            });
+            const verifier = new ReproductionVerifier({ bridgeClient: fakeBridge({ callTool: callTool }), pauseSeconds: 0 });
             const html = '<script id="sap-ui-bootstrap" src="https://ui5.sap.com/1.152.0/resources/sap-ui-core.js" data-sap-ui-libs="sap.m"></script>';
             return verifier.verify(html).then(function () {
-                const url = decodeURIComponent(callTool.getCall(0).args[2].url);
-                url.should.contain('http://localhost:3000/sapui5/resources/sap-ui-core.js');
-                url.should.not.contain('ui5.sap.com');
+                const navUrl = callTool.getCall(0).args[2].url;
+                navUrl.should.equal('https://ui5.sap.com/resources/sap-ui-version.json');
+                navUrl.should.not.contain('data:');
             });
         });
     });
@@ -248,83 +252,94 @@ describe('ReproductionVerifier', function () {
         });
     });
 
-    describe('verifyAndSave', function () {
-        it('should save first and then verify Playwright against the real Snippix run URL', function () {
-            const calls = [];
-            const bridge = {
-                listTools: function () { return Promise.resolve([{ server: 'playwright' }, { server: 'snippix' }]); },
-                callTool: function (server, name) {
-                    calls.push({ server: server, name: name });
-                    if (name === 'browser_console_messages') {
-                        return Promise.resolve({ content: [{ type: 'text', text: '[LOG] ok' }] });
-                    }
-                    if (name === 'save_snippet') {
-                        return Promise.resolve({ content: [{ type: 'text', text: 'id: zzz\ndirect run: https://snippix.only.sap/snippix/snippets/zzz.html' }] });
-                    }
-                    return Promise.resolve({ content: [] });
-                }
-            };
-            const verifier = new ReproductionVerifier({ bridgeClient: bridge, pauseSeconds: 0 });
-            return verifier.verifyAndSave('<html>APP</html>').then(function (result) {
-                result.verification.ok.should.equal(true);
+    describe('verifyFixSave', function () {
+        function makeVerifier() {
+            return new ReproductionVerifier({ bridgeClient: fakeBridge() });
+        }
+
+        it('should save immediately and never rebuild when the first render is clean', function () {
+            const verifier = makeVerifier();
+            sinon.stub(verifier, 'verify').returns(Promise.resolve({ ok: true, errors: [], reason: 'ok' }));
+            const save = sinon.stub(verifier, 'save').returns(Promise.resolve({ ok: true, id: 'x', url: 'u', reason: 'saved' }));
+            const rebuild = sinon.stub().returns('REBUILT');
+            return verifier.verifyFixSave('HTML', rebuild).then(function (result) {
                 result.snippet.ok.should.equal(true);
-                result.snippet.url.should.contain('zzz.html');
-
-                // save_snippet must come before browser_navigate
-                const saveIdx = calls.findIndex(function (c) { return c.name === 'save_snippet'; });
-                const navIdx = calls.findIndex(function (c) { return c.name === 'browser_navigate'; });
-                saveIdx.should.be.lessThan(navIdx);
+                result.attempts.should.equal(0);
+                result.fixed.should.equal(false);
+                rebuild.called.should.equal(false);
+                save.calledWith('HTML').should.equal(true);
             });
         });
 
-        it('should navigate Playwright to the Snippix run URL, not to a data: URL', function () {
-            const callTool = sinon.stub();
-            callTool.withArgs('snippix', 'save_snippet').returns(Promise.resolve({ content: [{ type: 'text', text: 'id: abc\ndirect run: https://snippix.only.sap/snippix/snippets/abc.html' }] }));
-            callTool.withArgs('playwright', 'browser_console_messages').returns(Promise.resolve({ content: [{ type: 'text', text: '[LOG] ok' }] }));
-            callTool.returns(Promise.resolve({ content: [] }));
-            const bridge = {
-                listTools: function () { return Promise.resolve([{ server: 'playwright' }, { server: 'snippix' }]); },
-                callTool: callTool
-            };
-            const verifier = new ReproductionVerifier({ bridgeClient: bridge, pauseSeconds: 0 });
-            return verifier.verifyAndSave('<html>APP</html>').then(function () {
-                const navCall = callTool.getCalls().find(function (c) { return c.args[1] === 'browser_navigate'; });
-                navCall.args[2].url.should.equal('https://snippix.only.sap/snippix/snippets/abc.html');
-                navCall.args[2].url.should.not.contain('data:');
+        it('should fix and then save when a rebuild clears the errors', function () {
+            const verifier = makeVerifier();
+            const verify = sinon.stub(verifier, 'verify');
+            verify.onCall(0).returns(Promise.resolve({ ok: false, errors: ['failed to load "sap/m/Foo.js"'], reason: 'errors' }));
+            verify.onCall(1).returns(Promise.resolve({ ok: true, errors: [], reason: 'ok' }));
+            const save = sinon.stub(verifier, 'save').returns(Promise.resolve({ ok: true, id: 'x', url: 'u', reason: 'saved' }));
+            const rebuild = sinon.stub().returns('REBUILT');
+            return verifier.verifyFixSave('HTML', rebuild).then(function (result) {
+                result.snippet.ok.should.equal(true);
+                result.fixed.should.equal(true);
+                result.attempts.should.equal(1);
+                rebuild.calledOnce.should.equal(true);
+                rebuild.firstCall.args[0].excludeTypes.should.contain('sap.m.Foo');
+                save.calledWith('REBUILT').should.equal(true);
             });
         });
 
-        it('should fall back to data: URL verification when Snippix is unavailable', function () {
-            const callTool = sinon.stub();
-            callTool.withArgs('playwright', 'browser_console_messages').returns(Promise.resolve({ content: [{ type: 'text', text: '[LOG] ok' }] }));
-            callTool.returns(Promise.resolve({ content: [] }));
-            const bridge = {
-                listTools: function () { return Promise.resolve([{ server: 'playwright' }]); },
-                callTool: callTool
-            };
-            const verifier = new ReproductionVerifier({ bridgeClient: bridge, pauseSeconds: 0 });
-            return verifier.verifyAndSave('<html>APP</html>').then(function (result) {
-                (result.snippet.ok === null).should.equal(true);
-                result.snippet.reason.should.equal('unavailable');
-                const navCall = callTool.getCalls().find(function (c) { return c.args[1] === 'browser_navigate'; });
-                navCall.args[2].url.should.contain('data:text/html');
-            });
-        });
-
-        it('should fall back to data: URL verification when the Snippix save fails', function () {
-            const callTool = sinon.stub();
-            callTool.withArgs('snippix', 'save_snippet').returns(Promise.resolve({ isError: true, content: [{ type: 'text', text: 'HTTP 503' }] }));
-            callTool.withArgs('playwright', 'browser_console_messages').returns(Promise.resolve({ content: [{ type: 'text', text: '[LOG] ok' }] }));
-            callTool.returns(Promise.resolve({ content: [] }));
-            const bridge = {
-                listTools: function () { return Promise.resolve([{ server: 'playwright' }, { server: 'snippix' }]); },
-                callTool: callTool
-            };
-            const verifier = new ReproductionVerifier({ bridgeClient: bridge, pauseSeconds: 0 });
-            return verifier.verifyAndSave('<html>APP</html>').then(function (result) {
+        it('should never save when the errors cannot be fixed (no recognized signature)', function () {
+            const verifier = makeVerifier();
+            sinon.stub(verifier, 'verify').returns(Promise.resolve({ ok: false, errors: ['some opaque error'], reason: 'errors' }));
+            const save = sinon.stub(verifier, 'save');
+            const rebuild = sinon.stub().returns('REBUILT');
+            return verifier.verifyFixSave('HTML', rebuild).then(function (result) {
                 result.snippet.ok.should.equal(false);
-                const navCall = callTool.getCalls().find(function (c) { return c.args[1] === 'browser_navigate'; });
-                navCall.args[2].url.should.contain('data:text/html');
+                result.snippet.reason.should.equal('not-saved-has-errors');
+                save.called.should.equal(false);
+                rebuild.called.should.equal(false);
+            });
+        });
+
+        it('should stop after maxAttempts and never save a persistently broken app', function () {
+            const verifier = makeVerifier();
+            const verify = sinon.stub(verifier, 'verify');
+            verify.onCall(0).returns(Promise.resolve({ ok: false, errors: ['failed to load "sap/m/A.js"'], reason: 'errors' }));
+            verify.onCall(1).returns(Promise.resolve({ ok: false, errors: ['failed to load "sap/m/B.js"'], reason: 'errors' }));
+            verify.onCall(2).returns(Promise.resolve({ ok: false, errors: ['failed to load "sap/m/C.js"'], reason: 'errors' }));
+            verify.onCall(3).returns(Promise.resolve({ ok: false, errors: ['failed to load "sap/m/D.js"'], reason: 'errors' }));
+            const save = sinon.stub(verifier, 'save');
+            const rebuild = sinon.stub().returns('REBUILT');
+            return verifier.verifyFixSave('HTML', rebuild, { maxAttempts: 3 }).then(function (result) {
+                result.snippet.reason.should.equal('not-saved-has-errors');
+                result.attempts.should.equal(3);
+                rebuild.callCount.should.equal(3);
+                save.called.should.equal(false);
+            });
+        });
+
+        it('should never save when the render check is unavailable', function () {
+            const verifier = makeVerifier();
+            sinon.stub(verifier, 'verify').returns(Promise.resolve({ ok: null, errors: [], reason: 'unavailable' }));
+            const save = sinon.stub(verifier, 'save');
+            return verifier.verifyFixSave('HTML', sinon.stub()).then(function (result) {
+                (result.snippet.ok === null).should.equal(true);
+                result.snippet.reason.should.equal('skipped-unverified');
+                save.called.should.equal(false);
+            });
+        });
+
+        it('should invoke onAttempt before each fix rebuild', function () {
+            const verifier = makeVerifier();
+            const verify = sinon.stub(verifier, 'verify');
+            verify.onCall(0).returns(Promise.resolve({ ok: false, errors: ['failed to load "sap/m/Foo.js"'], reason: 'errors' }));
+            verify.onCall(1).returns(Promise.resolve({ ok: true, errors: [], reason: 'ok' }));
+            sinon.stub(verifier, 'save').returns(Promise.resolve({ ok: true, id: 'x', url: 'u', reason: 'saved' }));
+            const onAttempt = sinon.spy();
+            return verifier.verifyFixSave('HTML', sinon.stub().returns('R'), { onAttempt: onAttempt }).then(function () {
+                onAttempt.calledOnce.should.equal(true);
+                onAttempt.firstCall.args[0].attempt.should.equal(1);
+                onAttempt.firstCall.args[0].maxAttempts.should.equal(3);
             });
         });
     });

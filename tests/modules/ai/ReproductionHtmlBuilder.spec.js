@@ -52,9 +52,15 @@ describe('ReproductionHtmlBuilder', function () {
             html.should.contain('<body class="sapUiBody">');
         });
 
-        it('should embed the CDN bootstrap URL', function () {
+        it('should embed a version-specific CDN bootstrap URL from the app version', function () {
             const html = builder.build(snapshotWith([]));
-            html.should.contain('ui5.sap.com/resources/sap-ui-core.js');
+            // snapshotWith sets version 1.120.0, so the bootstrap matches that version (not latest).
+            html.should.contain('https://ui5.sap.com/1.120.0/resources/sap-ui-core.js');
+        });
+
+        it('should fall back to the version-less CDN bootstrap when no version is known', function () {
+            const html = builder.build(snapshotWith([], { version: undefined }));
+            html.should.contain('https://ui5.sap.com/resources/sap-ui-core.js');
         });
 
         it('should allow overriding the bootstrap URL via options', function () {
@@ -130,6 +136,46 @@ describe('ReproductionHtmlBuilder', function () {
             html.should.contain('Core.ready');
             html.should.contain('placeAt("content")');
         });
+
+        it('should log a load failure to the console so an automated render check detects it', function () {
+            const html = builder.build(snapshotWith([]));
+            html.should.contain('console.error');
+            html.should.contain('Could not load content');
+        });
+    });
+
+    describe('#build() exclusions (deterministic fix loop)', function () {
+        it('should drop a control whose type is in excludeTypes, along with its subtree', function () {
+            const tree = [controlNode({
+                id: 'page', type: 'sap.m.Page', children: [
+                    controlNode({ id: 'ok', type: 'sap.m.Button', aggregation: 'content' }),
+                    controlNode({ id: 'bad', type: 'sap.ui.comp.smartfield.SmartField', aggregation: 'content', children: [
+                        controlNode({ id: 'inner', type: 'sap.m.Text', aggregation: 'content' })
+                    ] })
+                ]
+            })];
+            const html = builder.build(snapshotWith(tree), { excludeTypes: ['sap.ui.comp.smartfield.SmartField'] });
+            html.should.contain('id="ok"');
+            html.should.not.contain('id="bad"');
+            html.should.not.contain('id="inner"');
+        });
+
+        it('should leave the tree untouched when excludeTypes is empty or omitted', function () {
+            const tree = [controlNode({ id: 'b', type: 'sap.m.Button' })];
+            builder.build(snapshotWith(tree)).should.contain('id="b"');
+            builder.build(snapshotWith(tree), { excludeTypes: [] }).should.contain('id="b"');
+        });
+
+        it('should omit a library listed in excludeLibraries from data-sap-ui-libs', function () {
+            const tree = [
+                controlNode({ id: 'b', type: 'sap.m.Button' }),
+                controlNode({ id: 'f', type: 'sap.ui.layout.form.Form' })
+            ];
+            const html = builder.build(snapshotWith(tree), { excludeLibraries: ['sap.ui.layout'] });
+            const libs = html.match(/data-sap-ui-libs="([^"]*)"/)[1];
+            libs.should.contain('sap.m');
+            libs.should.not.contain('sap.ui.layout');
+        });
     });
 
     describe('#build() XML fragment generation', function () {
@@ -169,7 +215,7 @@ describe('ReproductionHtmlBuilder', function () {
         });
 
         it('should render a control with children using open/close tags', function () {
-            const child = controlNode({ id: 'txt', type: 'sap.m.Text' });
+            const child = controlNode({ id: 'txt', type: 'sap.m.Text', aggregation: 'content' });
             const parent = controlNode({ id: 'page', type: 'sap.m.Page', children: [child] });
             const html = builder.build(snapshotWith([parent]));
             html.should.contain('<Page id="page">');
@@ -225,40 +271,43 @@ describe('ReproductionHtmlBuilder', function () {
             html.should.contain('\\{notABinding\\}');
         });
 
-        it('should render property bindings as {model>path}', function () {
+        it('should inline a bound property as its resolved value (literal), not a {model>path} binding', function () {
             const node = controlNode({
-                bindings: { properties: { text: { path: '/name', model: 'app', mode: '' } }, aggregations: {} }
+                bindings: { properties: { text: { path: '/name', model: { names: ['app'] }, mode: 'OneWay', value: 'Alice' } }, aggregations: {} }
             });
             const html = builder.build(snapshotWith([node]));
-            html.should.contain('text=');
-            // '>' is XML-escaped in attribute values; the XML parser decodes it at runtime
-            html.should.contain('app&gt;/name');
+            html.should.contain('text="Alice"');
+            // No binding syntax and no serialized descriptor must leak into the attribute.
+            html.should.not.contain('text="{');
+            html.should.not.contain('[object Object]');
         });
 
-        it('should render bindings without a model using {/path} syntax', function () {
+        it('should inline a bound boolean value', function () {
             const node = controlNode({
-                bindings: { properties: { value: { path: '/total', model: '', mode: 'TwoWay' } }, aggregations: {} }
+                bindings: { properties: { visible: { path: '/v', model: { names: ['app'] }, mode: 'OneWay', value: false } }, aggregations: {} }
             });
             const html = builder.build(snapshotWith([node]));
-            html.should.contain('{/total}');
+            html.should.contain('visible="false"');
         });
 
-        it('should use full binding syntax for non-default modes', function () {
+        it('should omit a bound property whose resolved value is not a primitive', function () {
             const node = controlNode({
-                bindings: { properties: { text: { path: '/n', model: 'app', mode: 'OneWay' } }, aggregations: {} }
+                id: 'x', type: 'sap.m.Button',
+                bindings: { properties: { href: { path: '', model: { names: ['app'] }, mode: 'OneWay', value: { some: 'object' } } }, aggregations: {} }
             });
             const html = builder.build(snapshotWith([node]));
-            html.should.contain('mode');
+            html.should.not.contain('href');
+            html.should.not.contain('[object Object]');
         });
 
-        it('should prefer the binding over a property of the same name', function () {
+        it('should prefer the binding’s resolved value over a literal property of the same name', function () {
             const node = controlNode({
                 properties: [{ name: 'text', value: 'literal', type: 'string' }],
-                bindings: { properties: { text: { path: '/title', model: '', mode: '' } }, aggregations: {} }
+                bindings: { properties: { text: { path: '/title', model: { names: ['app'] }, mode: 'OneWay', value: 'bound' } }, aggregations: {} }
             });
             const html = builder.build(snapshotWith([node]));
+            html.should.contain('text="bound"');
             html.should.not.contain('"literal"');
-            html.should.contain('/title');
         });
     });
 
@@ -296,7 +345,7 @@ describe('ReproductionHtmlBuilder', function () {
         });
 
         it('should still render controls nested below an inlined ComponentContainer', function () {
-            const button = controlNode({ id: 'btn', type: 'sap.m.Button' });
+            const button = controlNode({ id: 'btn', type: 'sap.m.Button', aggregation: 'content' });
             const page = controlNode({ id: 'rootView', type: 'sap.m.Page', aggregation: 'rootControl', children: [button] });
             const container = controlNode({
                 id: 'comp', type: 'sap.ui.core.ComponentContainer', children: [page]
@@ -306,6 +355,98 @@ describe('ReproductionHtmlBuilder', function () {
             html.should.not.contain('rootControl');
             html.should.contain('id="rootView"');
             html.should.contain('id="btn"');
+        });
+    });
+
+    describe('#build() non-reproducible shell controls', function () {
+        it('should not emit a sap.ushell.* control (cannot run standalone)', function () {
+            // Regression: Fiori Launchpad shell controls reach into the FLP runtime on instantiation
+            // ("Config accessed before BootstrapConfig was initialized", shellHeader getModel errors),
+            // which does not exist in a standalone CDN reproduction. They must be dropped.
+            const shellTitle = controlNode({ id: 'shellTitle', type: 'sap.ushell.ui.shell.ShellAppTitle' });
+            const html = builder.build(snapshotWith([shellTitle]));
+
+            html.should.not.contain('ShellAppTitle');
+            html.should.not.contain('shellTitle');
+        });
+
+        it('should inline real app content nested below a shell control', function () {
+            const appButton = controlNode({ id: 'appBtn', type: 'sap.m.Button', aggregation: 'content' });
+            const appPage = controlNode({ id: 'appPage', type: 'sap.m.Page', aggregation: 'content', children: [appButton] });
+            const shell = controlNode({ id: 'shell', type: 'sap.ushell.renderers.fiori2.Shell', children: [appPage] });
+            const html = builder.build(snapshotWith([shell]));
+
+            // The shell wrapper element is gone, but the app content it contained survives. (A unused
+            // xmlns declaration for the shell namespace may remain — harmless, UI5 ignores it.)
+            html.should.not.contain('fiori2:Shell');
+            html.should.not.contain('id="shell"');
+            html.should.contain('id="appPage"');
+            html.should.contain('id="appBtn"');
+        });
+    });
+
+    describe('#build() transparent mvc views', function () {
+        it('should inline an XMLView’s content and drop the view wrapper + viewName', function () {
+            // Regression: a `<mvc:XMLView viewName="sap.ushell...ShellBar">` tried to LOAD that internal
+            // view module standalone and rejected Fragment.load. The crawler already captured the view’s
+            // rendered content, so the view must be transparent.
+            const inner = controlNode({ id: 'sb', type: 'sap.f.ShellBar', aggregation: 'content' });
+            const view = {
+                id: 'v', type: 'sap.ui.core.mvc.XMLView', isControl: true,
+                properties: [{ name: 'viewName', value: 'my.internal.ShellBar', type: 'string' }],
+                bindings: { properties: {}, aggregations: {} }, children: [inner]
+            };
+            const html = builder.build(snapshotWith([view]));
+
+            html.should.contain('id="sb"');
+            html.should.not.contain('XMLView');
+            html.should.not.contain('my.internal.ShellBar');
+        });
+    });
+
+    describe('#build() private aggregation skipping', function () {
+        it('should not emit a child sitting in an underscore-prefixed private aggregation', function () {
+            // Regression: SysInfoBar's private `_bar` aggregation was emitted as `<shell:_bar>`, which
+            // UI5 rejects ("Cannot add direct child without default aggregation defined"). The parent
+            // rebuilds the private aggregation at runtime, so it must be dropped from the reproduction.
+            const innerBar = controlNode({ id: 'bar0-bar', type: 'sap.m.Bar', aggregation: '_bar' });
+            const panel = controlNode({
+                id: 'bar0', type: 'sap.m.Panel', children: [innerBar]
+            });
+            const html = builder.build(snapshotWith([panel]));
+
+            html.should.contain('id="bar0"');
+            html.should.not.contain('_bar');
+            html.should.not.contain('id="bar0-bar"');
+            // With its only child dropped, the parent collapses to a self-closing tag.
+            html.should.contain('id="bar0"/>');
+        });
+
+        it('should still emit sibling children in public aggregations when a private one is dropped', function () {
+            const privateChild = controlNode({ id: 'priv', type: 'sap.m.Bar', aggregation: '_bar' });
+            const publicChild = controlNode({ id: 'pub', type: 'sap.m.Button', aggregation: 'content' });
+            const parent = controlNode({
+                id: 'host', type: 'sap.m.Panel', children: [privateChild, publicChild]
+            });
+            const html = builder.build(snapshotWith([parent]));
+
+            html.should.not.contain('id="priv"');
+            html.should.contain('id="pub"');
+        });
+
+        it('should drop a child with no aggregation name (internal implementation child)', function () {
+            // Regression: a control can hold an internal child (e.g. ShellAppTitle's slim-arrow-down
+            // Icon) with sParentAggregationName = '' → aggregation: undefined in the snapshot. Emitting
+            // it as a direct child causes "Cannot add direct child without default aggregation defined".
+            const icon = controlNode({ id: 'icon0', type: 'sap.ui.core.Icon', aggregation: undefined });
+            const title = controlNode({
+                id: 'title0', type: 'sap.m.Panel', children: [icon]
+            });
+            const html = builder.build(snapshotWith([title]));
+
+            html.should.contain('id="title0"');
+            html.should.not.contain('id="icon0"');
+            html.should.contain('id="title0"/>');
         });
     });
 
@@ -337,6 +478,94 @@ describe('ReproductionHtmlBuilder', function () {
         it('should not add any JSONModel entries when there are no bindings', function () {
             const html = builder.build(snapshotWith([controlNode()]));
             html.should.contain('aModels = []');
+        });
+    });
+
+    describe('#build() duplicate ID deduplication', function () {
+        it('should emit a control with a duplicate id only once in a flat tree', function () {
+            // Regression: the crawler can capture the same control via two different traversal paths
+            // (e.g. once through its UIArea, once as a sibling in an aggregation scan). Emitting both
+            // produces `id="X"` twice, which causes UI5 to fail with "duplicate id X-describedby".
+            const tree = [
+                controlNode({ id: 'btn', type: 'sap.m.Button' }),
+                controlNode({ id: 'btn', type: 'sap.m.Button' })
+            ];
+            const html = builder.build(snapshotWith(tree));
+            const occurrences = html.split('id="btn"').length - 1;
+            occurrences.should.equal(1);
+        });
+
+        it('should emit a control with a duplicate id only once across two frames', function () {
+            const snapshot = {
+                meta: { libraries: ['sap.m'], theme: 'sap_horizon', title: 'T' },
+                frames: [
+                    { frameId: 0, url: 'https://app/', tree: [controlNode({ id: 'shared', type: 'sap.m.Button' })] },
+                    { frameId: 1, url: 'https://app/iframe', tree: [controlNode({ id: 'shared', type: 'sap.m.Button' })] }
+                ],
+                tree: [],
+                stats: { controlCount: 2, truncated: false }
+            };
+            const html = builder.build(snapshot);
+            const occurrences = html.split('id="shared"').length - 1;
+            occurrences.should.equal(1);
+        });
+
+        it('should still emit controls without ids even if their type repeats', function () {
+            const tree = [
+                controlNode({ id: undefined, type: 'sap.m.Button' }),
+                controlNode({ id: undefined, type: 'sap.m.Button' })
+            ];
+            const html = builder.build(snapshotWith(tree));
+            const occurrences = html.split('<Button/>').length - 1;
+            occurrences.should.equal(2);
+        });
+
+        it('should drop a control whose id is an auto-generated suffix of another control id', function () {
+            // Regression: the crawler captures UI5-internal accessibility helpers (e.g. a Button's
+            // "-describedby" InvisibleText) as their own control nodes. Emitting id="btn-describedby"
+            // explicitly collides with the one UI5 auto-creates for the Button → "duplicate id" error.
+            const button = controlNode({ id: 'supportChatBtn', type: 'sap.m.Button' });
+            const helper = controlNode({ id: 'supportChatBtn-describedby', type: 'sap.ui.core.InvisibleText' });
+            const html = builder.build(snapshotWith([button, helper]));
+
+            html.should.contain('id="supportChatBtn"');
+            html.should.not.contain('supportChatBtn-describedby');
+            html.should.not.contain('InvisibleText');
+        });
+
+        it('should drop a nested auto-generated suffix child of its parent control', function () {
+            const inner = controlNode({ id: 'myBtn-img', type: 'sap.m.Image', aggregation: 'content' });
+            const button = controlNode({ id: 'myBtn', type: 'sap.m.Button', children: [inner] });
+            const html = builder.build(snapshotWith([button]));
+
+            html.should.contain('id="myBtn"');
+            html.should.not.contain('myBtn-img');
+        });
+
+        it('should keep a control whose dashed id has no matching base control', function () {
+            // A real, author-assigned dashed id (no base control of the prefix in the tree) is kept.
+            const node = controlNode({ id: 'my-custom-button', type: 'sap.m.Button' });
+            const html = builder.build(snapshotWith([node]));
+            html.should.contain('id="my-custom-button"');
+        });
+
+        it('should not emit a UI5 auto-generated id, letting UI5 reassign it at runtime', function () {
+            // Regression: `id="__image0"` (UI5's runtime uid) collides with the fresh `__image0` UI5
+            // generates from its own counter → "duplicate id '__image0'". The control is still
+            // emitted (we want the Image), just without the forced id.
+            const node = controlNode({ id: '__image0', type: 'sap.m.Image' });
+            const html = builder.build(snapshotWith([node]));
+            html.should.not.contain('__image0');
+            html.should.contain('<Image');
+        });
+
+        it('should drop the forced id but keep the control for an auto-generated parent with children', function () {
+            const child = controlNode({ id: 'realChild', type: 'sap.m.Text', aggregation: 'content' });
+            const parent = controlNode({ id: '__panel2', type: 'sap.m.Panel', children: [child] });
+            const html = builder.build(snapshotWith([parent]));
+            html.should.not.contain('__panel2');
+            html.should.contain('<Panel');
+            html.should.contain('id="realChild"');
         });
     });
 

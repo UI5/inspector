@@ -1,6 +1,7 @@
 'use strict';
 
 var McpBridgeClient = require('./McpBridgeClient.js');
+var ReproductionHtmlFixer = require('./ReproductionHtmlFixer.js');
 
 // Verifies a generated reproduction HTML actually renders without console errors, by driving the
 // Playwright MCP server hosted in the local bridge: navigate a headless browser to the HTML (as a
@@ -18,25 +19,23 @@ var DEFAULT_PAUSE_SECONDS = 3;
 var MAX_REPORTED_ERRORS = 5;
 // Cap web-component API lookups per generation so a large app cannot fan out into dozens of calls.
 var MAX_REFERENCE_LOOKUPS = 8;
+// How many deterministic fix-and-retry rounds verifyFixSave attempts before giving up.
+var MAX_FIX_ATTEMPTS = 3;
+// Fallback origin to host the render check when the HTML's bootstrap src can't be parsed. UI5 cannot
+// boot from a `data:` URL (its bootstrap calls `new URL()` against the null origin and throws), so
+// the render check navigates to a real CDN origin first and then writes the reproduction into it.
+var DEFAULT_ORIGIN = 'https://ui5.sap.com/resources/sap-ui-version.json';
 
 /**
  * @param {Object} [options]
  * @param {McpBridgeClient} [options.bridgeClient] - Shares the Assistant's bridge client in practice.
  * @param {number} [options.pauseSeconds] - How long to let UI5 boot before reading the console.
- * @param {string} [options.localDistBase] - Absolute base URL of a local UI5 `/sapui5` distribution.
- *     When set, the reproduction bootstrap is rewritten to it before verification. Left empty by
- *     default: the render check loads the HTML as a `data:` URL (origin `null`, an insecure context),
- *     and Chrome's Private Network Access policy BLOCKS requests from there to a loopback address such
- *     as `http://localhost`. So by default we verify the HTML as-authored against its public CDN
- *     bootstrap (which is HTTPS/public and loads fine). Only pass this when the HTML will be served
- *     from a same-origin/secure context where loopback is reachable.
  * @constructor
  */
 function ReproductionVerifier(options) {
     options = options || {};
     this._bridgeClient = options.bridgeClient || new McpBridgeClient();
     this._pauseSeconds = typeof options.pauseSeconds === 'number' ? options.pauseSeconds : DEFAULT_PAUSE_SECONDS;
-    this._localDistBase = typeof options.localDistBase === 'string' ? options.localDistBase : '';
 }
 
 /**
@@ -151,24 +150,27 @@ ReproductionVerifier.prototype.references = function (componentNames) {
 };
 
 /**
- * Rewrite the reproduction's UI5 bootstrap `src` to an explicitly-configured local distribution.
- * No-op when `localDistBase` is empty (the default) or no `sap-ui-core.js` bootstrap is present — so
- * the render check loads the HTML's own public-CDN bootstrap and is not blocked by Chrome's Private
- * Network Access policy (which forbids a `data:` URL, an insecure `null` origin, from reaching a
- * loopback address like `http://localhost`).
+ * The origin to host the render check in: the origin of the HTML's own UI5 bootstrap. UI5 must boot
+ * from a real http(s) origin — it cannot initialize from a `data:` URL — so the check navigates here
+ * first and then writes the reproduction document into the live page (see {@link #_runRenderCheck}).
  * @private
  * @param {string} html
  * @returns {string}
  */
-ReproductionVerifier.prototype._rewriteBootstrapForLocalDist = function (html) {
-    if (!html || !this._localDistBase) {
-        return html;
+ReproductionVerifier.prototype._bootstrapOrigin = function (html) {
+    var match = (html || '').match(/src\s*=\s*["']([^"']*sap-ui-core\.js)["']/i);
+    if (match) {
+        try {
+            return new URL(match[1]).origin + '/resources/sap-ui-version.json';
+        } catch (e) {
+            return match[1];
+        }
     }
-    return html.replace(/(src\s*=\s*["'])[^"']*sap-ui-core\.js(["'])/i, '$1' + this._localDistBase + '/sap-ui-core.js$2');
+    return DEFAULT_ORIGIN;
 };
 
 /**
- * Load the HTML in the Playwright-controlled browser and report whether it rendered clean.
+ * Render-check a standalone reproduction document and report whether it rendered clean.
  *
  * @param {string} html - A full standalone reproduction document.
  * @returns {Promise<{ok: (boolean|null), errors: Array<string>, reason: string}>} `ok` is `true`
@@ -184,25 +186,29 @@ ReproductionVerifier.prototype.verify = function (html) {
         if (!self._hasPlaywright(tools)) {
             return { ok: null, errors: [], reason: 'unavailable', servers: servers };
         }
-        var rendered = self._rewriteBootstrapForLocalDist(html);
-        var url = 'data:text/html;charset=utf-8,' + encodeURIComponent(rendered);
-        return self._runPlaywrightCheck(url, servers);
+        return self._runRenderCheck(html, servers);
     }).then(null, function (error) {
         return { ok: null, errors: [], reason: 'error: ' + (error && error.message ? error.message : 'failed') };
     });
 };
 
 /**
- * Navigate Playwright to `url`, wait for UI5 to boot, and return the console-error result.
- * Extracted so both the data: URL path and the Snippix URL path can share this logic.
+ * Render a candidate reproduction and return the console-error result. Navigates to the bootstrap
+ * origin (a real http(s) context where UI5 can initialize), then replaces the document with the
+ * reproduction via `document.write` so the page keeps that origin — unlike a `data:` URL, whose null
+ * origin makes UI5's bootstrap throw `Failed to construct 'URL'` before it ever boots.
  * @private
- * @param {string} url
+ * @param {string} html
  * @param {Array<string>} servers
  * @returns {Promise<{ok: boolean, errors: Array<string>, reason: string, servers: Array<string>}>}
  */
-ReproductionVerifier.prototype._runPlaywrightCheck = function (url, servers) {
+ReproductionVerifier.prototype._runRenderCheck = function (html, servers) {
     var self = this;
-    return self._bridgeClient.callTool(PLAYWRIGHT_SERVER, 'browser_navigate', { url: url }).then(function () {
+    var origin = self._bootstrapOrigin(html);
+    var writeFn = '() => { document.open(); document.write(' + JSON.stringify(html) + '); document.close(); }';
+    return self._bridgeClient.callTool(PLAYWRIGHT_SERVER, 'browser_navigate', { url: origin }).then(function () {
+        return self._bridgeClient.callTool(PLAYWRIGHT_SERVER, 'browser_evaluate', { function: writeFn });
+    }).then(function () {
         return self._bridgeClient.callTool(PLAYWRIGHT_SERVER, 'browser_wait_for', { time: self._pauseSeconds });
     }).then(function () {
         return self._bridgeClient.callTool(PLAYWRIGHT_SERVER, 'browser_console_messages', {});
@@ -261,42 +267,75 @@ ReproductionVerifier.prototype.save = function (html) {
 };
 
 /**
- * Validate the reproduction renders clean (Playwright MCP) and store it in Snippix (snippix MCP) so
- * the result is a verified, shareable working app. Each step is best-effort and independent.
+ * Render-check → deterministic-fix → save loop. Verifies the HTML renders clean (Playwright MCP) and
+ * only then stores it in Snippix (snippix MCP), so a broken reproduction is NEVER published — the
+ * Snippix MCP has no delete/update, so a bad save cannot be retracted. When the render check reports
+ * console errors, {@link ReproductionHtmlFixer} derives control types / libraries to exclude and the
+ * caller's `rebuild` regenerates the HTML without them; this repeats up to `MAX_FIX_ATTEMPTS` times.
  *
- * Saves to Snippix first, then verifies Playwright against the real Snippix run URL. This is
- * intentional: the reproduction bootstraps UI5 from `/sapui5/resources/sap-ui-core.js` (a
- * Snippix-relative path). Loading that same HTML as a `data:` URL (the `verify` fallback) silently
- * fails to resolve the relative path, so UI5 never boots and Playwright reports zero errors — a
- * false positive. Verifying against the actual Snippix URL lets UI5 start for real, so genuine
- * rendering failures surface.
+ * The render check ({@link ReproductionVerifier#verify}) boots UI5 for real on its bootstrap origin
+ * (UI5 cannot initialize from a `data:` URL), so a genuine verdict is reached before anything is
+ * published.
  *
- * @param {string} html
- * @returns {Promise<{verification: Object, snippet: Object}>}
+ * @param {string} initialHtml - The first candidate reproduction document.
+ * @param {Function} rebuild - `(adjustments) => string`: regenerate the HTML for the accumulated
+ *     `{excludeTypes, excludeLibraries}`. In the view this is `adj => htmlBuilder.build(active, adj)`.
+ * @param {Object} [options]
+ * @param {Function} [options.onAttempt] - Called before each fix rebuild with
+ *     `{attempt, maxAttempts, errors, adjustments}` so the UI can report progress.
+ * @param {ReproductionHtmlFixer} [options.fixer] - Test seam.
+ * @param {number} [options.maxAttempts] - Override the fix-round cap (default MAX_FIX_ATTEMPTS).
+ * @returns {Promise<{verification: Object, snippet: Object, attempts: number, fixed: boolean}>}
+ *     `snippet.ok` is `true` only when a clean render was published; `false` with
+ *     `reason: 'not-saved-has-errors'` when it stayed broken; `null` with `reason: 'skipped-unverified'`
+ *     when the render check could not run (bridge/Playwright absent) so publishing would be a guess.
  */
-ReproductionVerifier.prototype.verifyAndSave = function (html) {
+ReproductionVerifier.prototype.verifyFixSave = function (initialHtml, rebuild, options) {
     var self = this;
-    return this.save(html).then(function (snippet) {
-        var verifyPromise;
-        if (snippet.ok && snippet.url) {
-            // Verify against the real Snippix URL so the bootstrap resolves correctly.
-            verifyPromise = self._bridgeClient.listTools().then(function (tools) {
-                var servers = self._serverNames(tools);
-                if (!self._hasPlaywright(tools)) {
-                    return { ok: null, errors: [], reason: 'unavailable', servers: servers };
-                }
-                return self._runPlaywrightCheck(snippet.url, servers);
-            }).then(null, function (error) {
-                return { ok: null, errors: [], reason: 'error: ' + (error && error.message ? error.message : 'failed') };
-            });
-        } else {
-            // Snippix unavailable or save failed — fall back to data: URL verification.
-            verifyPromise = self.verify(html);
-        }
-        return verifyPromise.then(function (verification) {
-            return { verification: verification, snippet: snippet };
+    options = options || {};
+    var fixer = options.fixer || new ReproductionHtmlFixer();
+    var onAttempt = typeof options.onAttempt === 'function' ? options.onAttempt : function () {};
+    var maxAttempts = typeof options.maxAttempts === 'number' ? options.maxAttempts : MAX_FIX_ATTEMPTS;
+
+    function notSaved(verification, count) {
+        return {
+            verification: verification,
+            snippet: { ok: false, id: '', url: '', reason: 'not-saved-has-errors' },
+            attempts: count,
+            fixed: false
+        };
+    }
+
+    function attempt(html, adjustments, count) {
+        return self.verify(html).then(function (verification) {
+            if (verification.ok === true) {
+                return self.save(html).then(function (snippet) {
+                    return { verification: verification, snippet: snippet, attempts: count, fixed: count > 0 };
+                });
+            }
+            if (verification.ok === null) {
+                // Render check unavailable — we cannot confirm it works, so never publish.
+                return {
+                    verification: verification,
+                    snippet: { ok: null, id: '', url: '', reason: 'skipped-unverified' },
+                    attempts: count,
+                    fixed: false
+                };
+            }
+            // ok === false: console errors. Try to fix unless we are out of rounds.
+            if (count >= maxAttempts) {
+                return notSaved(verification, count);
+            }
+            var next = fixer.deriveAdjustments(verification.errors, adjustments);
+            if (next === adjustments) {
+                return notSaved(verification, count); // nothing new to try
+            }
+            onAttempt({ attempt: count + 1, maxAttempts: maxAttempts, errors: verification.errors, adjustments: next });
+            return attempt(rebuild(next), next, count + 1);
         });
-    });
+    }
+
+    return attempt(initialHtml, { excludeTypes: [], excludeLibraries: [] }, 0);
 };
 
 module.exports = ReproductionVerifier;

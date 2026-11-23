@@ -38,6 +38,9 @@ function ReproductionView(containerId, options) {
     this._focusedSnapshot = null;
     this._focusInfo = null;
     this._isFocusing = false;
+    // Monotonic token identifying the current focus run; bumped on cancel/supersede so a stale async
+    // result is ignored when it settles.
+    this._focusToken = 0;
 
     this._render();
     this._attachEventListeners();
@@ -100,21 +103,23 @@ ReproductionView.prototype._attachEventListeners = function () {
         self._onRequestSnapshot();
     });
 
-    // Toggling privacy rebuilds from the cached snapshot — no re-crawl needed.
+    // Toggling privacy rebuilds from the cached snapshot — no re-crawl needed. Real data changes the
+    // generated HTML, so re-verify in app-code mode.
     this._realDataInput.addEventListener('change', function () {
         if (self._snapshot) {
-            self._rebuild();
+            self._rebuild({ verify: true });
         }
     });
 
-    // Editing the issue re-focuses the reproduction without re-crawling. Any existing AI focus is
-    // now stale, so drop it and fall back to the deterministic outline.
+    // Editing the issue must NOT generate anything — generation only happens when the user presses a
+    // button. Any existing AI focus is now stale, so drop it (and cancel an in-flight focus run) so
+    // the next explicit Generate/Focus starts from a clean state.
     this._issueInput.addEventListener('input', function () {
+        if (self._isFocusing) {
+            self._cancelFocus();
+        }
         self._focusedSnapshot = null;
         self._focusInfo = null;
-        if (self._snapshot) {
-            self._rebuild();
-        }
     });
 
     this._focusButton.addEventListener('click', function () {
@@ -148,15 +153,20 @@ ReproductionView.prototype.showSnapshot = function (snapshot, error) {
     }
 
     this._snapshot = snapshot;
-    return this._rebuild();
+    return this._rebuild({ verify: true });
 };
 
 /**
  * @private
+ * @param {Object} [options]
+ * @param {boolean} [options.verify] - Run the Playwright render check and save to Snippix. Only the
+ *     explicit user actions (Generate app code, Focus with AI, real-data toggle) set this; passive
+ *     rebuilds such as typing in the issue field never verify, so they cannot spam Snippix with a
+ *     new snippet (and a racing render check) on every keystroke.
  */
-ReproductionView.prototype._rebuild = function () {
+ReproductionView.prototype._rebuild = function (options) {
     if (this._mode === 'html') {
-        return this._rebuildHtml();
+        return this._rebuildHtml(options);
     }
 
     var active = this._focusedSnapshot || this._snapshot;
@@ -170,7 +180,7 @@ ReproductionView.prototype._rebuild = function () {
     var lineCount = prompt ? prompt.split('\n').length : 0;
 
     if (this._focusedSnapshot && this._focusInfo) {
-        this._setStatus('AI-focused to ' + this._focusInfo.focusedIds.length + ' controls — ' + lineCount + ' lines.');
+        this._setStatus(this._focusPrefix() + ' — ' + lineCount + ' lines.');
         return null;
     }
 
@@ -182,13 +192,17 @@ ReproductionView.prototype._rebuild = function () {
 
 /**
  * Build a standalone runnable HTML app from the snapshot and show it in the output field. When a
- * verifier is wired, additionally validate the app renders clean (Playwright MCP) and store it
- * (Snippix MCP), reporting the verdict + Snippix URL in the status line. Returns a promise (or null
- * when no verifier) so tests can await the async validation.
+ * verifier is wired AND `options.verify` is set, additionally validate the app renders clean
+ * (Playwright MCP) and store it (Snippix MCP), reporting the verdict + Snippix URL in the status
+ * line. Passive rebuilds (typing in the issue field) pass no `verify`, so they only refresh the
+ * output and never re-run the render check or save a new Snippix snippet. Returns a promise (or null
+ * when not verifying) so tests can await the async validation.
  * @private
+ * @param {Object} [options]
+ * @param {boolean} [options.verify] - Run the render check + Snippix save.
  * @returns {Promise|null}
  */
-ReproductionView.prototype._rebuildHtml = function () {
+ReproductionView.prototype._rebuildHtml = function (options) {
     var self = this;
     var active = this._focusedSnapshot || this._snapshot;
     var html = this._htmlBuilder.build(active);
@@ -196,17 +210,29 @@ ReproductionView.prototype._rebuildHtml = function () {
     this._copyButton.disabled = false;
 
     var lineCount = html ? html.split('\n').length : 0;
-    var count = this._snapshot.stats ? this._snapshot.stats.controlCount : 0;
-    var suffix = this._snapshot.stats && this._snapshot.stats.truncated ? ' (truncated)' : '';
-    var ready = 'App code ready — ' + count + ' controls' + suffix + ', ' + lineCount + ' lines.';
+    var ready;
+    if (this._focusedSnapshot && this._focusInfo) {
+        ready = 'App code ready — ' + this._focusPrefix() + ', ' + lineCount + ' lines.';
+    } else {
+        var count = this._snapshot.stats ? this._snapshot.stats.controlCount : 0;
+        var suffix = this._snapshot.stats && this._snapshot.stats.truncated ? ' (truncated)' : '';
+        ready = 'App code ready — ' + count + ' controls' + suffix + ', ' + lineCount + ' lines.';
+    }
 
-    if (!this._verifier) {
+    if (!this._verifier || !(options && options.verify)) {
         this._setStatus(ready);
         return null;
     }
 
-    this._setStatus(ready + ' Validating (Playwright + Snippix)…');
-    return this._verifier.verifyAndSave(html).then(function (result) {
+    this._setStatus(ready + ' Checking the app renders…');
+    var rebuild = function (adjustments) {
+        return self._htmlBuilder.build(active, adjustments);
+    };
+    return this._verifier.verifyFixSave(html, rebuild, {
+        onAttempt: function (info) {
+            self._setStatus(ready + ' Render check failed — applying fixes (attempt ' + info.attempt + '/' + info.maxAttempts + ')…');
+        }
+    }).then(function (result) {
         self._setStatus(ready + ' ' + self._validationStatus(result));
     }, function () {
         self._setStatus(ready + ' Validation unavailable (is the MCP bridge running?).');
@@ -214,39 +240,85 @@ ReproductionView.prototype._rebuildHtml = function () {
 };
 
 /**
- * Compose the validation status from a verifyAndSave result: render verdict + Snippix link.
+ * Compose the validation status from a verifyFixSave result: render verdict + Snippix link. A broken
+ * app is never published (Snippix has no delete), so the message makes clear whether a snippet was
+ * created.
  * @private
- * @param {{verification: Object, snippet: Object}} result
+ * @param {{verification: Object, snippet: Object, attempts: number, fixed: boolean}} result
  * @returns {string}
  */
 ReproductionView.prototype._validationStatus = function (result) {
     var verification = (result && result.verification) || {};
-    var snippet = (result && result.snippet) || {};
-    var parts = [];
-    if (verification.ok === true) {
-        parts.push('Rendered with no console errors');
-    } else if (verification.ok === false) {
-        parts.push(verification.errors.length + ' console error(s): ' + verification.errors.join(' | '));
-    } else {
-        parts.push('Render check skipped (' + (verification.reason || 'unavailable') + ')');
+
+    // Render check could not run — cannot confirm it works, so nothing was published.
+    if (verification.ok === null) {
+        return 'Render check skipped (' + (verification.reason || 'unavailable') + ') — Snippix not created.';
     }
+    // Render check found errors — not published.
+    if (verification.ok === false) {
+        var errs = verification.errors || [];
+        return errs.length + ' console error(s): ' + errs.join(' | ') + ' — Snippix not created (app has errors).';
+    }
+    // Render check clean.
+    return 'Rendered with no console errors' + this._fixNote(result) + ' — ' + this._snippetStatus((result && result.snippet) || {});
+};
+
+/**
+ * " (after N fixes)" suffix when the app needed deterministic fixes before it rendered clean.
+ * @private
+ */
+ReproductionView.prototype._fixNote = function (result) {
+    if (!result || !result.fixed) {
+        return '';
+    }
+    return ' (after ' + result.attempts + ' fix' + (result.attempts === 1 ? '' : 'es') + ')';
+};
+
+/**
+ * The Snippix part of the validation status: link on success, else why nothing was published.
+ * @private
+ */
+ReproductionView.prototype._snippetStatus = function (snippet) {
     if (snippet.ok && snippet.url) {
-        parts.push('Snippix: ' + snippet.url);
-    } else if (snippet.ok === false) {
-        parts.push('Snippix save failed (' + (snippet.reason || 'error') + ')');
-    } else {
-        parts.push('Snippix save skipped (' + (snippet.reason || 'unavailable') + ')');
+        return 'Snippix: ' + snippet.url;
     }
-    return parts.join(' — ');
+    if (snippet.ok === false) {
+        return 'Snippix save failed (' + (snippet.reason || 'error') + ').';
+    }
+    return 'Snippix unavailable (' + (snippet.reason || 'skipped') + ').';
+};
+
+/**
+ * Status-line prefix describing the current focus, distinguishing a true on-device-model focus from
+ * the deterministic keyword fallback.
+ * @private
+ * @returns {string}
+ */
+ReproductionView.prototype._focusPrefix = function () {
+    var n = (this._focusInfo && this._focusInfo.focusedIds.length) || 0;
+    if (this._focusInfo && this._focusInfo.method === 'keyword') {
+        return 'Focused to ' + n + ' controls (keyword match)';
+    }
+    return 'AI-focused to ' + n + ' controls';
 };
 
 /**
  * Ask the on-device model which controls are relevant to the typed issue and rebuild from the
  * pruned tree. Falls back to the deterministic outline on any failure or when the model declines.
+ *
+ * While a focus run is in flight the Focus button acts as a Cancel: clicking it abandons the run
+ * (the on-device model download can be slow and must be interruptible). A monotonic token guards the
+ * async result so a cancelled or superseded run never mutates the view when it eventually settles.
  * @private
  */
 ReproductionView.prototype._focusWithAI = function () {
     var self = this;
+
+    // A second click while focusing means Cancel.
+    if (this._isFocusing) {
+        this._cancelFocus();
+        return;
+    }
 
     if (!this._snapshot) {
         this._setStatus('Generate a prompt first.');
@@ -257,26 +329,31 @@ ReproductionView.prototype._focusWithAI = function () {
         this._setStatus('Type an issue to focus on first.');
         return;
     }
-    if (this._isFocusing) {
-        return;
-    }
 
+    var token = ++this._focusToken;
     this._isFocusing = true;
-    this._focusButton.disabled = true;
+    // Keep the Focus button enabled so it can cancel; relabel it. Disable the generate buttons.
+    this._focusButton.textContent = 'Cancel focus';
     this._generateButton.disabled = true;
     this._generateHtmlButton.disabled = true;
     this._setStatus('Focusing with AI…');
 
-    return this._issueFocuser.focus(this._snapshot, issue).then(function (result) {
-        self._isFocusing = false;
-        self._focusButton.disabled = false;
-        self._generateButton.disabled = false;
-        self._generateHtmlButton.disabled = false;
+    return this._issueFocuser.focus(this._snapshot, issue, {
+        onProgress: function (progress) {
+            if (token !== self._focusToken) { return; }
+            var percent = Math.round((progress || 0) * 100);
+            self._setStatus('Downloading on-device model… ' + percent + '% (click Cancel focus to stop)');
+        }
+    }).then(function (result) {
+        if (token !== self._focusToken) { return; }
+        self._endFocus();
 
         if (result && result.usedAI) {
-            self._focusedSnapshot = Object.assign({}, self._snapshot, { tree: result.tree });
-            self._focusInfo = { focusedIds: result.focusedIds || [] };
-            self._rebuild();
+            // The focused tree is a single merged tree spanning all frames. Drop `frames` so the
+            // prompt/HTML builders render the pruned tree instead of re-expanding the raw frames.
+            self._focusedSnapshot = Object.assign({}, self._snapshot, { tree: result.tree, frames: undefined });
+            self._focusInfo = { focusedIds: result.focusedIds || [], method: result.method || 'ai' };
+            self._rebuild({ verify: true });
             return;
         }
 
@@ -285,12 +362,33 @@ ReproductionView.prototype._focusWithAI = function () {
         self._rebuild();
         self._setStatus(self._status.textContent + ' (AI focus skipped: ' + self._reasonText(result && result.reason) + ')');
     }, function () {
-        self._isFocusing = false;
-        self._focusButton.disabled = false;
-        self._generateButton.disabled = false;
-        self._generateHtmlButton.disabled = false;
+        if (token !== self._focusToken) { return; }
+        self._endFocus();
         self._setStatus('AI focus failed — using the full outline.');
     });
+};
+
+/**
+ * Abandon the in-flight focus run. Bumps the token so the pending result is ignored when it settles,
+ * resets the toolbar, and reports the cancellation. The background model download (if any) may keep
+ * running, but the view is unlocked immediately.
+ * @private
+ */
+ReproductionView.prototype._cancelFocus = function () {
+    this._focusToken += 1;
+    this._endFocus();
+    this._setStatus('AI focus cancelled.');
+};
+
+/**
+ * Reset the focus-run UI state: clear the flag, restore the Focus button label, re-enable buttons.
+ * @private
+ */
+ReproductionView.prototype._endFocus = function () {
+    this._isFocusing = false;
+    this._focusButton.textContent = 'Focus with AI';
+    this._generateButton.disabled = false;
+    this._generateHtmlButton.disabled = false;
 };
 
 /**
@@ -303,7 +401,7 @@ ReproductionView.prototype._reasonText = function (reason) {
         'no-issue': 'no issue provided',
         'no-candidates': 'no controls found',
         'too-large': 'app too large for the on-device model',
-        'empty-selection': 'model found nothing specific',
+        'empty-selection': 'nothing matched the issue',
         'model-error': 'on-device model unavailable'
     };
     return map[reason] || 'unavailable';

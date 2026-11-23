@@ -8,6 +8,17 @@ var PromptClient = require('./PromptClient.js');
 var DEFAULT_BATCH_SIZE = 300;
 var LABEL_MAX_LENGTH = 40;
 var LABEL_PROPERTY_PATTERN = /^(text|title|label|placeholder|value|tooltip|name)$/i;
+// Cap how many controls the keyword fallback selects, so a broad issue ("button") cannot select the
+// whole app. Highest-scoring candidates win.
+var KEYWORD_MAX_SELECTION = 60;
+// Words carried by almost every issue report; ignored when matching so they don't inflate scores.
+var STOP_WORDS = {
+    'the': true, 'and': true, 'for': true, 'that': true, 'this': true, 'with': true, 'not': true,
+    'does': true, 'when': true, 'then': true, 'but': true, 'you': true, 'are': true, 'was': true,
+    'click': true, 'clicking': true, 'press': true, 'pressing': true, 'tap': true, 'issue': true,
+    'error': true, 'errors': true, 'bug': true, 'problem': true, 'throws': true, 'fails': true,
+    'after': true, 'from': true, 'into': true, 'over': true, 'should': true, 'would': true
+};
 
 /**
  * Uses the on-device language model (via {@link PromptClient}) to pick which controls are relevant
@@ -35,6 +46,33 @@ function IssueFocuser(options) {
 IssueFocuser.prototype.isAvailable = function () {
     return this._promptClient.checkAvailability().then(function (capability) {
         return capability.status === 'ready';
+    }, function () {
+        return false;
+    });
+};
+
+/**
+ * Ensure the on-device model is ready to prompt, downloading it first when Chrome reports it as
+ * downloadable/downloading. Never rejects — resolves `false` on any failure so the caller falls back
+ * to the full tree. The download is the same one the AI Assistant uses; it runs once per device and
+ * is cached by Chrome, so subsequent focus runs skip straight to `ready`.
+ * @param {Function} [onProgress] - Receives download progress in [0, 1].
+ * @returns {Promise<boolean>}
+ */
+IssueFocuser.prototype._ensureReady = function (onProgress) {
+    var self = this;
+    return this._promptClient.checkAvailability().then(function (capability) {
+        if (capability.status === 'ready') {
+            return true;
+        }
+        if (capability.status === 'downloadable' || capability.status === 'downloading') {
+            return self._promptClient.downloadModel(onProgress).then(function () {
+                return true;
+            }, function () {
+                return false;
+            });
+        }
+        return false;
     }, function () {
         return false;
     });
@@ -83,6 +121,56 @@ IssueFocuser.prototype._flatten = function (tree) {
 
     visit(tree);
     return candidates;
+};
+
+/**
+ * Split the issue text into lowercased search tokens: words of 3+ chars that are not stop-words.
+ * @private
+ * @param {string} issue
+ * @returns {Array<string>}
+ */
+IssueFocuser.prototype._tokenizeIssue = function (issue) {
+    return (issue || '').toLowerCase().split(/[^a-z0-9]+/).filter(function (word) {
+        return word.length >= 3 && !STOP_WORDS[word];
+    });
+};
+
+/**
+ * Deterministic fallback used when the on-device model is unavailable (or selects nothing): score
+ * each candidate by how many issue tokens appear in its id, short type name, or label, and return the
+ * highest-scoring ids. Reuses the same candidate list the model is given, so the pruned result is
+ * identical in shape to the AI path — only the selection differs. Returns `[]` when nothing matches.
+ * @private
+ * @param {string} issue
+ * @param {Array<{id: string, type: string, label: string}>} candidates
+ * @returns {Array<string>}
+ */
+IssueFocuser.prototype._keywordFocus = function (issue, candidates) {
+    var tokens = this._tokenizeIssue(issue);
+    if (tokens.length === 0) {
+        return [];
+    }
+    var scored = [];
+    candidates.forEach(function (candidate, index) {
+        var type = candidate.type || '';
+        var shortType = type.substring(type.lastIndexOf('.') + 1);
+        var haystack = (candidate.id + ' ' + shortType + ' ' + (candidate.label || '')).toLowerCase();
+        var score = 0;
+        tokens.forEach(function (token) {
+            if (haystack.indexOf(token) !== -1) {
+                score += 1;
+            }
+        });
+        if (score > 0) {
+            scored.push({ id: candidate.id, score: score, index: index });
+        }
+    });
+    scored.sort(function (a, b) {
+        return (b.score - a.score) || (a.index - b.index);
+    });
+    return scored.slice(0, KEYWORD_MAX_SELECTION).map(function (entry) {
+        return entry.id;
+    });
 };
 
 /**
@@ -252,13 +340,26 @@ IssueFocuser.prototype._selectIds = function (prompt, validIds) {
  * @param {Object} [options]
  * @param {number} [options.maxCandidates] - Per-batch candidate window; larger apps are split into
  *     sequential batches of this size rather than declined.
- * @returns {Promise<{tree: Array, focusedIds: Array<string>, usedAI: boolean, reason: string}>}
- *     Always resolves; `usedAI` is false when the original tree is returned unchanged.
+ * @param {Function} [options.onProgress] - Receives on-device model download progress in [0, 1] when
+ *     the model must be downloaded before focusing.
+ * @returns {Promise<{tree: Array, focusedIds: Array<string>, usedAI: boolean, method: string, reason: string}>}
+ *     Always resolves; `usedAI` is false only when the full tree is returned unchanged. `method` is
+ *     `'ai'` (on-device model), `'keyword'` (deterministic fallback), or `'none'` (unfocused).
  */
 IssueFocuser.prototype.focus = function (snapshot, issue, options) {
     options = options || {};
     var tree = snapshot && Array.isArray(snapshot.tree) ? snapshot.tree : [];
-    var original = { tree: tree, focusedIds: [], usedAI: false, reason: '' };
+
+    // For multi-frame snapshots merge all frames so controls from every frame are candidates.
+    // The focused result is a single pruned tree spanning the relevant controls across frames.
+    if (snapshot && Array.isArray(snapshot.frames) && snapshot.frames.length > 1) {
+        tree = [];
+        snapshot.frames.forEach(function (frame) {
+            tree = tree.concat(frame.tree || []);
+        });
+    }
+
+    var original = { tree: tree, focusedIds: [], usedAI: false, method: 'none', reason: '' };
 
     if (!issue || !issue.trim()) {
         original.reason = 'no-issue';
@@ -288,11 +389,8 @@ IssueFocuser.prototype.focus = function (snapshot, issue, options) {
 
     var self = this;
 
-    return this._selectAcrossBatches(issue, batches, validIds).then(function (ids) {
-        if (ids.length === 0) {
-            original.reason = 'empty-selection';
-            return original;
-        }
+    // Build a focused result (pruned tree) from a selected id list.
+    function focusedResult(ids, method) {
         var selected = Object.create(null);
         ids.forEach(function (id) {
             selected[id] = true;
@@ -301,11 +399,36 @@ IssueFocuser.prototype.focus = function (snapshot, issue, options) {
             tree: self._prune(tree, selected),
             focusedIds: ids,
             usedAI: true,
+            method: method,
             reason: 'ok'
         };
-    }, function () {
-        original.reason = 'model-error';
-        return original;
+    }
+
+    // Deterministic fallback when the model is unavailable or selects nothing. Only when keyword
+    // matching ALSO finds nothing do we return the full outline unchanged.
+    function keywordFallback() {
+        var ids = self._keywordFocus(issue, candidates);
+        if (ids.length === 0) {
+            original.reason = 'empty-selection';
+            return original;
+        }
+        return focusedResult(ids, 'keyword');
+    }
+
+    return this._ensureReady(options.onProgress).then(function (ready) {
+        if (!ready) {
+            // On-device model unavailable — keyword match instead of giving up.
+            return keywordFallback();
+        }
+        return self._selectAcrossBatches(issue, batches, validIds).then(function (ids) {
+            if (ids.length === 0) {
+                return keywordFallback();
+            }
+            return focusedResult(ids, 'ai');
+        }, function () {
+            // Model errored mid-run — keyword fallback rather than the full outline.
+            return keywordFallback();
+        });
     });
 };
 

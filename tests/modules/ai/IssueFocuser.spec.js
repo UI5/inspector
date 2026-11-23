@@ -15,6 +15,7 @@ function makeStream(chunks) {
 function createFakeClient(overrides) {
     return Object.assign({
         checkAvailability: function () { return Promise.resolve({ status: 'ready' }); },
+        downloadModel: function () { return Promise.resolve(); },
         createSession: function () { return Promise.resolve(true); },
         promptStreaming: function () { return Promise.resolve(makeStream(['["btnSave"]'])); },
         destroy: function () {}
@@ -101,6 +102,72 @@ describe('IssueFocuser', function () {
             });
         });
 
+        it('should keyword-match (without calling the model) when the model is not ready', function () {
+            const client = createFakeClient({
+                checkAvailability: function () { return Promise.resolve({ status: 'unsupported' }); },
+                createSession: sinon.stub().returns(Promise.resolve(true))
+            });
+            return new IssueFocuser({ promptClient: client }).focus(sampleSnapshot(), 'Save fails').then(function (result) {
+                result.usedAI.should.equal(true);
+                result.method.should.equal('keyword');
+                result.focusedIds.should.deep.equal(['btnSave']);
+                client.createSession.called.should.equal(false);
+            });
+        });
+
+        it('should return the full outline when the model is unavailable AND nothing matches the issue', function () {
+            const client = createFakeClient({
+                checkAvailability: function () { return Promise.resolve({ status: 'unsupported' }); }
+            });
+            return new IssueFocuser({ promptClient: client }).focus(sampleSnapshot(), 'nonexistent widget zzz').then(function (result) {
+                result.usedAI.should.equal(false);
+                result.method.should.equal('none');
+                result.reason.should.equal('empty-selection');
+            });
+        });
+
+        it('should download the model when downloadable, then focus', function () {
+            const downloadModel = sinon.stub().returns(Promise.resolve());
+            const client = createFakeClient({
+                checkAvailability: function () { return Promise.resolve({ status: 'downloadable' }); },
+                downloadModel: downloadModel
+            });
+            return new IssueFocuser({ promptClient: client }).focus(sampleSnapshot(), 'Save fails').then(function (result) {
+                downloadModel.calledOnce.should.equal(true);
+                result.usedAI.should.equal(true);
+                result.focusedIds.should.deep.equal(['btnSave']);
+            });
+        });
+
+        it('should forward download progress to options.onProgress', function () {
+            const client = createFakeClient({
+                checkAvailability: function () { return Promise.resolve({ status: 'downloadable' }); },
+                downloadModel: function (onProgress) {
+                    onProgress(0.5);
+                    onProgress(1);
+                    return Promise.resolve();
+                }
+            });
+            const seen = [];
+            return new IssueFocuser({ promptClient: client })
+                .focus(sampleSnapshot(), 'Save fails', { onProgress: function (p) { seen.push(p); } })
+                .then(function () {
+                    seen.should.deep.equal([0.5, 1]);
+                });
+        });
+
+        it('should keyword-match when the download fails', function () {
+            const client = createFakeClient({
+                checkAvailability: function () { return Promise.resolve({ status: 'downloadable' }); },
+                downloadModel: function () { return Promise.reject(new Error('download failed')); }
+            });
+            return new IssueFocuser({ promptClient: client }).focus(sampleSnapshot(), 'Save fails').then(function (result) {
+                result.usedAI.should.equal(true);
+                result.method.should.equal('keyword');
+                result.focusedIds.should.deep.equal(['btnSave']);
+            });
+        });
+
         it('should batch candidates when there are more than the per-batch window', function () {
             const promptStreaming = sinon.stub().returns(Promise.resolve(makeStream(['["btnSave"]'])));
             const client = createFakeClient({ promptStreaming: promptStreaming });
@@ -138,6 +205,28 @@ describe('IssueFocuser', function () {
                 ids.should.not.contain('btnSave');
             });
         });
+
+        it('should merge multi-frame trees so controls in any frame are candidates', function () {
+            const snapshot = {
+                meta: {},
+                stats: { controlCount: 2, truncated: false },
+                frames: [
+                    { frameId: 0, url: 'https://app/', tree: [
+                        { id: 'shell', type: 'sap.m.Shell', isControl: true, properties: [], bindings: { properties: {}, aggregations: {} }, children: [] }
+                    ] },
+                    { frameId: 1, url: 'https://app/iframe', tree: [
+                        { id: 'btnSave', type: 'sap.m.Button', isControl: true, properties: [{ name: 'text', value: 'Save', type: 'string' }], bindings: { properties: {}, aggregations: {} }, children: [] }
+                    ] }
+                ],
+                tree: []
+            };
+            return new IssueFocuser({ promptClient: createFakeClient() }).focus(snapshot, 'Save fails').then(function (result) {
+                // The model selected btnSave, which lives in frame 1 — reachable only after merging.
+                result.usedAI.should.equal(true);
+                result.focusedIds.should.deep.equal(['btnSave']);
+                idsOf(result.tree).should.contain('btnSave');
+            });
+        });
     });
 
     describe('#focus() parsing & validation', function () {
@@ -156,40 +245,50 @@ describe('IssueFocuser', function () {
             });
         });
 
-        it('should fall back when the model selects nothing valid', function () {
+        it('should keyword-recover when the model selects nothing valid', function () {
             const client = createFakeClient({ promptStreaming: function () { return Promise.resolve(makeStream(['["ghost"]'])); } });
             return new IssueFocuser({ promptClient: client }).focus(sampleSnapshot(), 'Save fails').then(function (result) {
+                result.usedAI.should.equal(true);
+                result.method.should.equal('keyword');
+                result.focusedIds.should.deep.equal(['btnSave']);
+            });
+        });
+
+        it('should return the full outline when the model yields nothing and no keyword matches', function () {
+            const client = createFakeClient({ promptStreaming: function () { return Promise.resolve(makeStream(['["ghost"]'])); } });
+            return new IssueFocuser({ promptClient: client }).focus(sampleSnapshot(), 'nonexistent zzz').then(function (result) {
                 result.usedAI.should.equal(false);
                 result.reason.should.equal('empty-selection');
             });
         });
 
-        it('should fall back when the reply has no JSON array', function () {
+        it('should fall back when the reply has no JSON array and nothing matches', function () {
             const client = createFakeClient({ promptStreaming: function () { return Promise.resolve(makeStream(['no array here'])); } });
-            return new IssueFocuser({ promptClient: client }).focus(sampleSnapshot(), 'Save fails').then(function (result) {
+            return new IssueFocuser({ promptClient: client }).focus(sampleSnapshot(), 'nonexistent zzz').then(function (result) {
                 result.usedAI.should.equal(false);
                 result.reason.should.equal('empty-selection');
             });
         });
 
-        it('should fall back when the JSON is malformed', function () {
+        it('should fall back when the JSON is malformed and nothing matches', function () {
             const client = createFakeClient({ promptStreaming: function () { return Promise.resolve(makeStream(['[not json]'])); } });
-            return new IssueFocuser({ promptClient: client }).focus(sampleSnapshot(), 'Save fails').then(function (result) {
+            return new IssueFocuser({ promptClient: client }).focus(sampleSnapshot(), 'nonexistent zzz').then(function (result) {
                 result.usedAI.should.equal(false);
             });
         });
     });
 
     describe('#focus() resilience', function () {
-        it('should fall back and destroy the session on a model error', function () {
+        it('should keyword-recover and destroy the session on a model error', function () {
             const destroy = sinon.spy();
             const client = createFakeClient({
                 promptStreaming: function () { return Promise.reject(new Error('boom')); },
                 destroy: destroy
             });
             return new IssueFocuser({ promptClient: client }).focus(sampleSnapshot(), 'Save fails').then(function (result) {
-                result.usedAI.should.equal(false);
-                result.reason.should.equal('model-error');
+                result.usedAI.should.equal(true);
+                result.method.should.equal('keyword');
+                result.focusedIds.should.deep.equal(['btnSave']);
                 destroy.called.should.equal(true);
             });
         });
@@ -199,6 +298,41 @@ describe('IssueFocuser', function () {
             const client = createFakeClient({ destroy: destroy });
             return new IssueFocuser({ promptClient: client }).focus(sampleSnapshot(), 'Save fails').then(function () {
                 destroy.called.should.equal(true);
+            });
+        });
+    });
+
+    describe('#focus() keyword fallback', function () {
+        // Model unavailable in every test here, so the deterministic keyword path runs.
+        function unavailableClient() {
+            return createFakeClient({ checkAvailability: function () { return Promise.resolve({ status: 'unsupported' }); } });
+        }
+
+        it('should match on the control label, keeping ancestors and dropping siblings', function () {
+            return new IssueFocuser({ promptClient: unavailableClient() }).focus(sampleSnapshot(), 'Cancel is broken').then(function (result) {
+                result.method.should.equal('keyword');
+                result.focusedIds.should.deep.equal(['btnCancel']);
+                const ids = idsOf(result.tree);
+                ids.should.contain('app');
+                ids.should.contain('page');
+                ids.should.contain('btnCancel');
+                ids.should.not.contain('btnSave');
+            });
+        });
+
+        it('should match on the control type name', function () {
+            return new IssueFocuser({ promptClient: unavailableClient() }).focus(sampleSnapshot(), 'the List does not refresh').then(function (result) {
+                result.method.should.equal('keyword');
+                result.focusedIds.should.contain('list');
+                // Selecting the list keeps its descendants.
+                idsOf(result.tree).should.contain('item0');
+            });
+        });
+
+        it('should ignore short tokens and stop-words so a generic issue selects nothing', function () {
+            return new IssueFocuser({ promptClient: unavailableClient() }).focus(sampleSnapshot(), 'the bug is an error').then(function (result) {
+                result.usedAI.should.equal(false);
+                result.reason.should.equal('empty-selection');
             });
         });
     });

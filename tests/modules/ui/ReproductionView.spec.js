@@ -132,17 +132,18 @@ describe('ReproductionView', function () {
 
         it('should validate the generated app and report a clean render + Snippix URL', function () {
             const verifier = {
-                verifyAndSave: sinon.stub().returns(Promise.resolve({
+                verifyFixSave: sinon.stub().returns(Promise.resolve({
                     verification: { ok: true, errors: [], reason: 'ok' },
-                    snippet: { ok: true, url: 'https://snippix/snippets/abc.html', reason: 'saved' }
+                    snippet: { ok: true, url: 'https://snippix/snippets/abc.html', reason: 'saved' },
+                    attempts: 0, fixed: false
                 }))
             };
             const v = viewWithVerifier(verifier);
             v._generateHtmlButton.click();
 
             const promise = v.showSnapshot(sampleSnapshot());
-            verifier.verifyAndSave.calledOnce.should.equal(true);
-            verifier.verifyAndSave.firstCall.args[0].should.equal('<!DOCTYPE html>');
+            verifier.verifyFixSave.calledOnce.should.equal(true);
+            verifier.verifyFixSave.firstCall.args[0].should.equal('<!DOCTYPE html>');
 
             return promise.then(function () {
                 v._status.textContent.should.contain('Rendered with no console errors');
@@ -150,11 +151,51 @@ describe('ReproductionView', function () {
             });
         });
 
-        it('should report console errors from a failed render', function () {
+        it('should pass a rebuild function that regenerates HTML with the given adjustments', function () {
             const verifier = {
-                verifyAndSave: sinon.stub().returns(Promise.resolve({
+                verifyFixSave: sinon.stub().returns(Promise.resolve({
+                    verification: { ok: true, errors: [], reason: 'ok' },
+                    snippet: { ok: true, url: 'https://snippix/snippets/abc.html', reason: 'saved' },
+                    attempts: 0, fixed: false
+                }))
+            };
+            const v = viewWithVerifier(verifier);
+            v._generateHtmlButton.click();
+            return v.showSnapshot(sampleSnapshot()).then(function () {
+                const rebuild = verifier.verifyFixSave.firstCall.args[1];
+                const before = fakeHtmlBuilder.calls.length;
+                rebuild({ excludeTypes: ['sap.m.Foo'], excludeLibraries: [] });
+                const lastCall = fakeHtmlBuilder.calls[fakeHtmlBuilder.calls.length - 1];
+                fakeHtmlBuilder.calls.length.should.equal(before + 1);
+                lastCall.options.excludeTypes.should.deep.equal(['sap.m.Foo']);
+            });
+        });
+
+        it('should report the fix attempts when the app needed fixing before saving', function () {
+            const verifier = {
+                verifyFixSave: sinon.stub().callsFake(function (html, rebuild, options) {
+                    options.onAttempt({ attempt: 1, maxAttempts: 3, errors: ['[ERROR] x'], adjustments: {} });
+                    return Promise.resolve({
+                        verification: { ok: true, errors: [], reason: 'ok' },
+                        snippet: { ok: true, url: 'https://snippix/snippets/abc.html', reason: 'saved' },
+                        attempts: 1, fixed: true
+                    });
+                })
+            };
+            const v = viewWithVerifier(verifier);
+            v._generateHtmlButton.click();
+            return v.showSnapshot(sampleSnapshot()).then(function () {
+                v._status.textContent.should.contain('Rendered with no console errors (after 1 fix)');
+                v._status.textContent.should.contain('Snippix: https://snippix/snippets/abc.html');
+            });
+        });
+
+        it('should report console errors and NOT create a Snippix when the app stays broken', function () {
+            const verifier = {
+                verifyFixSave: sinon.stub().returns(Promise.resolve({
                     verification: { ok: false, errors: ['[ERROR] boom'], reason: 'errors' },
-                    snippet: { ok: null, url: '', reason: 'unavailable' }
+                    snippet: { ok: false, url: '', reason: 'not-saved-has-errors' },
+                    attempts: 3, fixed: false
                 }))
             };
             const v = viewWithVerifier(verifier);
@@ -162,32 +203,77 @@ describe('ReproductionView', function () {
             return v.showSnapshot(sampleSnapshot()).then(function () {
                 v._status.textContent.should.contain('1 console error(s)');
                 v._status.textContent.should.contain('boom');
-                v._status.textContent.should.contain('Snippix save skipped (unavailable)');
+                v._status.textContent.should.contain('Snippix not created (app has errors)');
             });
         });
 
-        it('should report a skipped render check when the bridge is unavailable', function () {
+        it('should report a skipped render check and no Snippix when the bridge is unavailable', function () {
             const verifier = {
-                verifyAndSave: sinon.stub().returns(Promise.resolve({
+                verifyFixSave: sinon.stub().returns(Promise.resolve({
                     verification: { ok: null, errors: [], reason: 'unavailable' },
-                    snippet: { ok: null, url: '', reason: 'unavailable' }
+                    snippet: { ok: null, url: '', reason: 'skipped-unverified' },
+                    attempts: 0, fixed: false
                 }))
             };
             const v = viewWithVerifier(verifier);
             v._generateHtmlButton.click();
             return v.showSnapshot(sampleSnapshot()).then(function () {
                 v._status.textContent.should.contain('Render check skipped (unavailable)');
+                v._status.textContent.should.contain('Snippix not created');
             });
         });
 
-        it('should degrade gracefully when verifyAndSave rejects', function () {
+        it('should degrade gracefully when verifyFixSave rejects', function () {
             const verifier = {
-                verifyAndSave: sinon.stub().returns(Promise.reject(new Error('bridge down')))
+                verifyFixSave: sinon.stub().returns(Promise.reject(new Error('bridge down')))
             };
             const v = viewWithVerifier(verifier);
             v._generateHtmlButton.click();
             return v.showSnapshot(sampleSnapshot()).then(function () {
                 v._status.textContent.should.contain('Validation unavailable');
+            });
+        });
+
+        it('should NOT re-validate or re-save when typing in the issue field (html mode)', function () {
+            const verifier = {
+                verifyFixSave: sinon.stub().returns(Promise.resolve({
+                    verification: { ok: true, errors: [], reason: 'ok' },
+                    snippet: { ok: true, url: 'https://snippix/snippets/abc.html', reason: 'saved' },
+                    attempts: 0, fixed: false
+                }))
+            };
+            const v = viewWithVerifier(verifier);
+            v._generateHtmlButton.click();
+            return v.showSnapshot(sampleSnapshot()).then(function () {
+                verifier.verifyFixSave.calledOnce.should.equal(true);
+                // Typing in the issue field must not spawn more render checks / Snippix saves.
+                v._issueInput.value = 'S';
+                v._issueInput.dispatchEvent(new Event('input'));
+                v._issueInput.value = 'Sa';
+                v._issueInput.dispatchEvent(new Event('input'));
+                v._issueInput.value = 'Sav';
+                v._issueInput.dispatchEvent(new Event('input'));
+                verifier.verifyFixSave.calledOnce.should.equal(true);
+                // The app code is still refreshed in the output field.
+                v._output.value.should.equal('<!DOCTYPE html>');
+            });
+        });
+
+        it('should re-validate when the real-data toggle changes (html mode)', function () {
+            const verifier = {
+                verifyFixSave: sinon.stub().returns(Promise.resolve({
+                    verification: { ok: true, errors: [], reason: 'ok' },
+                    snippet: { ok: true, url: 'https://snippix/snippets/abc.html', reason: 'saved' },
+                    attempts: 0, fixed: false
+                }))
+            };
+            const v = viewWithVerifier(verifier);
+            v._generateHtmlButton.click();
+            return v.showSnapshot(sampleSnapshot()).then(function () {
+                verifier.verifyFixSave.calledOnce.should.equal(true);
+                v._realDataInput.checked = true;
+                v._realDataInput.dispatchEvent(new Event('change'));
+                verifier.verifyFixSave.calledTwice.should.equal(true);
             });
         });
     });
@@ -242,19 +328,46 @@ describe('ReproductionView', function () {
     });
 
     describe('Issue field', function () {
-        it('should pass the issue text to the builder on rebuild', function () {
-            view.showSnapshot(sampleSnapshot());
+        it('should pass the issue text to the builder when generating', function () {
             view._issueInput.value = 'Save throws a binding error';
+            view.showSnapshot(sampleSnapshot());
+
+            fakeBuilder.calls.should.have.length(1);
+            fakeBuilder.calls[0].options.issue.should.equal('Save throws a binding error');
+        });
+
+        it('should NOT generate while typing in the issue field', function () {
+            view.showSnapshot(sampleSnapshot());
+            fakeBuilder.calls.should.have.length(1);
+
+            view._issueInput.value = 'S';
+            view._issueInput.dispatchEvent(new Event('input'));
+            view._issueInput.value = 'Save';
             view._issueInput.dispatchEvent(new Event('input'));
 
-            fakeBuilder.calls.should.have.length(2);
-            fakeBuilder.calls[1].options.issue.should.equal('Save throws a binding error');
+            // Typing must not trigger any new build — generation only happens on an explicit button.
+            fakeBuilder.calls.should.have.length(1);
         });
 
         it('should do nothing when edited before any snapshot exists', function () {
             view._issueInput.value = 'something';
             view._issueInput.dispatchEvent(new Event('input'));
             fakeBuilder.calls.should.have.length(0);
+        });
+
+        it('should drop a stale AI focus when the issue text is edited', function () {
+            const focusedTree = [{ id: 'btnSave', type: 'sap.m.Button', isControl: true, children: [] }];
+            fakeFocuser.focus.returns(Promise.resolve({ usedAI: true, focusedIds: ['btnSave'], tree: focusedTree, reason: 'ok' }));
+
+            view.showSnapshot(sampleSnapshot());
+            view._issueInput.value = 'Save fails';
+
+            return view._focusWithAI().then(function () {
+                (view._focusedSnapshot === null).should.equal(false);
+                view._issueInput.value = 'Save fails more';
+                view._issueInput.dispatchEvent(new Event('input'));
+                (view._focusedSnapshot === null).should.equal(true);
+            });
         });
     });
 
@@ -290,6 +403,18 @@ describe('ReproductionView', function () {
             });
         });
 
+        it('should label the status as a keyword match when the focus used the deterministic fallback', function () {
+            const focusedTree = [{ id: 'btnSave', type: 'sap.m.Button', isControl: true, children: [] }];
+            fakeFocuser.focus.returns(Promise.resolve({ usedAI: true, method: 'keyword', focusedIds: ['btnSave'], tree: focusedTree, reason: 'ok' }));
+
+            view.showSnapshot(sampleSnapshot());
+            view._issueInput.value = 'Save fails';
+
+            return view._focusWithAI().then(function () {
+                view._status.textContent.should.contain('Focused to 1 controls (keyword match)');
+            });
+        });
+
         it('should fall back to the full outline and explain when the model declines', function () {
             fakeFocuser.focus.returns(Promise.resolve({ usedAI: false, reason: 'too-large', tree: [] }));
 
@@ -313,20 +438,75 @@ describe('ReproductionView', function () {
             });
         });
 
-        it('should drop a stale AI focus when the issue text is edited', function () {
+        it('should apply the focus to the generated app code when in html mode', function () {
             const focusedTree = [{ id: 'btnSave', type: 'sap.m.Button', isControl: true, children: [] }];
             fakeFocuser.focus.returns(Promise.resolve({ usedAI: true, focusedIds: ['btnSave'], tree: focusedTree, reason: 'ok' }));
 
+            view._generateHtmlButton.click();
             view.showSnapshot(sampleSnapshot());
             view._issueInput.value = 'Save fails';
 
             return view._focusWithAI().then(function () {
-                view._issueInput.value = 'Save fails more';
-                view._issueInput.dispatchEvent(new Event('input'));
-
-                const lastCall = fakeBuilder.calls[fakeBuilder.calls.length - 1];
-                lastCall.snapshot.should.equal(view._snapshot);
+                // The HTML builder (not the prompt builder) renders the pruned tree.
+                const lastCall = fakeHtmlBuilder.calls[fakeHtmlBuilder.calls.length - 1];
+                lastCall.snapshot.tree.should.equal(focusedTree);
+                view._status.textContent.should.contain('App code ready');
+                view._status.textContent.should.contain('AI-focused to 1 controls');
             });
+        });
+
+        it('should drop frames from the focused snapshot so the pruned tree is rendered', function () {
+            const focusedTree = [{ id: 'btnSave', type: 'sap.m.Button', isControl: true, children: [] }];
+            fakeFocuser.focus.returns(Promise.resolve({ usedAI: true, focusedIds: ['btnSave'], tree: focusedTree, reason: 'ok' }));
+
+            view.showSnapshot(Object.assign(sampleSnapshot(), {
+                frames: [{ frameId: 0, tree: [] }, { frameId: 1, tree: [] }]
+            }));
+            view._issueInput.value = 'Save fails';
+
+            return view._focusWithAI().then(function () {
+                const lastCall = fakeBuilder.calls[fakeBuilder.calls.length - 1];
+                (lastCall.snapshot.frames === undefined).should.equal(true);
+                lastCall.snapshot.tree.should.equal(focusedTree);
+            });
+        });
+
+        it('should cancel an in-flight focus run when the button is clicked again', function () {
+            let resolveFocus;
+            fakeFocuser.focus.returns(new Promise(function (resolve) { resolveFocus = resolve; }));
+
+            view.showSnapshot(sampleSnapshot());
+            view._issueInput.value = 'Save fails';
+
+            const pending = view._focusWithAI();
+            view._isFocusing.should.equal(true);
+            view._focusButton.textContent.should.equal('Cancel focus');
+
+            // Second click cancels.
+            view._focusButton.click();
+            view._isFocusing.should.equal(false);
+            view._focusButton.textContent.should.equal('Focus with AI');
+            view._status.textContent.should.contain('AI focus cancelled');
+
+            // The late result must not mutate the view (no focus applied).
+            resolveFocus({ usedAI: true, focusedIds: ['btnSave'], tree: [{ id: 'btnSave', type: 'sap.m.Button', isControl: true, children: [] }], reason: 'ok' });
+            return pending.then(function () {
+                (view._focusedSnapshot === null).should.equal(true);
+            });
+        });
+
+        it('should report download progress while focusing', function () {
+            fakeFocuser.focus.callsFake(function (snapshot, issue, options) {
+                options.onProgress(0.42);
+                return Promise.resolve({ usedAI: false, reason: 'empty-selection', tree: [] });
+            });
+
+            view.showSnapshot(sampleSnapshot());
+            view._issueInput.value = 'Save fails';
+
+            const p = view._focusWithAI();
+            view._status.textContent.should.contain('42%');
+            return p;
         });
     });
 
