@@ -48,8 +48,14 @@ function _getElementById(sId) {
 function ClickableValue(options) {
     // This is used for checking in the dataView
     this._isClickableValueForDataView = true;
-    // This is shown in the data view
-    this.value = '<clickable-value key="' + options.key + '" parent="' + options.parent + '">' + (options.value || '') + '</clickable-value>';
+    // Raw (unescaped) parts. The DevTools panel is the trust boundary and
+    // escapes these when it builds the <clickable-value> element, so the panel
+    // never renders a page-supplied HTML blob. Do not pre-build markup here:
+    // a hostile page can forge the whole message payload, so escaping in the
+    // page context buys nothing — the panel must escape at render time.
+    this.clickableKey = options.key;
+    this.clickableParent = options.parent;
+    this.clickableText = options.value || '';
     // This data is attached in the click event of the dataview
     this.eventData = options.eventData || {};
 }

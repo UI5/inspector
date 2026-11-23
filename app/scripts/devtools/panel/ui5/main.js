@@ -40,7 +40,23 @@
 
     // Create a port with background page for continuous message communication
     // ================================================================================
-    var port = Object.assign(utils.getPort(), {
+    var basePort = utils.getPort();
+    // Capture the original before wrapping: Object.assign below mutates basePort
+    // in place, so referencing basePort.postMessage inside the wrapper would
+    // re-enter the wrapper itself (infinite recursion).
+    var basePostMessage = basePort.postMessage;
+    var port = Object.assign(basePort, {
+        // Stamp every outgoing message with the inspected tab id so the
+        // background routes privileged actions (script injection) and relayed
+        // control commands to the tab this panel is inspecting, not whichever
+        // tab is active at dispatch time. Without this, an async active-tab
+        // lookup in the background is a cross-tab confused deputy.
+        postMessage: function (message, callback) {
+            if (message && message.tabId === undefined) {
+                message.tabId = chrome.devtools.inspectedWindow.tabId;
+            }
+            return basePostMessage.call(basePort, message, callback);
+        },
         onMessage: function (callback) {
             chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 // accept only messages from the inspected tab

@@ -12,6 +12,26 @@
     });
 
     /**
+     * Resolve the tab a privileged action must target. The DevTools panel knows
+     * the inspected tab and sends it as message.tabId (inspectedWindow.tabId);
+     * using it keeps injection/routing bound to that tab. Only when a caller
+     * omits it do we fall back to the current window's active tab (legacy
+     * behaviour, kept so callers that never carried a tabId don't break).
+     * @param {Object} message
+     * @returns {Promise<number>}
+     */
+    function resolveInspectedTabId(message) {
+        if (message && message.tabId !== undefined) {
+            return Promise.resolve(message.tabId);
+        }
+        return chrome.windows.getCurrent().then(function (w) {
+            return chrome.tabs.query({ active: true, windowId: w.id }).then(function (tabs) {
+                return tabs[0].id;
+            });
+        });
+    }
+
+    /**
      * Persist the UI5 panel visibility state in session storage so it survives
      * service-worker eviction and respawn cycles.
      */
@@ -31,9 +51,17 @@
      * @param {Object} tab - The details of the tab where the click took place.
      */
     contextMenu.onClicked = function (info, tab) {
+        // The menu's tab (provided by chrome.contextMenus.onClicked) is the
+        // authoritative target. If it is somehow absent, do not dispatch: a
+        // fallback to the active tab would deliver the selection to the wrong
+        // tab (the confused-deputy this guards against).
+        if (!tab || tab.id === undefined) {
+            return;
+        }
         utils.sendToAll({
             action: 'do-context-menu-control-select',
             target: contextMenu._rightClickTarget,
+            tabId: tab.id,
             // specify the frame in which the user clicked
             frameId: info.frameId
         });
@@ -75,60 +103,61 @@
          */
         'do-script-injection': function (message) {
             const frameId = message.frameId;
-            chrome.windows.getCurrent().then(w => {
-                chrome.tabs.query({ active: true, windowId: w.id }).then(tabs => {
-                    const target = {
-                        tabId: tabs[0].id
-                    };
-                    // inject the script only into the frame
-                    // specified in the request from the devTools UI5 panel script;
-                    // If no frameId specified, the script will be injected into the main frame
-                    if (frameId !== undefined) {
-                        target.frameIds = [message.frameId];
-                    }
-                    chrome.scripting.executeScript({
-                        target,
-                        files: [message.file]
-                    });
+            // Target the tab the DevTools panel is actually inspecting
+            // (message.tabId === inspectedWindow.tabId, set by the panel), not
+            // whichever tab happens to be active. Resolving the active tab here
+            // is a confused-deputy: if the user switches tabs during the async
+            // hop, the inspector's scripts would be injected into the wrong page.
+            resolveInspectedTabId(message).then(tabId => {
+                const target = {
+                    tabId: tabId
+                };
+                // inject the script only into the frame
+                // specified in the request from the devTools UI5 panel script;
+                // If no frameId specified, the script will be injected into the main frame
+                if (frameId !== undefined) {
+                    target.frameIds = [message.frameId];
+                }
+                chrome.scripting.executeScript({
+                    target,
+                    files: [message.file]
                 });
             });
         },
 
         'do-webc-injection': function (message) {
             const frameId = message.frameId;
-            chrome.windows.getCurrent().then(w => {
-                chrome.tabs.query({ active: true, windowId: w.id }).then(tabs => {
-                    const target = {
-                        tabId: tabs[0].id
-                    };
-                    if (frameId !== undefined) {
-                        target.frameIds = [message.frameId];
-                    }
-                    // 1. Inject the isolated-world message bridge (mirrors
-                    //    content/main.js for classic UI5).
-                    chrome.scripting.executeScript({
+            resolveInspectedTabId(message).then(tabId => {
+                const target = {
+                    tabId: tabId
+                };
+                if (frameId !== undefined) {
+                    target.frameIds = [message.frameId];
+                }
+                // 1. Inject the isolated-world message bridge (mirrors
+                //    content/main.js for classic UI5).
+                return chrome.scripting.executeScript({
+                    target,
+                    files: ['/scripts/content/webcMain.js']
+                }).then(() => {
+                    // 2. Inject the tools API into the page's MAIN world so
+                    //    it can see the framework classes / isUI5Element.
+                    return chrome.scripting.executeScript({
                         target,
-                        files: ['/scripts/content/webcMain.js']
-                    }).then(() => {
-                        // 2. Inject the tools API into the page's MAIN world so
-                        //    it can see the framework classes / isUI5Element.
-                        return chrome.scripting.executeScript({
-                            target,
-                            files: ['/vendor/WebComponentsToolsAPI.js'],
-                            world: 'MAIN'
-                        });
-                    }).then(() => {
-                        // 3. Inject the MAIN-world handler script.
-                        return chrome.scripting.executeScript({
-                            target,
-                            files: ['/scripts/injected/webcMain.js'],
-                            world: 'MAIN'
-                        });
-                    }).then(() => {
-                        chrome.runtime.sendMessage({
-                            action: 'on-webc-script-injection',
-                            frameId: frameId
-                        });
+                        files: ['/vendor/WebComponentsToolsAPI.js'],
+                        world: 'MAIN'
+                    });
+                }).then(() => {
+                    // 3. Inject the MAIN-world handler script.
+                    return chrome.scripting.executeScript({
+                        target,
+                        files: ['/scripts/injected/webcMain.js'],
+                        world: 'MAIN'
+                    });
+                }).then(() => {
+                    chrome.runtime.sendMessage({
+                        action: 'on-webc-script-injection',
+                        frameId: frameId
                     });
                 });
             });
@@ -162,6 +191,10 @@
 
         'do-ping-frames': function (message, messageSender) {
             var frameIds = message.frameIds;
+            // Ping the frames of the inspected tab, not whichever tab is active:
+            // frame discovery must match the tab do-script-injection targets, or
+            // the panel reasons about the wrong tab's frame list.
+            var tabId = message.tabId;
             var liveFrameIds = [];
             var pingFrame = function (i) {
                     if (i >= frameIds.length) {
@@ -181,6 +214,7 @@
                     // from the <code>frameIds</code> list
                     utils.sendToAll({
                         action: 'do-ping',
+                        tabId: tabId,
                         frameId: frameId
                     }, function (isAlive) {
                         if (isAlive) {
@@ -194,13 +228,31 @@
         }
     };
 
+    // Privileged handlers must only run for messages that originate from the
+    // extension's own contexts (DevTools panel / popup), never from a content
+    // script relaying a page-dispatched event. A page/content-script sender
+    // carries sender.tab; an extension-internal sender does not and matches
+    // chrome.runtime.id.
+    var PRIVILEGED_ACTIONS = ['do-script-injection', 'do-webc-injection'];
+
+    function isTrustedSender(sender) {
+        return !!sender && !sender.tab && sender.id === chrome.runtime.id;
+    }
+
     chrome.runtime.onMessage.addListener(function (request, messageSender, sendResponse) {
+        // Drop forged privileged messages: neither dispatch nor re-broadcast.
+        if (request && PRIVILEGED_ACTIONS.indexOf(request.action) !== -1 && !isTrustedSender(messageSender)) {
+            return;
+        }
+
         // Resolve incoming messages
         utils.resolveMessage({
             message: request,
             messageSender: messageSender,
             sendResponse: sendResponse,
-            actions: messageHandler
+            actions: messageHandler,
+            privilegedActions: PRIVILEGED_ACTIONS,
+            isTrustedSender: isTrustedSender
         });
 
         utils.sendToAll(request);

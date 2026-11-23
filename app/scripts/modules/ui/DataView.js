@@ -2,23 +2,10 @@
 
 var JSONFormatter = require('../ui/JSONFormatter');
 var DVHelper = require('../ui/helpers/DataViewHelper');
+var escapeHTML = require('../utils/EscapeHelper.js').escapeHTML;
+var sanitizeSectionTitle = require('../utils/EscapeHelper.js').sanitizeSectionTitle;
 
 var FILTER_INPUT_CLASS = 'dataview-filter-input';
-
-/**
- * Escape HTML special characters to prevent XSS.
- * @param {string} str
- * @returns {string}
- */
-function escapeHTML(str) {
-    if (!str) {
-        return '';
-    }
-    return str.replace(/&/g, '&amp;')
-              .replace(/</g, '&lt;')
-              .replace(/>/g, '&gt;')
-              .replace(/"/g, '&quot;');
-}
 
 /**
  * Sort keys alphabetically (case-insensitive).
@@ -191,8 +178,12 @@ DataView.prototype._generateHTMLFromObject = function (key, currentElement) {
     var options = currentElement.options;
 
     if (options.title) {
-        key = options.title;
+        key = sanitizeSectionTitle(options.title);
         tag = 'section-title';
+    } else {
+        // Plain object key (page-controlled property/aggregation name) - escape it.
+        // Section titles are intentionally-HTML and are sanitised at their source.
+        key = escapeHTML(key);
     }
 
     if (DVHelper.getObjectLength(currentElement) && options.expandable) {
@@ -268,7 +259,12 @@ DataView.prototype._generateHTMLForKeyValuePair = function (key, currentView) {
     }
 
     if (typeof vValue === 'string') {
-        vValue = DVHelper.formatHTMLString(vValue);
+        // Trusted clickable-value markup is pre-built and already escaped at
+        // its source (controlUtils.ClickableValue); emit it raw. Every other
+        // string is page-derived and must be HTML-escaped.
+        if (!currentView.isClickableValue) {
+            vValue = DVHelper.formatHTMLString(vValue);
+        }
     }
 
     if (vValue && typeof vValue === 'object') {
@@ -281,7 +277,7 @@ DataView.prototype._generateHTMLForKeyValuePair = function (key, currentView) {
         valueHTML = DVHelper.valueNeedsQuotes(vValue, DVHelper.wrapInTag('value', vValue, attributes));
     }
 
-    html += DVHelper.wrapInTag('key', key) + ':&nbsp;' + valueHTML;
+    html += DVHelper.wrapInTag('key', escapeHTML(key)) + ':&nbsp;' + valueHTML;
 
     if (bDefault) {
         html += '&nbsp;' + DVHelper.createDefaultSpan();
@@ -333,7 +329,7 @@ DataView.prototype._generateHTMLSection = function (viewObject) {
     for (var j = 0; j < assocKeys.length; j++) {
         var name = assocKeys[j];
         html += DVHelper.openLI();
-        html += DVHelper.wrapInTag('key', name) + ':&nbsp;' + DVHelper.wrapInTag('value', viewObject.associations[name]);
+        html += DVHelper.wrapInTag('key', escapeHTML(name)) + ':&nbsp;' + DVHelper.wrapInTag('value', escapeHTML(viewObject.associations[name]));
         html += DVHelper.closeLI();
     }
 
@@ -430,7 +426,7 @@ DataView.prototype._addSectionTitle = function (config, htmlPart) {
         html += DVHelper.addArrow(options.expanded);
     }
 
-    html += DVHelper.wrapInTag('section-title', options.title);
+    html += DVHelper.wrapInTag('section-title', sanitizeSectionTitle(options.title));
     html += htmlPart;
     html += DVHelper.closeLI();
     html += DVHelper.closeUL();

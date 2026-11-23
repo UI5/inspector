@@ -916,4 +916,69 @@ describe('ControlTree', function () {
             should.equal(controlTree._treeContainer.getAttribute('show-filtered-elements'), null);
         });
     });
+
+    describe('Security - HTML escaping of page-controlled data', function () {
+        var xssPayload = 'x"><img src=x onerror="window.__xss=true">';
+
+        beforeEach(function () {
+            window.__xss = undefined;
+        });
+
+        afterEach(function () {
+            delete window.__xss;
+        });
+
+        it('should not inject markup from a malicious control id', function () {
+            controlTree = new ControlTree('control-tree', {
+                data: {
+                    versionInfo: {framework: 'OPENUI5', version: '1.0.0'},
+                    controls: [{id: xssPayload, name: 'sap.m.Button', type: 'data-sap-ui', content: []}]
+                }
+            });
+
+            // No injected element should have materialised in the tree.
+            should.equal(controlTree._treeContainer.querySelector('img'), null);
+            // The onerror handler must not have run.
+            should.equal(window.__xss, undefined);
+        });
+
+        it('should not inject markup from a malicious control name', function () {
+            controlTree = new ControlTree('control-tree', {
+                data: {
+                    versionInfo: {framework: 'OPENUI5', version: '1.0.0'},
+                    controls: [{id: 'safeId', name: 'sap.m.' + xssPayload, type: 'data-sap-ui', content: []}]
+                }
+            });
+
+            should.equal(controlTree._treeContainer.querySelector('img'), null);
+            should.equal(window.__xss, undefined);
+        });
+
+        it('should not inject markup from a malicious framework/version header', function () {
+            controlTree = new ControlTree('control-tree', {
+                data: {
+                    versionInfo: {framework: xssPayload, version: xssPayload},
+                    controls: [{id: 'safeId', name: 'sap.m.Button', type: 'data-sap-ui', content: []}]
+                }
+            });
+
+            should.equal(controlTree._treeContainer.querySelector('img'), null);
+            should.equal(window.__xss, undefined);
+        });
+
+        it('should preserve the original (unescaped) id so selection still works', function () {
+            controlTree = new ControlTree('control-tree', {
+                data: {
+                    versionInfo: {framework: 'OPENUI5', version: '1.0.0'},
+                    controls: [{id: xssPayload, name: 'sap.m.Button', type: 'data-sap-ui', content: []}]
+                }
+            });
+
+            // The browser decodes the escaped entities back to the original string,
+            // so the rendered <li> must expose the exact id for lookups/selection.
+            var li = controlTree._treeContainer.querySelector('li[id]');
+            li.should.not.be.null;
+            li.getAttribute('id').should.equal(xssPayload);
+        });
+    });
 });

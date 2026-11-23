@@ -370,6 +370,7 @@ describe('Helpers for DataView', function () {
 
             requiredFormat = {data: {}};
             requiredFormat.data[key] = sampleObject.value;
+            requiredFormat.isClickableValue = false;
         });
 
         afterEach(function () {
@@ -382,6 +383,13 @@ describe('Helpers for DataView', function () {
             var formattedValueForDataView = DVHelper.formatValueForDataView(key, sampleObject);
 
             formattedValueForDataView.should.deep.equal(requiredFormat);
+        });
+
+        it('should flag the result as a clickable value when the source is one', function () {
+            sampleObject._isClickableValueForDataView = true;
+            var formattedValueForDataView = DVHelper.formatValueForDataView(key, sampleObject);
+
+            formattedValueForDataView.isClickableValue.should.equal(true);
         });
     });
 
@@ -457,6 +465,15 @@ describe('Helpers for DataView', function () {
             expect(html).to.include('value="Emphasized" selected');
             expect(html).to.include('value="Default"');
             expect(html).to.not.include('value="Default" selected');
+        });
+    });
+
+    describe('#formatHTMLString', function () {
+
+        it('should escape a value even when it contains the clickable-value substring', function () {
+            var malicious = '</clickable-value><img src=x onerror=alert(1)>';
+            expect(DVHelper.formatHTMLString(malicious)).to.not.contain('<img');
+            expect(DVHelper.formatHTMLString(malicious)).to.contain('&lt;img');
         });
     });
 });

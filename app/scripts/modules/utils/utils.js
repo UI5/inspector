@@ -24,6 +24,17 @@ function _resolveMessage(options) {
     var actions = options.actions;
     var messageHandlerFunction = actions[message.action];
 
+    // Optional, opt-in sender policy. When privilegedActions names this
+    // message's action, it is dispatched only if isTrustedSender approves the
+    // sender. Callers that pass no policy keep dispatching every action
+    // (default-allow), so existing callers are unaffected.
+    var privilegedActions = options.privilegedActions;
+    if (privilegedActions && privilegedActions.indexOf(message.action) !== -1) {
+        if (typeof options.isTrustedSender !== 'function' || !options.isTrustedSender(messageSender)) {
+            return;
+        }
+    }
+
     if (messageHandlerFunction) {
         messageHandlerFunction(message, messageSender, sendResponse);
     }
@@ -124,22 +135,67 @@ function _getPort () {
 }
 
 /**
- * Send message to all ports listening.
+ * Send message to the inspected tab (or the active tab as a fallback).
+ *
+ * When the message carries a tabId (the DevTools panel sets it to
+ * inspectedWindow.tabId), the message is delivered to that specific tab so
+ * routing stays bound to the tab actually being inspected. Callers that don't
+ * supply a tabId (e.g. the frame-ping loop) keep the legacy active-tab
+ * behaviour.
  * @param {Object} message
  */
 function _sendToAll(message, callback) {
     var frameId = message.frameId;
     var options;
+
+    function dispatch(tabId) {
+        // options.frameId allows to send the message to
+        // a specific frame instead of all frames in the tab
+        if (frameId !== undefined) {
+            options = { frameId };
+        }
+        chrome.tabs.sendMessage(tabId, message, options, callback);
+    }
+
+    if (message.tabId !== undefined) {
+        dispatch(message.tabId);
+        return;
+    }
+
     chrome.windows.getCurrent().then(w => {
         chrome.tabs.query({ active: true, windowId: w.id }).then(tabs => {
-            // options.frameId allows to send the message to
-            // a specific frame instead of all frames in the tab
-            if (frameId !== undefined) {
-                options = { frameId };
-            }
-            chrome.tabs.sendMessage(tabs[0].id, message, options, callback);
+            dispatch(tabs[0].id);
         });
     });
+}
+
+// Actions the inspected page (via the injected script) may legitimately relay
+// into the extension through the content-script CustomEvent bridge. Anything
+// not listed — e.g. a privileged do-* action — is a forgery and is dropped at
+// the relay so it never reaches the background service worker.
+var PAGE_RELAY_ACTIONS = [
+    'on-application-dom-update',
+    'on-application-dom-update-webc',
+    'on-console-errors-updated',
+    'on-contextMenu-control-select',
+    'on-control-select',
+    'on-control-select-elements-registry',
+    'on-event-update',
+    'on-framework-information',
+    'on-receiving-elements-registry-refresh-data',
+    'on-receiving-initial-data',
+    'on-receiving-initial-data-webc',
+    'on-right-click'
+];
+
+/**
+ * Whether a page-dispatched action is allowed to be relayed into the extension.
+ * @param {string} action
+ * @returns {boolean}
+ * @private
+ */
+function _isRelayableAction(action) {
+    return PAGE_RELAY_ACTIONS.indexOf(action) !== -1;
 }
 
 module.exports = {
@@ -151,5 +207,6 @@ module.exports = {
     applyTheme: _applyTheme,
     isObjectEmpty: _isObjectEmpty,
     getPort: _getPort,
-    sendToAll: _sendToAll
+    sendToAll: _sendToAll,
+    isRelayableAction: _isRelayableAction
 };

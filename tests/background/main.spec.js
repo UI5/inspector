@@ -100,6 +100,16 @@ function sendMessage(action) {
     });
 }
 
+function sendMessageFrom(action, sender, extra) {
+    var msg = { action: action };
+    if (extra) {
+        Object.keys(extra).forEach(function (k) { msg[k] = extra[k]; });
+    }
+    onMessageListeners.forEach(function (fn) {
+        fn(msg, sender, function () {});
+    });
+}
+
 describe('background/main.js — devtools port lifecycle', function () {
 
     beforeEach(function () {
@@ -246,6 +256,72 @@ describe('background/main.js — devtools port lifecycle', function () {
 
         return tick().then(function () {
             window.chrome.contextMenus.removeAll.callCount.should.equal(0);
+        });
+    });
+});
+
+describe('background/main.js — privileged action sender validation', function () {
+
+    beforeEach(function () {
+        // ContextMenu.spec.js may replace window.chrome with chrome-stub (no
+        // .scripting); reinstall what these tests need before each run.
+        if (!window.chrome.scripting) {
+            window.chrome.scripting = {};
+        }
+        if (!window.chrome.runtime) {
+            window.chrome.runtime = {};
+        }
+        window.chrome.runtime.id = 'test-extension-id';
+        window.chrome.scripting.executeScript = sinon.spy(function () { return Promise.resolve(); });
+        // do-script-injection resolves the active tab before injecting; ensure
+        // these return promises even if another spec replaced window.chrome.
+        window.chrome.windows = window.chrome.windows || {};
+        window.chrome.windows.getCurrent = function () { return Promise.resolve({ id: 1 }); };
+        window.chrome.tabs = window.chrome.tabs || {};
+        window.chrome.tabs.query = function () { return Promise.resolve([{ id: 1 }]); };
+    });
+
+    it('should NOT run script injection for a forged do-script-injection from a page/content origin', function () {
+        // A page-origin sender carries sender.tab.
+        sendMessageFrom('do-script-injection', { tab: { id: 1 }, id: 'test-extension-id', file: '/x.js' });
+
+        window.chrome.scripting.executeScript.callCount.should.equal(0);
+    });
+
+    it('should run script injection for a legitimate do-script-injection from the extension (panel/popup) origin', function () {
+        // An extension-internal sender has no tab and matches chrome.runtime.id.
+        sendMessageFrom('do-script-injection', { id: 'test-extension-id', file: '/x.js' });
+
+        return tick().then(function () {
+            window.chrome.scripting.executeScript.callCount.should.be.above(0);
+        });
+    });
+
+    it('should inject into the inspected tab (message.tabId), not the active tab', function () {
+        // Active tab is 1 (chrome.tabs.query stub); the panel inspects tab 202.
+        // The injection must target 202 — binding to the inspected tab, not the
+        // ambient active tab (cross-tab confused-deputy, HASI2026375-3390).
+        sendMessageFrom('do-script-injection',
+            { id: 'test-extension-id' },
+            { tabId: 202, file: '/x.js' });
+
+        return tick().then(function () {
+            window.chrome.scripting.executeScript.callCount.should.be.above(0);
+            var arg = window.chrome.scripting.executeScript.firstCall.args[0];
+            arg.target.tabId.should.equal(202);
+        });
+    });
+
+    it('should fall back to the active tab when no tabId is supplied', function () {
+        // Legacy callers that omit tabId keep the active-tab behaviour (id 1).
+        sendMessageFrom('do-script-injection',
+            { id: 'test-extension-id' },
+            { file: '/x.js' });
+
+        return tick().then(function () {
+            window.chrome.scripting.executeScript.callCount.should.be.above(0);
+            var arg = window.chrome.scripting.executeScript.firstCall.args[0];
+            arg.target.tabId.should.equal(1);
         });
     });
 });
