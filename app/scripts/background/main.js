@@ -1,11 +1,11 @@
 (function () {
     'use strict';
 
-    var utils = require('../modules/utils/utils.js');
-    var ContextMenu = require('../modules/background/ContextMenu.js');
-    var pageAction = require('../modules/background/pageAction.js');
+    const utils = require('../modules/utils/utils.js');
+    const ContextMenu = require('../modules/background/ContextMenu.js');
+    const pageAction = require('../modules/background/pageAction.js');
 
-    var contextMenu = new ContextMenu({
+    const contextMenu = new ContextMenu({
         title: 'Inspect UI5 element',
         id: 'context-menu',
         contexts: ['all']
