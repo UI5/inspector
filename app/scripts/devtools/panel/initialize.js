@@ -3,7 +3,21 @@
 var utils = require('../../modules/utils/utils.js');
 
 // Create a port with background page for continuous message communication
-var port = utils.getPort();
+var messagePort = utils.getPort();
+
+// Persistent connection so the background knows when DevTools close.
+// Reconnects on disconnect to handle service worker eviction/respawn cycles —
+// without this, the respawned worker never gets an onDisconnect listener for
+// the existing port, so closing DevTools wouldn't clear the context menu.
+// No explicit stop condition is needed: when DevTools actually closes (rather
+// than the worker being evicted), this page is torn down, so the one reconnect
+// attempt that onDisconnect triggers runs into an unloading context and nothing
+// further executes. There is no closure state across calls, so no leak.
+function connectDevtoolsPort() {
+    var port = chrome.runtime.connect({ name: 'devtools' });
+    port.onDisconnect.addListener(connectDevtoolsPort);
+}
+connectDevtoolsPort();
 
 /**
  * Find the ID of the nearest UI5 control from the current selected element in Chrome elements panel.
@@ -24,12 +38,15 @@ function _getNearestUI5ControlID(selectedElement) {
 
 chrome.devtools.panels.create('UI5', '/images/icon-128.png', '/html/panel/ui5/index.html', function (panel) {
     panel.onHidden.addListener(function () {
-        port.postMessage({
+        messagePort.postMessage({
+            action: 'on-hide-highlight'
+        });
+        messagePort.postMessage({
             action: 'on-ui5-devtool-hide'
         });
     });
     panel.onShown.addListener(function () {
-        port.postMessage({
+        messagePort.postMessage({
             action: 'on-ui5-devtool-show'
         });
     });
@@ -45,7 +62,7 @@ chrome.devtools.panels.elements.onSelectionChanged.addListener(function () {
             return;
         }
 
-        port.postMessage({
+        messagePort.postMessage({
             action: 'on-select-ui5-control-from-element-tab',
             nearestUI5Control: elementId
         });

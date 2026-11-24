@@ -32,6 +32,7 @@ CLAUDE.md
 .scratch/
 docs/adr/
 docs/agents/
+docs/superpowers/
 CONTEXT.md
 prompt.md
 
