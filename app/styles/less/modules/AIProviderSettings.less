@@ -1,0 +1,152 @@
+// AIProviderSettings modal
+
+.ai-settings-host {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    z-index: 1000;
+}
+
+.ai-settings-dialog {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: all;
+
+    .settings-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(2px);
+    }
+
+    .settings-content {
+        position: relative;
+        background: @bg-white;
+        border-radius: 8px;
+        padding: 24px;
+        max-width: 420px;
+        width: 90%;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        z-index: 1;
+        animation: confirmSlideIn 0.2s ease-out;
+    }
+
+    .settings-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: @text-color;
+        margin-bottom: 16px;
+    }
+
+    .settings-body {
+        margin-bottom: 20px;
+    }
+
+    .settings-field {
+        margin-bottom: 12px;
+
+        &:last-child {
+            margin-bottom: 0;
+        }
+    }
+
+    .settings-label {
+        display: block;
+        font-size: 12px;
+        font-weight: 600;
+        color: @text-color;
+        margin-bottom: 4px;
+    }
+
+    .settings-select,
+    .settings-input {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid @border-gray-lighter;
+        border-radius: 4px;
+        font-family: inherit;
+        font-size: 13px;
+        background-color: @bg-white;
+        color: @text-color;
+        box-sizing: border-box;
+
+        &:focus {
+            outline: none;
+            border-color: @lighter-blue;
+            box-shadow: 0 0 0 2px fade(@lighter-blue, 10%);
+        }
+    }
+
+    .settings-buttons {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+    }
+
+    .settings-button {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        transition: background-color 0.2s;
+
+        &.settings-cancel {
+            background-color: @bg-gray-lightest;
+            color: @text-color;
+
+            &:hover {
+                background-color: darken(@bg-gray-lightest, 10%);
+            }
+        }
+
+        &.settings-save {
+            background-color: @lighter-blue;
+            color: @white;
+
+            &:hover {
+                background-color: darken(@lighter-blue, 10%);
+            }
+        }
+    }
+}
+
+// Gear icon button in the AI status banner
+.ai-settings-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: @gray-dark;
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-left: 4px;
+    transition: color 0.15s, background-color 0.15s;
+
+    &:hover {
+        color: @text-color;
+        background-color: fade(@gray, 15%);
+    }
+
+    svg {
+        display: block;
+    }
+}
