@@ -26,7 +26,7 @@ var mockDataWithNestedObject = {
 
     'properties': {
         'options': {
-            'title': '<anchor>#__button0</anchor> (sap.m.Button)',
+            'title': '#<span class="controlId" data-control-id="button_0">button_0</span><span gray>(sap.m.Button)</span>',
             'expandable': true,
             'editableValues': true,
             'showTypeInfo': true,
@@ -56,7 +56,7 @@ var mockDataWithTypes = {
 
     'properties': {
         'options': {
-            'title': '<anchor>#__button0</anchor> (sap.m.Button)',
+            'title': '#<span class="controlId" data-control-id="button_0">button_0</span><span gray>(sap.m.Button)</span>',
             'expandable': true,
             'editableValues': true,
             'showTypeInfo': true,
@@ -233,7 +233,9 @@ var clickableValueData = {
                         listMode: 'SingleSelectMaster'
                     }
                 },
-                value: '<clickable-value key="model" parent="counter">entity (TwoWay, JSONModel)</clickable-value>',
+                clickableKey: 'model',
+                clickableParent: 'counter',
+                clickableText: 'entity (TwoWay, JSONModel)',
                 path: 'sampleCount',
                 type: 'int'
             }
@@ -265,7 +267,7 @@ var SIMPLE_HTML_OUTPUT = '<ul expandable="true"><li><arrow right="true"></arrow>
 
 var COMPLEX_HTML_OUTPUT = '<ul expanded="true"><li><section-title>#__item0-__xmlview0--list-0-selectSingleMaster (sap.m.RadioButton)</section-title><ul expanded="true"><li><key>enabled</key>:&nbsp;<value>true</value></li><li><key>selected</key>:&nbsp;<value>false</value></li><li><key>groupName</key>:&nbsp;"<value>__xmlview0--list_selectMasterGroup</value>"</li><li><key>text</key>:&nbsp;"<value></value>"</li><li><key>textDirection</key>:&nbsp;"<value>Inherit</value>"</li><li><key>width</key>:&nbsp;"<value></value>"</li><li><key>activeHandling</key>:&nbsp;<value>false</value></li><li><key>editable</key>:&nbsp;<value>true</value></li><li><key>valueState</key>:&nbsp;"<value>None</value>"</li></ul></li></ul><ul expanded="true"><li><section-title><span gray="">sap.m.StandardListItem</span></section-title><ul expanded="true"><li><key>title</key>:&nbsp;"<value>Action Sheet</value>"</li><li><key>description</key>:&nbsp;"<value></value>"</li><li><key>icon</key>:&nbsp;"<value></value>"</li><li><key>iconInset</key>:&nbsp;<value>true</value></li><li><key>iconDensityAware</key>:&nbsp;<value>true</value></li><li><key>activeIcon</key>:&nbsp;"<value></value>"</li><li><key>info</key>:&nbsp;"<value></value>"</li><li><key>infoState</key>:&nbsp;"<value>None</value>"</li><li><key>adaptTitleSize</key>:&nbsp;<value>true</value></li></ul></li></ul><ul expanded="true"><li><section-title><span gray="">sap.m.List</span></section-title><ul expanded="true"><li><key>backgroundDesign</key>:&nbsp;"<value>Solid</value>"</li></ul></li></ul><ul expanded="true"><li><section-title><span gray="">sap.m.Page</span></section-title><ul expanded="true"><li><key>title</key>:&nbsp;"<value></value>"</li><li><key>showNavButton</key>:&nbsp;<value>false</value></li><li><key>showHeader</key>:&nbsp;<value>true</value></li><li><key>navButtonText</key>:&nbsp;"<value></value>"</li><li><key>enableScrolling</key>:&nbsp;<value>true</value></li><li><key>icon</key>:&nbsp;"<value></value>"</li><li><key>backgroundDesign</key>:&nbsp;"<value>Standard</value>"</li><li><key>navButtonType</key>:&nbsp;"<value>Back</value>"</li><li><key>showFooter</key>:&nbsp;<value>true</value></li></ul></li></ul><ul expanded="true"><li><section-title><span gray="">sap.ui.core.mvc.XMLView</span></section-title><ul expanded="true"><li><no-data>No Available Data</no-data></li></ul></li></ul><ul expanded="true"><li><section-title><span gray="">sap.m.NavContainer</span></section-title><ul expanded="true"><li><key>height</key>:&nbsp;"<value>100%</value>"</li><li><key>width</key>:&nbsp;"<value></value>"</li><li><key>visible</key>:&nbsp;<value>true</value></li><li><key>defaultTransitionName</key>:&nbsp;"<value>slide</value>"</li><li><key>initialPage</key>:&nbsp;"<value> (sap.ui.core.Control) (associations)</value>"</li></ul></li></ul><ul expanded="true"><li><section-title><span gray="">sap.m.SplitApp</span></section-title><ul expanded="true"><li><key>homeIcon</key>:&nbsp;<value>null</value></li></ul></li></ul><ul expanded="true"><li><section-title><span gray="">sap.ui.core.mvc.JSView</span></section-title><ul expanded="true"><li><no-data>No Available Data</no-data></li></ul></li></ul>';
 
-var SECTION_TITLE = '<ul expandable="true"><li><arrow right="true"></arrow><section-title><anchor>#__button0</anchor> (sap.m.Button)</section-title></li></ul>';
+var SECTION_TITLE = '<ul expandable="true"><li><arrow right="true"></arrow><section-title>#<span class="controlId" data-control-id="button_0">button_0</span><span gray>(sap.m.Button)</span></section-title></li></ul>';
 
 var SECTION_HTML = '<ul expandable="true"><li><key>title</key>:&nbsp;&quot;<value contentEditable="true" data-control-id="button_0" data-property-name="title">Simple Form</value>&quot;</li><li><key>description</key>:&nbsp;&quot;<value contentEditable="true" data-control-id="button_0" data-property-name="description"></value>&quot;</li><li><key>icon</key>:&nbsp;&quot;<value contentEditable="true" data-control-id="button_0" data-property-name="icon"></value>&quot;</li><li><key>iconInset</key>:&nbsp;<value contentEditable="true" data-control-id="button_0" data-property-name="iconInset">true</value></li><li><key>iconDensityAware</key>:&nbsp;<value contentEditable="true" data-control-id="button_0" data-property-name="iconDensityAware">true</value></li><li><key>activeIcon</key>:&nbsp;&quot;<value contentEditable="true" data-control-id="button_0" data-property-name="activeIcon">sap://icon</value>&quot;</li><li><key>infoState</key>:&nbsp;&quot;<value contentEditable="true" data-control-id="button_0" data-property-name="infoState">None</value>&quot;</li><li><key>adaptTileSize</key>:&nbsp;<value contentEditable="true" data-control-id="button_0" data-property-name="adaptTileSize">true</value></li><li><key>titleTextDirection</key>:&nbsp;&quot;<value contentEditable="true" data-control-id="button_0" data-property-name="titleTextDirection">inherit</value>&quot;</li><li><key>infoTextDirection</key>:&nbsp;&quot;<value contentEditable="true" data-control-id="button_0" data-property-name="infoTextDirection">inherit</value>&quot;</li><li><arrow down="true"></arrow><section-title>Associations</section-title><ul expandable="true" expanded="true"><li><key>key1</key>:&nbsp;&quot;<value>sap.m.Bar</value>&quot;</li><li><key>key2</key>:&nbsp;&quot;<value>sap.m.Button</value>&quot;</li></ul></li><li><key>ariaDescribedBy</key>:&nbsp;<value>sap.ui.core.Control</value></li><li><key>ariaLabelledBy</key>:&nbsp;<value>sap.ui.core.Control</value></li></ul>';
 
@@ -339,6 +341,74 @@ describe('DataView', function () {
 
         it('should assign a default function for onValueClick ', function () {
             expect(sampleView.onValueClick).to.be.an.instanceof(Function);
+        });
+
+        it('should NOT inject markup from a forged section title', function () {
+            var dataViewElement = document.getElementById('data-view');
+            sampleView.setData({
+                props: {
+                    options: {
+                        title: '<img src=x onerror="alert(1)">',
+                        expandable: true,
+                        expanded: true
+                    },
+                    data: { a: '1' }
+                }
+            });
+            expect(dataViewElement.querySelector('img')).to.equal(null);
+            expect(dataViewElement.innerHTML).to.contain('&lt;img');
+        });
+
+        it('should keep a legitimate controlId title clickable (span.controlId preserved)', function () {
+            var dataViewElement = document.getElementById('data-view');
+            sampleView.setData({
+                props: {
+                    options: {
+                        title: '#<span class="controlId" data-control-id="button_0">button_0</span><span gray>(sap.m.Button)</span>',
+                        expandable: true,
+                        expanded: true
+                    },
+                    data: { a: '1' }
+                }
+            });
+            var controlIdSpan = dataViewElement.querySelector('span.controlId');
+            expect(controlIdSpan).to.not.equal(null);
+            expect(controlIdSpan.getAttribute('data-control-id')).to.equal('button_0');
+        });
+
+        it('should render the <opaque> scaffold in a binding title as a real element, not escaped text', function () {
+            var dataViewElement = document.getElementById('data-view');
+            sampleView.setData({
+                counter: {
+                    options: {
+                        title: 'counter <opaque>(property)</opaque>',
+                        expandable: true,
+                        expanded: true
+                    },
+                    data: { a: '1' }
+                }
+            });
+            expect(dataViewElement.querySelector('opaque')).to.not.equal(null);
+            expect(dataViewElement.querySelector('opaque').textContent).to.equal('(property)');
+            expect(dataViewElement.innerHTML).to.not.contain('&lt;opaque&gt;');
+        });
+
+        it('should render the classic controlId title (with copy-to-console attr) and a raw id correctly', function () {
+            var dataViewElement = document.getElementById('data-view');
+            sampleView.setData({
+                props: {
+                    options: {
+                        title: '#<span class="controlId" data-control-id="my&Control" title="Click to copy control to console">my&Control</span><span gray>(sap.m.Button)</span>',
+                        expandable: true,
+                        expanded: true
+                    },
+                    data: { a: '1' }
+                }
+            });
+            var controlIdSpan = dataViewElement.querySelector('span.controlId');
+            expect(controlIdSpan).to.not.equal(null);
+            expect(controlIdSpan.getAttribute('data-control-id')).to.equal('my&Control');
+            expect(controlIdSpan.textContent).to.equal('my&Control');
         });
 
         describe('#setData()', function () {
@@ -827,11 +897,49 @@ describe('DataView', function () {
             clickableView._onClickHandler();
             clickableElement = dataViewElement.querySelector('clickable-value');
             clickableView._DataViewContainer.onclick({target: clickableElement});
+            onValueClickSpy.calledOnce.should.be.equal(true);
             onValueClickSpy.calledWith({
                 target: 'model',
-                eventData: clickableValueData.counter.data.model.eventData
-            });
+                data: clickableValueData.counter.data.model.eventData
+            }).should.be.equal(true);
             clickHandlerSpy.calledOnce.should.be.equal(true);
+        });
+
+        it('should render the clickable-value element (not escaped text)', function () {
+            var dataViewElement = document.getElementById('data-view');
+            clickableView._onClickHandler();
+            expect(dataViewElement.querySelector('clickable-value')).to.not.equal(null);
+        });
+
+        it('should NOT inject markup from a forged clickable value payload', function () {
+            var forgedView = new DataViewComponent('data-view', {
+                data: {
+                    counter: {
+                        data: {
+                            evil: {
+                                _isClickableValueForDataView: true,
+                                clickableKey: 'evil',
+                                clickableParent: 'counter',
+                                clickableText: '<img src=x onerror="alert(1)">',
+                                eventData: {}
+                            }
+                        },
+                        options: {
+                            controlId: undefined,
+                            editableValues: false,
+                            expandable: false,
+                            expanded: true,
+                            hideTitle: false,
+                            showTypeInfo: false,
+                            title: 'counter'
+                        }
+                    }
+                }
+            });
+            var dataViewElement = document.getElementById('data-view');
+            forgedView._onClickHandler();
+            expect(dataViewElement.querySelector('img')).to.equal(null);
+            expect(dataViewElement.innerHTML).to.contain('&lt;img');
         });
 
     });
@@ -918,10 +1026,11 @@ describe('DataView', function () {
                 sampleView.setData(clickableValueData);
                 clickableElement = dataViewElement.querySelector('clickable-value');
                 sampleView._DataViewContainer.onclick({target: clickableElement});
+                onValueClickSpy.calledOnce.should.be.equal(true);
                 onValueClickSpy.calledWith({
                     target: 'model',
-                    eventData: clickableValueData.counter.data.model.eventData
-                });
+                    data: clickableValueData.counter.data.model.eventData
+                }).should.be.equal(true);
             });
 
         });
@@ -1110,5 +1219,71 @@ describe('DataView', function () {
 
         });
 
+    });
+
+    describe('Security - HTML escaping of page-controlled data', function () {
+        var sampleView;
+        var xssPayload = 'x"><img src=x onerror="window.__xss=true">';
+
+        beforeEach(function () {
+            window.__xss = undefined;
+        });
+
+        afterEach(function () {
+            delete window.__xss;
+        });
+
+        it('should not inject markup from a malicious property key', function () {
+            var data = {};
+            data[xssPayload] = 'someValue';
+
+            sampleView = new DataViewComponent('data-view', {
+                data: {
+                    own: {
+                        options: {title: 'Own', expandable: true, expanded: true},
+                        data: data
+                    }
+                }
+            });
+
+            var el = document.getElementById('data-view');
+            expect(el.querySelector('img')).to.be.null;
+            expect(window.__xss).to.be.undefined;
+        });
+
+        it('should not inject markup via an editable controlId attribute and should round-trip it', function () {
+            sampleView = new DataViewComponent('data-view', {
+                data: {
+                    own: {
+                        options: {title: 'Own', expandable: true, expanded: true, editableValues: true, controlId: xssPayload},
+                        data: {someKey: 'someValue'}
+                    }
+                }
+            });
+
+            var el = document.getElementById('data-view');
+            expect(el.querySelector('img')).to.be.null;
+            expect(window.__xss).to.be.undefined;
+
+            var withId = el.querySelector('[data-control-id]');
+            withId.should.not.be.null;
+            withId.getAttribute('data-control-id').should.equal(xssPayload);
+        });
+
+        it('should not inject markup from a malicious association string', function () {
+            sampleView = new DataViewComponent('data-view', {
+                data: {
+                    own: {
+                        options: {title: 'Own', expandable: true, expanded: true},
+                        data: {someKey: 'someValue'},
+                        associations: {assoc: xssPayload}
+                    }
+                }
+            });
+
+            var el = document.getElementById('data-view');
+            expect(el.querySelector('img')).to.be.null;
+            expect(window.__xss).to.be.undefined;
+        });
     });
 });

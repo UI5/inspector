@@ -1,16 +1,6 @@
 'use strict';
 
-var _ = require('lodash');
-
-/**
- * Escape HTML special characters.
- * @param {string} value - String to escape
- * @returns {string} - Escaped string
- * @private
- */
-function _escapeHTML(value) {
-    return _.escape(value);
-}
+var _escapeHTML = require('../../utils/EscapeHelper.js').escapeHTML;
 
 /**
  * Generates attributes in HTML.
@@ -23,7 +13,9 @@ function _generateTagAttributes(attributes) {
     var html = '';
     if (attributes) {
         for (var key in attributes) {
-            html += ' ' + key + '="' + attributes[key] + '"';
+            // Attribute values can be dynamic (e.g. data-control-id from
+            // control.getId()); escape them before putting them in the attribute.
+            html += ' ' + key + '="' + _escapeHTML(attributes[key]) + '"';
         }
     }
     return html;
@@ -75,7 +67,7 @@ function _closeLI() {
  * @private
  */
 function _addToolsButtons(options, type) {
-    return '<button class="tools-button" id="control-' + type.toLowerCase() + '" data-control-id="' + options.controlId + '">' + type + '</button>';
+    return '<button class="tools-button" id="control-' + type.toLowerCase() + '" data-control-id="' + _escapeHTML(options.controlId) + '">' + type + '</button>';
 }
 
 /**
@@ -374,7 +366,17 @@ function _formatValueForDataView(key, currentElement) {
     var requiredFormat = {
         data: {}
     };
-    requiredFormat.data[key] = currentElement.value;
+    requiredFormat.isClickableValue = currentElement._isClickableValueForDataView === true;
+
+    if (requiredFormat.isClickableValue) {
+        // Build the clickable-value element here, escaping each part, rather
+        // than taking a pre-built HTML string.
+        requiredFormat.data[key] = '<clickable-value key="' + _escapeHTML(currentElement.clickableKey) +
+            '" parent="' + _escapeHTML(currentElement.clickableParent) + '">' +
+            _escapeHTML(currentElement.clickableText) + '</clickable-value>';
+    } else {
+        requiredFormat.data[key] = currentElement.value;
+    }
 
     return requiredFormat;
 }
@@ -438,9 +440,6 @@ function _cleanDuplicateClasses(value) {
  * @private
  */
 function _formatHTMLString(value) {
-    if (value.includes('clickable-value')) {
-        return value;
-    }
     return _escapeHTML(_cleanDuplicateClasses(value));
 }
 

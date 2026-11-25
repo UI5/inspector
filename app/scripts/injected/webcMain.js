@@ -49,7 +49,11 @@
 
     var TREE_UPDATE_DEBOUNCE_MS = 150;
 
-    // Build the section title HTML used by all DataView formatters
+    // Build the section title HTML used by all DataView formatters. The id and
+    // name are passed RAW: the panel's sanitizeSectionTitle escapes the whole
+    // title once and restores this span scaffold, decoding the id for display
+    // and keeping the data-control-id attribute correctly escaped. Pre-escaping
+    // here would double-escape (see EscapeHelper.js).
     function _buildSectionTitle(controlId, controlName) {
         return '#<span class="controlId" data-control-id="' + controlId + '">' + controlId +
             '</span><span gray>(' + controlName + ')</span>';
@@ -117,6 +121,7 @@
         for (var key in slots) {
             formattedSlots[key] = {
                 options: {
+                    // Raw: the panel's sanitizeSectionTitle escapes titles once.
                     title: key,
                     expandable: true,
                     expanded: !!slots[key].value,
@@ -184,20 +189,6 @@
             },
             data: data
         };
-    }
-
-    // Escape HTML-significant characters. The DataView escapes string *values*
-    // but not section *titles* or *keys* (DataViewHelper._wrapInTag interpolates
-    // them raw). Any page-controlled string that ends up in a title/key — e.g. a
-    // runtime's alias or scoping suffix — must be escaped here first, otherwise a
-    // hostile page could inject markup into the DevTools panel.
-    function _escapeHTML(value) {
-        return String(value)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
     }
 
     // Stringify a configuration value for display in the App Info tab.
@@ -303,14 +294,15 @@
     // A concise per-runtime label, e.g. "Runtime 0 — v2.19.0 (myapp)" or,
     // when there's no alias, "Runtime 0 — v2.19.0 [scoping-suffix]". The
     // version/alias/scoping-suffix are page-controlled and land in a section
-    // title, so escape them (the DataView does not escape titles).
+    // title; they are passed RAW and the panel's sanitizeSectionTitle escapes
+    // the whole label once (it has no span scaffold, so it is escaped wholesale).
     function _runtimeLabel(rt, total) {
         var label = 'Runtime ' + _padIndex(rt.index, total || 1) +
-            ' — v' + _escapeHTML(rt.version || 'unknown');
+            ' — v' + (rt.version || 'unknown');
         if (rt.alias) {
-            label += ' (' + _escapeHTML(rt.alias) + ')';
+            label += ' (' + rt.alias + ')';
         } else if (rt.scopingSuffix) {
-            label += ' [' + _escapeHTML(rt.scopingSuffix) + ']';
+            label += ' [' + rt.scopingSuffix + ']';
         }
         return label;
     }
@@ -367,9 +359,9 @@
         var title = 'UI5 Web Components';
         if (runtimes.length > 1) {
             title += ' — ' + runtimes.length + ' runtimes (primary v' +
-                _escapeHTML(common.version || 'unknown') + ')';
+                (common.version || 'unknown') + ')';
         } else if (common.version) {
-            title += ' (v' + _escapeHTML(common.version) + ')';
+            title += ' (v' + common.version + ')';
         }
 
         return {

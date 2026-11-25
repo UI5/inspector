@@ -1,5 +1,7 @@
 'use strict';
 
+var _escapeHTML = require('../utils/EscapeHelper.js').escapeHTML;
+
 /**
  * @typedef {Object} ControlTree
  * @property {Object} data - This property should contain objects described in ControlTreeOptions
@@ -52,7 +54,7 @@ function _createTreeHeader(versionInfo) {
         return '';
     }
 
-    return '<ul><li visible><version>&#60;!' + versionInfo.framework + ' v' + versionInfo.version + '&#62;</version></li></ul>';
+    return '<ul><li visible><version>&#60;!' + _escapeHTML(versionInfo.framework) + ' v' + _escapeHTML(versionInfo.version) + '&#62;</version></li></ul>';
 }
 
 /**
@@ -78,7 +80,7 @@ function _endControlTreeList() {
  * @private
  */
 function _startControlTreeListItem(options) {
-    return '<li id="' + options.id + '">';
+    return '<li id="' + _escapeHTML(options.id) + '">';
 }
 
 /**
@@ -121,11 +123,11 @@ function _getControlTreeRightColumnOfListItem(control) {
     var name = splitControlName[splitControlName.length - 1];
     var nameSpace = control.name.replace(name, '');
 
-    return '<tag data-search="' + control.name + control.id + '">' +
+    return '<tag data-search="' + _escapeHTML(control.name + control.id) + '">' +
         '&#60;' +
-        '<namespace>' + nameSpace + '</namespace>' +
-        name +
-        '<attribute>&#32;id="<attribute-value>' + control.id + '</attribute-value>"</attribute>' +
+        '<namespace>' + _escapeHTML(nameSpace) + '</namespace>' +
+        _escapeHTML(name) +
+        '<attribute>&#32;id="<attribute-value>' + _escapeHTML(control.id) + '</attribute-value>"</attribute>' +
         '&#62;' +
         '</tag>';
 }

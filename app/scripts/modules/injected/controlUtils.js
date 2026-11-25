@@ -48,8 +48,11 @@ function _getElementById(sId) {
 function ClickableValue(options) {
     // This is used for checking in the dataView
     this._isClickableValueForDataView = true;
-    // This is shown in the data view
-    this.value = '<clickable-value key="' + options.key + '" parent="' + options.parent + '">' + (options.value || '') + '</clickable-value>';
+    // Store raw parts; the panel escapes them when it builds the
+    // <clickable-value> element. Don't pre-build markup here.
+    this.clickableKey = options.key;
+    this.clickableParent = options.parent;
+    this.clickableText = options.value || '';
     // This data is attached in the click event of the dataview
     this.eventData = options.eventData || {};
 }

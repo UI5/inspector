@@ -107,6 +107,10 @@
      * Listener for messages from the injected script.
      */
     document.addEventListener('ui5-communication-with-content-script', function sendEvent(detectEvent) {
+        // Only relay allowlisted actions; this CustomEvent can carry any action.
+        if (!detectEvent.detail || !utils.isRelayableAction(detectEvent.detail.action)) {
+            return;
+        }
         // Send the received event detail object to background page
         port.postMessage(detectEvent.detail);
     }, false);

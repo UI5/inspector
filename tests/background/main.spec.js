@@ -100,6 +100,16 @@ function sendMessage(action) {
     });
 }
 
+function sendMessageFrom(action, sender, extra) {
+    var msg = { action: action };
+    if (extra) {
+        Object.keys(extra).forEach(function (k) { msg[k] = extra[k]; });
+    }
+    onMessageListeners.forEach(function (fn) {
+        fn(msg, sender, function () {});
+    });
+}
+
 describe('background/main.js — devtools port lifecycle', function () {
 
     beforeEach(function () {
@@ -246,6 +256,62 @@ describe('background/main.js — devtools port lifecycle', function () {
 
         return tick().then(function () {
             window.chrome.contextMenus.removeAll.callCount.should.equal(0);
+        });
+    });
+});
+
+describe('background/main.js — privileged action sender validation', function () {
+
+    beforeEach(function () {
+        if (!window.chrome.scripting) {
+            window.chrome.scripting = {};
+        }
+        if (!window.chrome.runtime) {
+            window.chrome.runtime = {};
+        }
+        window.chrome.runtime.id = 'test-extension-id';
+        window.chrome.scripting.executeScript = sinon.spy(function () { return Promise.resolve(); });
+        window.chrome.windows = window.chrome.windows || {};
+        window.chrome.windows.getCurrent = function () { return Promise.resolve({ id: 1 }); };
+        window.chrome.tabs = window.chrome.tabs || {};
+        window.chrome.tabs.query = function () { return Promise.resolve([{ id: 1 }]); };
+    });
+
+    it('should NOT run script injection for a forged do-script-injection from a page/content origin', function () {
+        sendMessageFrom('do-script-injection', { tab: { id: 1 }, id: 'test-extension-id', file: '/x.js' });
+
+        window.chrome.scripting.executeScript.callCount.should.equal(0);
+    });
+
+    it('should run script injection for a legitimate do-script-injection from the extension (panel/popup) origin', function () {
+        sendMessageFrom('do-script-injection', { id: 'test-extension-id', file: '/x.js' });
+
+        return tick().then(function () {
+            window.chrome.scripting.executeScript.callCount.should.be.above(0);
+        });
+    });
+
+    it('should inject into the inspected tab (message.tabId), not the active tab', function () {
+        sendMessageFrom('do-script-injection',
+            { id: 'test-extension-id' },
+            { tabId: 202, file: '/x.js' });
+
+        return tick().then(function () {
+            window.chrome.scripting.executeScript.callCount.should.be.above(0);
+            var arg = window.chrome.scripting.executeScript.firstCall.args[0];
+            arg.target.tabId.should.equal(202);
+        });
+    });
+
+    it('should fall back to the active tab when no tabId is supplied', function () {
+        sendMessageFrom('do-script-injection',
+            { id: 'test-extension-id' },
+            { file: '/x.js' });
+
+        return tick().then(function () {
+            window.chrome.scripting.executeScript.callCount.should.be.above(0);
+            var arg = window.chrome.scripting.executeScript.firstCall.args[0];
+            arg.target.tabId.should.equal(1);
         });
     });
 });

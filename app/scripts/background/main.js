@@ -1,15 +1,35 @@
 (function () {
     'use strict';
 
-    var utils = require('../modules/utils/utils.js');
-    var ContextMenu = require('../modules/background/ContextMenu.js');
-    var pageAction = require('../modules/background/pageAction.js');
+    const utils = require('../modules/utils/utils.js');
+    const ContextMenu = require('../modules/background/ContextMenu.js');
+    const pageAction = require('../modules/background/pageAction.js');
 
-    var contextMenu = new ContextMenu({
+    const contextMenu = new ContextMenu({
         title: 'Inspect UI5 element',
         id: 'context-menu',
         contexts: ['all']
     });
+
+    /**
+     * Resolve the tab an action must target. The DevTools panel knows the
+     * inspected tab and sends it as message.tabId (inspectedWindow.tabId);
+     * using it keeps injection/routing bound to that tab. Only when a caller
+     * omits it do we fall back to the current window's active tab (legacy
+     * behaviour, kept so callers that never carried a tabId don't break).
+     * @param {Object} message
+     * @returns {Promise<number>}
+     */
+    function resolveInspectedTabId(message) {
+        if (message && message.tabId !== undefined) {
+            return Promise.resolve(message.tabId);
+        }
+        return chrome.windows.getCurrent().then(function (w) {
+            return chrome.tabs.query({ active: true, windowId: w.id }).then(function (tabs) {
+                return tabs[0].id;
+            });
+        });
+    }
 
     /**
      * Persist the UI5 panel visibility state in session storage so it survives
@@ -31,9 +51,16 @@
      * @param {Object} tab - The details of the tab where the click took place.
      */
     contextMenu.onClicked = function (info, tab) {
+        // The menu's tab (from chrome.contextMenus.onClicked) is the target.
+        // If it is somehow absent, don't dispatch rather than fall back to the
+        // active tab, which could be a different tab than the one clicked.
+        if (!tab || tab.id === undefined) {
+            return;
+        }
         utils.sendToAll({
             action: 'do-context-menu-control-select',
             target: contextMenu._rightClickTarget,
+            tabId: tab.id,
             // specify the frame in which the user clicked
             frameId: info.frameId
         });
@@ -75,60 +102,59 @@
          */
         'do-script-injection': function (message) {
             const frameId = message.frameId;
-            chrome.windows.getCurrent().then(w => {
-                chrome.tabs.query({ active: true, windowId: w.id }).then(tabs => {
-                    const target = {
-                        tabId: tabs[0].id
-                    };
-                    // inject the script only into the frame
-                    // specified in the request from the devTools UI5 panel script;
-                    // If no frameId specified, the script will be injected into the main frame
-                    if (frameId !== undefined) {
-                        target.frameIds = [message.frameId];
-                    }
-                    chrome.scripting.executeScript({
-                        target,
-                        files: [message.file]
-                    });
+            // Target the tab the DevTools panel is inspecting (message.tabId ===
+            // inspectedWindow.tabId, set by the panel), not whichever tab is
+            // active — the active tab can change during the async hop.
+            resolveInspectedTabId(message).then(tabId => {
+                const target = {
+                    tabId: tabId
+                };
+                // inject the script only into the frame
+                // specified in the request from the devTools UI5 panel script;
+                // If no frameId specified, the script will be injected into the main frame
+                if (frameId !== undefined) {
+                    target.frameIds = [message.frameId];
+                }
+                chrome.scripting.executeScript({
+                    target,
+                    files: [message.file]
                 });
             });
         },
 
         'do-webc-injection': function (message) {
             const frameId = message.frameId;
-            chrome.windows.getCurrent().then(w => {
-                chrome.tabs.query({ active: true, windowId: w.id }).then(tabs => {
-                    const target = {
-                        tabId: tabs[0].id
-                    };
-                    if (frameId !== undefined) {
-                        target.frameIds = [message.frameId];
-                    }
-                    // 1. Inject the isolated-world message bridge (mirrors
-                    //    content/main.js for classic UI5).
-                    chrome.scripting.executeScript({
+            resolveInspectedTabId(message).then(tabId => {
+                const target = {
+                    tabId: tabId
+                };
+                if (frameId !== undefined) {
+                    target.frameIds = [message.frameId];
+                }
+                // 1. Inject the isolated-world message bridge (mirrors
+                //    content/main.js for classic UI5).
+                return chrome.scripting.executeScript({
+                    target,
+                    files: ['/scripts/content/webcMain.js']
+                }).then(() => {
+                    // 2. Inject the tools API into the page's MAIN world so
+                    //    it can see the framework classes / isUI5Element.
+                    return chrome.scripting.executeScript({
                         target,
-                        files: ['/scripts/content/webcMain.js']
-                    }).then(() => {
-                        // 2. Inject the tools API into the page's MAIN world so
-                        //    it can see the framework classes / isUI5Element.
-                        return chrome.scripting.executeScript({
-                            target,
-                            files: ['/vendor/WebComponentsToolsAPI.js'],
-                            world: 'MAIN'
-                        });
-                    }).then(() => {
-                        // 3. Inject the MAIN-world handler script.
-                        return chrome.scripting.executeScript({
-                            target,
-                            files: ['/scripts/injected/webcMain.js'],
-                            world: 'MAIN'
-                        });
-                    }).then(() => {
-                        chrome.runtime.sendMessage({
-                            action: 'on-webc-script-injection',
-                            frameId: frameId
-                        });
+                        files: ['/vendor/WebComponentsToolsAPI.js'],
+                        world: 'MAIN'
+                    });
+                }).then(() => {
+                    // 3. Inject the MAIN-world handler script.
+                    return chrome.scripting.executeScript({
+                        target,
+                        files: ['/scripts/injected/webcMain.js'],
+                        world: 'MAIN'
+                    });
+                }).then(() => {
+                    chrome.runtime.sendMessage({
+                        action: 'on-webc-script-injection',
+                        frameId: frameId
                     });
                 });
             });
@@ -162,6 +188,9 @@
 
         'do-ping-frames': function (message, messageSender) {
             var frameIds = message.frameIds;
+            // Ping the frames of the inspected tab (message.tabId), so frame
+            // discovery matches the tab do-script-injection targets.
+            var tabId = message.tabId;
             var liveFrameIds = [];
             var pingFrame = function (i) {
                     if (i >= frameIds.length) {
@@ -181,6 +210,7 @@
                     // from the <code>frameIds</code> list
                     utils.sendToAll({
                         action: 'do-ping',
+                        tabId: tabId,
                         frameId: frameId
                     }, function (isAlive) {
                         if (isAlive) {
@@ -194,13 +224,30 @@
         }
     };
 
+    // These actions run only for messages from the extension's own contexts
+    // (DevTools panel / popup), not from a content script relaying a page event.
+    // A content-script sender carries sender.tab; an extension sender does not
+    // and matches chrome.runtime.id.
+    var PRIVILEGED_ACTIONS = ['do-script-injection', 'do-webc-injection'];
+
+    function isTrustedSender(sender) {
+        return !!sender && !sender.tab && sender.id === chrome.runtime.id;
+    }
+
     chrome.runtime.onMessage.addListener(function (request, messageSender, sendResponse) {
+        // Skip these actions unless the sender is extension-internal.
+        if (request && PRIVILEGED_ACTIONS.indexOf(request.action) !== -1 && !isTrustedSender(messageSender)) {
+            return;
+        }
+
         // Resolve incoming messages
         utils.resolveMessage({
             message: request,
             messageSender: messageSender,
             sendResponse: sendResponse,
-            actions: messageHandler
+            actions: messageHandler,
+            privilegedActions: PRIVILEGED_ACTIONS,
+            isTrustedSender: isTrustedSender
         });
 
         utils.sendToAll(request);
