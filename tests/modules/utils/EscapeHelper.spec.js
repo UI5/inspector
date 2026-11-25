@@ -29,10 +29,6 @@ describe('EscapeHelper', function () {
         });
 
         it('should preserve the classic controlId title carrying the copy-to-console title attribute', function () {
-            // This is the production shape built by controlUtils.js (properties,
-            // events, aggregations). The whole first TITLE_SPAN_PATTERN regex
-            // (the one with title="Click to copy control to console") must match
-            // so the clickable copy-to-console span survives for classic UI5.
             var title = '#<span class="controlId" data-control-id="__xmlview0--btn" title="Click to copy control to console">__xmlview0--btn</span><span gray>(sap.m.Button)</span>';
             sanitizeSectionTitle(title).should.equal(title);
         });
@@ -43,9 +39,6 @@ describe('EscapeHelper', function () {
         });
 
         it('should preserve the <opaque> scaffold in binding/aggregation titles', function () {
-            // controlUtils.js binding titles carry intentional <opaque>…</opaque>
-            // markup (a styled grey element). It must be restored, not escaped,
-            // otherwise users see the literal tags in the Bindings tab.
             var title = 'counter <opaque>(property)</opaque>';
             sanitizeSectionTitle(title).should.equal('counter <opaque>(property)</opaque>');
         });
@@ -63,41 +56,26 @@ describe('EscapeHelper', function () {
         });
 
         it('should not allow attribute breakout via the controlId value', function () {
-            // A forged id trying to inject an extra attribute / event handler.
             var forged = '<span class="controlId" data-control-id="x" onmouseover="alert(1)">x</span>';
-            // The exact legit scaffold is not matched (extra attribute present),
-            // so the whole thing is escaped — no raw onmouseover reaches output.
             sanitizeSectionTitle(forged).should.not.contain('onmouseover="alert');
             sanitizeSectionTitle(forged).should.contain('&lt;span');
         });
 
         it('should single-escape the data-control-id attribute and display the id decoded (id with ampersand)', function () {
-            // Builders now pass the RAW id; sanitizeSectionTitle escapes once.
-            // The attribute keeps the single-escaped value (&amp;) while the
-            // human-readable id text is decoded back to its literal characters.
             var title = '#<span class="controlId" data-control-id="my&Control" title="Click to copy control to console">my&Control</span><span gray>(sap.m.Button)</span>';
             var out = sanitizeSectionTitle(title);
-            // Correct single escaping in the attribute (NOT &amp;amp;):
             out.should.contain('data-control-id="my&amp;Control"');
             out.should.not.contain('&amp;amp;');
-            // Display text decoded so copy-to-console and the UI show the real id:
             out.should.contain('>my&Control</span>');
         });
 
         it('should not break out of the attribute when a forged id contains a quote and markup', function () {
-            // Raw forged id carrying a quote + <img>. After the single escape the
-            // quote is &quot;, which ends the data-control-id capture exactly at
-            // the attribute's real closing delimiter, so nothing after it is
-            // treated as markup — the whole forged span falls through to escaped.
             var title = '#<span class="controlId" data-control-id="a">< img src=x>" title="Click to copy control to console">x</span>';
             var out = sanitizeSectionTitle(title);
             out.should.not.contain('<img');
         });
 
         it('should not reconstruct a tag from the display-text slot of a legit-looking controlId span', function () {
-            // The span scaffold matches, but the display text ($2) carries a
-            // forged <img>. The text-safe decode must NOT turn &lt;img&gt; back
-            // into a live tag — &lt;/&gt; stay encoded in text content.
             var title = '#<span class="controlId" data-control-id="ok" title="Click to copy control to console"><img src=x onerror=alert(1)></span>';
             var out = sanitizeSectionTitle(title);
             out.should.not.contain('<img');

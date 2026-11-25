@@ -47,10 +47,9 @@
     var basePostMessage = basePort.postMessage;
     var port = Object.assign(basePort, {
         // Stamp every outgoing message with the inspected tab id so the
-        // background routes privileged actions (script injection) and relayed
-        // control commands to the tab this panel is inspecting, not whichever
-        // tab is active at dispatch time. Without this, an async active-tab
-        // lookup in the background is a cross-tab confused deputy.
+        // background routes injection and relayed control commands to the tab
+        // this panel is inspecting, rather than whichever tab is active at
+        // dispatch time (the active tab can differ after an async hop).
         postMessage: function (message, callback) {
             if (message && message.tabId === undefined) {
                 message.tabId = chrome.devtools.inspectedWindow.tabId;

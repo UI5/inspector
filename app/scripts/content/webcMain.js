@@ -22,8 +22,7 @@
 
     // Forward messages from the MAIN-world script back to the background.
     document.addEventListener('ui5-communication-with-content-script', function (event) {
-        // Only relay allowlisted page-originated actions; a hostile page can
-        // dispatch this CustomEvent with any action.
+        // Only relay allowlisted actions; this CustomEvent can carry any action.
         if (!event.detail || !utils.isRelayableAction(event.detail.action)) {
             return;
         }

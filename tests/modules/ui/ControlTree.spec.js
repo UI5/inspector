@@ -936,9 +936,7 @@ describe('ControlTree', function () {
                 }
             });
 
-            // No injected element should have materialised in the tree.
             should.equal(controlTree._treeContainer.querySelector('img'), null);
-            // The onerror handler must not have run.
             should.equal(window.__xss, undefined);
         });
 
@@ -974,8 +972,6 @@ describe('ControlTree', function () {
                 }
             });
 
-            // The browser decodes the escaped entities back to the original string,
-            // so the rendered <li> must expose the exact id for lookups/selection.
             var li = controlTree._treeContainer.querySelector('li[id]');
             li.should.not.be.null;
             li.getAttribute('id').should.equal(xssPayload);

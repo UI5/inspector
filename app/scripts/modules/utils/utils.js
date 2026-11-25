@@ -26,8 +26,8 @@ function _resolveMessage(options) {
 
     // Optional, opt-in sender policy. When privilegedActions names this
     // message's action, it is dispatched only if isTrustedSender approves the
-    // sender. Callers that pass no policy keep dispatching every action
-    // (default-allow), so existing callers are unaffected.
+    // sender. Callers that pass no policy dispatch every action, so existing
+    // callers are unaffected.
     var privilegedActions = options.privilegedActions;
     if (privilegedActions && privilegedActions.indexOf(message.action) !== -1) {
         if (typeof options.isTrustedSender !== 'function' || !options.isTrustedSender(messageSender)) {
@@ -169,10 +169,9 @@ function _sendToAll(message, callback) {
     });
 }
 
-// Actions the inspected page (via the injected script) may legitimately relay
-// into the extension through the content-script CustomEvent bridge. Anything
-// not listed — e.g. a privileged do-* action — is a forgery and is dropped at
-// the relay so it never reaches the background service worker.
+// Actions the injected script may relay into the extension through the
+// content-script CustomEvent bridge. Anything not listed is dropped at the
+// relay and never reaches the background service worker.
 var PAGE_RELAY_ACTIONS = [
     'on-application-dom-update',
     'on-application-dom-update-webc',

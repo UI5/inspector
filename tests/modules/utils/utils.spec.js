@@ -132,9 +132,6 @@ describe('utils', function () {
         var sendMessageSpy;
 
         beforeEach(function () {
-            // background/main.spec.js stubs utils.sendToAll at module load and
-            // never restores it; restore the real implementation so these tests
-            // exercise the actual routing logic.
             if (utils.sendToAll.restore) {
                 utils.sendToAll.restore();
             }
@@ -145,7 +142,6 @@ describe('utils', function () {
                     getCurrent: function () { return Promise.resolve({ id: 1 }); }
                 },
                 tabs: {
-                    // Active-tab fallback resolves to tab id 99.
                     query: function () { return Promise.resolve([{ id: 99 }]); },
                     sendMessage: sendMessageSpy
                 }
@@ -154,9 +150,6 @@ describe('utils', function () {
 
         afterEach(function () {
             window.chrome = originalChrome;
-            // Re-stub so other specs that assume sendToAll is a no-op (e.g.
-            // background/main.spec.js's port-lifecycle tests) are unaffected by
-            // test ordering.
             if (!utils.sendToAll.restore) {
                 sinon.stub(utils, 'sendToAll');
             }
@@ -164,7 +157,6 @@ describe('utils', function () {
 
         it('should deliver to message.tabId (the inspected tab) when provided', function () {
             utils.sendToAll({ action: 'do-control-select', tabId: 202 });
-            // Synchronous path — no active-tab query needed.
             sendMessageSpy.callCount.should.equal(1);
             sendMessageSpy.firstCall.args[0].should.equal(202);
         });

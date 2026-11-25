@@ -263,8 +263,6 @@ describe('background/main.js — devtools port lifecycle', function () {
 describe('background/main.js — privileged action sender validation', function () {
 
     beforeEach(function () {
-        // ContextMenu.spec.js may replace window.chrome with chrome-stub (no
-        // .scripting); reinstall what these tests need before each run.
         if (!window.chrome.scripting) {
             window.chrome.scripting = {};
         }
@@ -273,8 +271,6 @@ describe('background/main.js — privileged action sender validation', function 
         }
         window.chrome.runtime.id = 'test-extension-id';
         window.chrome.scripting.executeScript = sinon.spy(function () { return Promise.resolve(); });
-        // do-script-injection resolves the active tab before injecting; ensure
-        // these return promises even if another spec replaced window.chrome.
         window.chrome.windows = window.chrome.windows || {};
         window.chrome.windows.getCurrent = function () { return Promise.resolve({ id: 1 }); };
         window.chrome.tabs = window.chrome.tabs || {};
@@ -282,14 +278,12 @@ describe('background/main.js — privileged action sender validation', function 
     });
 
     it('should NOT run script injection for a forged do-script-injection from a page/content origin', function () {
-        // A page-origin sender carries sender.tab.
         sendMessageFrom('do-script-injection', { tab: { id: 1 }, id: 'test-extension-id', file: '/x.js' });
 
         window.chrome.scripting.executeScript.callCount.should.equal(0);
     });
 
     it('should run script injection for a legitimate do-script-injection from the extension (panel/popup) origin', function () {
-        // An extension-internal sender has no tab and matches chrome.runtime.id.
         sendMessageFrom('do-script-injection', { id: 'test-extension-id', file: '/x.js' });
 
         return tick().then(function () {
@@ -298,9 +292,6 @@ describe('background/main.js — privileged action sender validation', function 
     });
 
     it('should inject into the inspected tab (message.tabId), not the active tab', function () {
-        // Active tab is 1 (chrome.tabs.query stub); the panel inspects tab 202.
-        // The injection must target 202 — binding to the inspected tab, not the
-        // ambient active tab (cross-tab confused-deputy, HASI2026375-3390).
         sendMessageFrom('do-script-injection',
             { id: 'test-extension-id' },
             { tabId: 202, file: '/x.js' });
@@ -313,7 +304,6 @@ describe('background/main.js — privileged action sender validation', function 
     });
 
     it('should fall back to the active tab when no tabId is supplied', function () {
-        // Legacy callers that omit tabId keep the active-tab behaviour (id 1).
         sendMessageFrom('do-script-injection',
             { id: 'test-extension-id' },
             { file: '/x.js' });

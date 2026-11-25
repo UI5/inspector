@@ -377,9 +377,6 @@ describe('DataView', function () {
         });
 
         it('should render the <opaque> scaffold in a binding title as a real element, not escaped text', function () {
-            // Regression guard: controlUtils binding/aggregation titles carry
-            // intentional <opaque>…</opaque> markup. If the title sanitiser
-            // escapes it, users see literal "<opaque>" text in the Bindings tab.
             var dataViewElement = document.getElementById('data-view');
             sampleView.setData({
                 counter: {
@@ -397,9 +394,6 @@ describe('DataView', function () {
         });
 
         it('should render the classic controlId title (with copy-to-console attr) and a raw id correctly', function () {
-            // Builders pass the RAW id; the panel escapes once. data-control-id
-            // must hold the correct single-escaped value and the displayed id
-            // must be the literal id (so copy-to-console sends the right id).
             var dataViewElement = document.getElementById('data-view');
             sampleView.setData({
                 props: {
@@ -413,7 +407,6 @@ describe('DataView', function () {
             });
             var controlIdSpan = dataViewElement.querySelector('span.controlId');
             expect(controlIdSpan).to.not.equal(null);
-            // The DOM decodes the single-escaped attribute back to the real id:
             expect(controlIdSpan.getAttribute('data-control-id')).to.equal('my&Control');
             expect(controlIdSpan.textContent).to.equal('my&Control');
         });
@@ -904,9 +897,6 @@ describe('DataView', function () {
             clickableView._onClickHandler();
             clickableElement = dataViewElement.querySelector('clickable-value');
             clickableView._DataViewContainer.onclick({target: clickableElement});
-            // The click handler reads key/parent off the panel-built
-            // <clickable-value> attributes and resolves the original eventData.
-            // onValueClick is called as {target: key, data: eventData}.
             onValueClickSpy.calledOnce.should.be.equal(true);
             onValueClickSpy.calledWith({
                 target: 'model',
@@ -1275,7 +1265,6 @@ describe('DataView', function () {
             expect(el.querySelector('img')).to.be.null;
             expect(window.__xss).to.be.undefined;
 
-            // The attribute must decode back to the exact id so edit events target the right control.
             var withId = el.querySelector('[data-control-id]');
             withId.should.not.be.null;
             withId.getAttribute('data-control-id').should.equal(xssPayload);

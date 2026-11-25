@@ -181,8 +181,8 @@ DataView.prototype._generateHTMLFromObject = function (key, currentElement) {
         key = sanitizeSectionTitle(options.title);
         tag = 'section-title';
     } else {
-        // Plain object key (page-controlled property/aggregation name) - escape it.
-        // Section titles are intentionally-HTML and are sanitised at their source.
+        // Plain object key (property/aggregation name) - escape it.
+        // Section titles carry markup and are sanitised above.
         key = escapeHTML(key);
     }
 

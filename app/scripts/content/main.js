@@ -107,9 +107,7 @@
      * Listener for messages from the injected script.
      */
     document.addEventListener('ui5-communication-with-content-script', function sendEvent(detectEvent) {
-        // Only relay allowlisted page-originated actions. A hostile page can
-        // dispatch this CustomEvent with any action; dropping unknown/privileged
-        // actions here stops it forging extension messages via the relay.
+        // Only relay allowlisted actions; this CustomEvent can carry any action.
         if (!detectEvent.detail || !utils.isRelayableAction(detectEvent.detail.action)) {
             return;
         }

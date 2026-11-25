@@ -12,8 +12,8 @@
     });
 
     /**
-     * Resolve the tab a privileged action must target. The DevTools panel knows
-     * the inspected tab and sends it as message.tabId (inspectedWindow.tabId);
+     * Resolve the tab an action must target. The DevTools panel knows the
+     * inspected tab and sends it as message.tabId (inspectedWindow.tabId);
      * using it keeps injection/routing bound to that tab. Only when a caller
      * omits it do we fall back to the current window's active tab (legacy
      * behaviour, kept so callers that never carried a tabId don't break).
@@ -51,10 +51,9 @@
      * @param {Object} tab - The details of the tab where the click took place.
      */
     contextMenu.onClicked = function (info, tab) {
-        // The menu's tab (provided by chrome.contextMenus.onClicked) is the
-        // authoritative target. If it is somehow absent, do not dispatch: a
-        // fallback to the active tab would deliver the selection to the wrong
-        // tab (the confused-deputy this guards against).
+        // The menu's tab (from chrome.contextMenus.onClicked) is the target.
+        // If it is somehow absent, don't dispatch rather than fall back to the
+        // active tab, which could be a different tab than the one clicked.
         if (!tab || tab.id === undefined) {
             return;
         }
@@ -103,11 +102,9 @@
          */
         'do-script-injection': function (message) {
             const frameId = message.frameId;
-            // Target the tab the DevTools panel is actually inspecting
-            // (message.tabId === inspectedWindow.tabId, set by the panel), not
-            // whichever tab happens to be active. Resolving the active tab here
-            // is a confused-deputy: if the user switches tabs during the async
-            // hop, the inspector's scripts would be injected into the wrong page.
+            // Target the tab the DevTools panel is inspecting (message.tabId ===
+            // inspectedWindow.tabId, set by the panel), not whichever tab is
+            // active — the active tab can change during the async hop.
             resolveInspectedTabId(message).then(tabId => {
                 const target = {
                     tabId: tabId
@@ -191,9 +188,8 @@
 
         'do-ping-frames': function (message, messageSender) {
             var frameIds = message.frameIds;
-            // Ping the frames of the inspected tab, not whichever tab is active:
-            // frame discovery must match the tab do-script-injection targets, or
-            // the panel reasons about the wrong tab's frame list.
+            // Ping the frames of the inspected tab (message.tabId), so frame
+            // discovery matches the tab do-script-injection targets.
             var tabId = message.tabId;
             var liveFrameIds = [];
             var pingFrame = function (i) {
@@ -228,11 +224,10 @@
         }
     };
 
-    // Privileged handlers must only run for messages that originate from the
-    // extension's own contexts (DevTools panel / popup), never from a content
-    // script relaying a page-dispatched event. A page/content-script sender
-    // carries sender.tab; an extension-internal sender does not and matches
-    // chrome.runtime.id.
+    // These actions run only for messages from the extension's own contexts
+    // (DevTools panel / popup), not from a content script relaying a page event.
+    // A content-script sender carries sender.tab; an extension sender does not
+    // and matches chrome.runtime.id.
     var PRIVILEGED_ACTIONS = ['do-script-injection', 'do-webc-injection'];
 
     function isTrustedSender(sender) {
@@ -240,7 +235,7 @@
     }
 
     chrome.runtime.onMessage.addListener(function (request, messageSender, sendResponse) {
-        // Drop forged privileged messages: neither dispatch nor re-broadcast.
+        // Skip these actions unless the sender is extension-internal.
         if (request && PRIVILEGED_ACTIONS.indexOf(request.action) !== -1 && !isTrustedSender(messageSender)) {
             return;
         }

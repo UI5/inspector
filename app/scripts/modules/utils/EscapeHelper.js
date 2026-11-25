@@ -1,12 +1,11 @@
 'use strict';
 
 /**
- * Escape HTML special characters in page-derived strings before they are
- * concatenated into markup that is rendered via innerHTML.
+ * Escape HTML special characters in strings before they are concatenated into
+ * markup rendered via innerHTML.
  *
- * Kept dependency-free on purpose: this module is required from both the
- * extension panel bundle and the injected page bundle, so it must not touch
- * any browser/DOM/chrome globals.
+ * Dependency-free on purpose: required from both the panel bundle and the
+ * injected page bundle, so it must not touch any browser/DOM/chrome globals.
  *
  * @param {string|number|boolean} value
  * @returns {string}
@@ -25,38 +24,17 @@ function _escapeHTML(value) {
         .replace(/'/g, '&#39;');
 }
 
-// The only markup legitimately present in a DataView section title, built by
-// the title builders in controlUtils/webcMain. Everything else in a title is
-// page-forgeable (a hostile page can send a crafted on-control-select message
-// whose options.title never passed through those builders), so the panel must
-// treat titles as untrusted: the whole title is HTML-escaped first, then only
-// this exact vocabulary is restored.
-//
-// The builders now pass the RAW control id (no pre-escaping); sanitizeSectionTitle
-// is the single place that escapes it. So after the initial escape the id is
-// single-escaped (a literal '&' in an id is '&amp;' here, a '"' is '&quot;').
-// The data-control-id capture therefore stops at the first '&quot;', which is
-// the attribute's real closing delimiter — a forged id containing a quote still
-// cannot terminate the attribute early or break out, because its '"' is '&quot;'
-// at this point and ends the capture exactly where the delimiter does.
-//
-// The captured id ($1) is single-escaped. For the data-control-id attribute we
-// keep it escaped (quotes/ampersands must stay entity-encoded inside the
-// attribute), but for the human-readable inner text (handled in _restoreSpan)
-// we decode it once so the id displays correctly instead of as '&amp;'.
+// Section titles are escaped in full, then only this fixed span/opaque
+// vocabulary is restored. Builders pass the raw control id; this is the single
+// place it gets escaped, so after escaping the id is single-encoded and the
+// data-control-id capture stops at the first '&quot;' (the attribute delimiter).
 var CONTROL_ID_WITH_TITLE = /&lt;span class=&quot;controlId&quot; data-control-id=&quot;((?:(?!&quot;).)*)&quot; title=&quot;Click to copy control to console&quot;&gt;((?:(?!&lt;\/span&gt;).)*)&lt;\/span&gt;/g;
 var CONTROL_ID_PLAIN = /&lt;span class=&quot;controlId&quot; data-control-id=&quot;((?:(?!&quot;).)*)&quot;&gt;((?:(?!&lt;\/span&gt;).)*)&lt;\/span&gt;/g;
 
 /**
- * Decode a control id for display as TEXT CONTENT inside the restored span.
- *
- * Only entities that are safe inside a text node are decoded: '&amp;' -> '&',
- * '&quot;' -> '"', '&#39;' -> "'". '&lt;' and '&gt;' are DELIBERATELY left
- * encoded: the display text ($2) is attacker-influenced (a forged title can put
- * anything between the span tags), and decoding '&lt;'/'&gt;' would let that
- * content reconstruct a live tag (e.g. a forged '&lt;img&gt;' turning into a
- * real <img> once placed between the real <span></span> we restore). Leaving
- * them encoded means the worst case renders as harmless literal text.
+ * Decode a control id for display as text inside the restored span. Only
+ * text-safe entities are decoded; '&lt;'/'&gt;' stay encoded so the display
+ * text can never reconstruct a live tag.
  * @param {string} value
  * @returns {string}
  * @private
@@ -70,7 +48,7 @@ function _decodeControlIdText(value) {
 
 var TITLE_SPAN_PATTERNS = [
     // <span class="controlId" data-control-id="ID" title="...">ID</span>
-    // $1 = id in attribute context (kept escaped), $2 = id as display text (text-safe decode)
+    // $1 = id in attribute (kept encoded), $2 = id as display text (text-safe decode)
     { from: CONTROL_ID_WITH_TITLE,
       to: function (match, idAttr, idText) {
           return '<span class="controlId" data-control-id="' + idAttr +
@@ -82,10 +60,9 @@ var TITLE_SPAN_PATTERNS = [
           return '<span class="controlId" data-control-id="' + idAttr + '">' +
               _decodeControlIdText(idText) + '</span>';
       } },
-    // <span gray> ... </span> (the wrapper is scaffold; inner text stays escaped)
+    // <span gray> wrapper (scaffold; inner text stays encoded)
     { from: /&lt;span gray&gt;/g, to: '<span gray>' },
-    // <opaque> ... </opaque> (binding/aggregation "(property)"/"(aggregation)"
-    // scaffold from controlUtils; a styled grey element, no attributes)
+    // <opaque> scaffold used by binding/aggregation titles (styled element, no attributes)
     { from: /&lt;opaque&gt;/g, to: '<opaque>' },
     { from: /&lt;\/opaque&gt;/g, to: '</opaque>' },
     // </span>
@@ -93,12 +70,9 @@ var TITLE_SPAN_PATTERNS = [
 ];
 
 /**
- * Sanitise a DataView section title. All titles are treated as untrusted
- * (the panel is the trust boundary): the title is fully HTML-escaped, then
- * only the exact span vocabulary legitimate titles use is restored. The
- * dynamic parts (the data-control-id value captured by $1, and all inner
- * text) stay escaped, so a forged title cannot inject markup or break out of
- * the attribute context.
+ * Sanitise a DataView section title: escape it in full, then restore only the
+ * fixed span/opaque vocabulary legitimate titles use. Dynamic parts (the
+ * data-control-id attribute value and inner text) stay encoded.
  * @param {string|number|boolean} value
  * @returns {string}
  * @private

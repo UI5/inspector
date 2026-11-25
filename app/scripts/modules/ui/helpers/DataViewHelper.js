@@ -13,9 +13,8 @@ function _generateTagAttributes(attributes) {
     var html = '';
     if (attributes) {
         for (var key in attributes) {
-            // Attribute values can be page-controlled (e.g. data-control-id derived
-            // from control.getId()). Escape them to prevent breaking out of the
-            // attribute context and injecting markup.
+            // Attribute values can be dynamic (e.g. data-control-id from
+            // control.getId()); escape them before putting them in the attribute.
             html += ' ' + key + '="' + _escapeHTML(attributes[key]) + '"';
         }
     }
@@ -370,9 +369,8 @@ function _formatValueForDataView(key, currentElement) {
     requiredFormat.isClickableValue = currentElement._isClickableValueForDataView === true;
 
     if (requiredFormat.isClickableValue) {
-        // Build the clickable-value element here, in the extension context,
-        // escaping each page-derived part. The panel never renders a
-        // page-supplied HTML blob, so a forged payload cannot inject markup.
+        // Build the clickable-value element here, escaping each part, rather
+        // than taking a pre-built HTML string.
         requiredFormat.data[key] = '<clickable-value key="' + _escapeHTML(currentElement.clickableKey) +
             '" parent="' + _escapeHTML(currentElement.clickableParent) + '">' +
             _escapeHTML(currentElement.clickableText) + '</clickable-value>';
