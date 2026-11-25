@@ -2,6 +2,9 @@
 
 const AssistantController = require('../ai/AssistantController.js');
 const AssistantTranscript = require('../ai/AssistantTranscript.js');
+const ProviderSettingsStore = require('../ai/ProviderSettingsStore.js');
+const AIProviderSettings = require('./AIProviderSettings.js');
+const { PROVIDERS } = require('../ai/providers/index.js');
 
 /**
  * Thin view over the assistant. Owns the banner, input area, confirm dialog, token counter, and
@@ -20,8 +23,9 @@ const AssistantTranscript = require('../ai/AssistantTranscript.js');
  *     {@link PromptBuilder#buildUserPrompt} on each send.
  * @param {Function} [options.clearConsoleErrors] - Clears the recent-console-errors buffer for the
  *     current URL. Called by the controller on Clear Conversation and URL change.
- * @param {AssistantController} [options.controller] - Pre-built controller for tests. Defaults to a
- *                                                     fresh AssistantController.
+ * @param {AssistantController} [options.controller] - Pre-built controller for tests. Skips storage
+ *                                                     loading when provided.
+ * @param {ProviderSettingsStore} [options.settingsStore] - Test seam for provider-settings storage.
  * @param {Function} [options.transcriptFactory] - Test seam: `(container, options) => AssistantTranscript`.
  *                                                 Wired with `{ onCopyFailed }` so the transcript
  *                                                 can report clipboard failures back to the view.
@@ -32,6 +36,7 @@ function AIChat(containerId, {
     getConsoleErrors = null,
     clearConsoleErrors = null,
     controller = null,
+    settingsStore = null,
     transcriptFactory = function (host, options) {
         return new AssistantTranscript(host, options);
     }
@@ -41,15 +46,13 @@ function AIChat(containerId, {
     this._getAppInfo = getAppInfo;
     this._getConsoleErrors = getConsoleErrors;
     this._clearConsoleErrors = clearConsoleErrors;
-    this._controller = controller || new AssistantController({
-        providerName: 'gemini-nano',
-        providerConfig: {},
-        getAppInfo: this._getAppInfo || function () { return null; },
-        getConsoleErrors: this._getConsoleErrors || function () { return []; },
-        clearConsoleErrors: this._clearConsoleErrors || function () {}
-    });
+    this._injectedController = controller;
+    this._settingsStore = settingsStore || new ProviderSettingsStore();
     this._transcriptFactory = transcriptFactory;
 
+    this._controller = null;
+    this._providerName = 'gemini-nano';
+    this._providerConfig = {};
     this._isStreaming = false;
     this._streamingHandle = null;
     this._hasShownUsageWarning = false;
@@ -64,9 +67,39 @@ AIChat.prototype.init = function () {
     this._transcript = this._transcriptFactory(document.getElementById('ai-messages-container'), {
         onCopyFailed: () => { this._showError('Failed to copy to clipboard'); }
     });
+    this._providerSettings = new AIProviderSettings('ai-settings-host', {
+        providers: PROVIDERS,
+        onSave: (name, config) => { this._applyProviderSettings(name, config); }
+    });
     this._attachEventListeners();
-    this._attachControllerListeners();
-    this._checkModelAvailability();
+
+    if (this._injectedController) {
+        this._controller = this._injectedController;
+        this._attachControllerListeners();
+        this._checkModelAvailability();
+        return;
+    }
+
+    this._settingsStore.load().then((settings) => {
+        this._providerName = settings.providerName;
+        this._providerConfig = settings.providerConfig;
+        this._controller = this._createController(this._providerName, this._providerConfig);
+        this._attachControllerListeners();
+        this._checkModelAvailability();
+    });
+};
+
+/**
+ * @private
+ */
+AIChat.prototype._createController = function (providerName, providerConfig) {
+    return new AssistantController({
+        providerName: providerName,
+        providerConfig: providerConfig,
+        getAppInfo: this._getAppInfo || function () { return null; },
+        getConsoleErrors: this._getConsoleErrors || function () { return []; },
+        clearConsoleErrors: this._clearConsoleErrors || function () {}
+    });
 };
 
 /**
@@ -86,6 +119,12 @@ AIChat.prototype._render = function () {
                 </button>
                 <button class="clear-history-button" id="ai-clear-history-button" style="display: none;" aria-label="Clear chat history">
                     Clear History
+                </button>
+                <button class="ai-settings-button" id="ai-settings-button" aria-label="AI provider settings">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path d="M8 10.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>
+                        <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.474l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115l.094-.319z"/>
+                    </svg>
                 </button>
             </div>
 
@@ -129,6 +168,8 @@ AIChat.prototype._render = function () {
                     </div>
                 </div>
             </div>
+
+            <div id="ai-settings-host" class="ai-settings-host"></div>
         </div>
     `;
 };
@@ -139,6 +180,7 @@ AIChat.prototype._attachEventListeners = function () {
     const downloadButton = document.getElementById('ai-download-button');
     const clearHistoryButton = document.getElementById('ai-clear-history-button');
     const contextClearButton = document.getElementById('ai-context-clear-button');
+    const settingsButton = document.getElementById('ai-settings-button');
 
     sendButton.addEventListener('click', () => {
         this._handleSendMessage();
@@ -169,6 +211,10 @@ AIChat.prototype._attachEventListeners = function () {
 
     contextClearButton.addEventListener('click', () => {
         this._clearContext();
+    });
+
+    settingsButton.addEventListener('click', () => {
+        this._providerSettings.open(this._providerName, this._providerConfig);
     });
 
     const confirmOk = document.getElementById('ai-confirm-ok');
@@ -526,7 +572,9 @@ AIChat.prototype.onTabActivated = function () {
 
 /** @param {string} url */
 AIChat.prototype.setUrl = function (url) {
-    this._controller.setUrl(url);
+    if (this._controller) {
+        this._controller.setUrl(url);
+    }
 };
 
 /**
@@ -557,10 +605,43 @@ AIChat.prototype._clearError = function () {
     slot.hidden = true;
 };
 
+/**
+ * Persist the new provider selection and hot-swap the controller without a panel reload.
+ * @private
+ * @param {string} name
+ * @param {Object} config
+ */
+AIChat.prototype._applyProviderSettings = function (name, config) {
+    this._settingsStore.save(name, config).then(() => {
+        this._providerName = name;
+        this._providerConfig = config;
+
+        const oldController = this._controller;
+        this._controller = this._createController(name, config);
+
+        this._hasMessages = false;
+        this._hasShownUsageWarning = false;
+        this._isStreaming = false;
+        this._streamingHandle = null;
+
+        this._attachControllerListeners();
+        if (oldController) {
+            oldController.destroy();
+        }
+
+        this._checkModelAvailability();
+    });
+};
+
 AIChat.prototype.destroy = function () {
-    this._controller.destroy();
+    if (this._controller) {
+        this._controller.destroy();
+    }
     if (this._transcript && typeof this._transcript.destroy === 'function') {
         this._transcript.destroy();
+    }
+    if (this._providerSettings && typeof this._providerSettings.destroy === 'function') {
+        this._providerSettings.destroy();
     }
 };
 

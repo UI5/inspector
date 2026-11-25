@@ -1,6 +1,27 @@
 'use strict';
 
 const AIChat = require('../../../app/scripts/modules/ui/AIChat.js');
+const ProviderSettingsStore = require('../../../app/scripts/modules/ai/ProviderSettingsStore.js');
+
+function createFakeStorage() {
+    const data = {};
+    return {
+        get: function (keys, callback) {
+            const result = {};
+            keys.forEach(function (key) {
+                if (Object.prototype.hasOwnProperty.call(data, key)) {
+                    result[key] = data[key];
+                }
+            });
+            callback(result);
+        },
+        set: function (items, callback) {
+            Object.keys(items).forEach(function (key) { data[key] = items[key]; });
+            callback();
+        },
+        data: data
+    };
+}
 
 /**
  * Fake {@link AssistantController}. Records event registrations and exposes `fire` to dispatch
@@ -697,6 +718,85 @@ describe('AIChat', function () {
                 const counter = document.getElementById('ai-token-counter');
                 counter.hasAttribute('hidden').should.be.false;
                 counter.textContent.should.contain('100');
+            });
+        });
+    });
+
+    describe('Settings button', function () {
+        it('should render a gear button for provider settings in the status banner', function () {
+            document.getElementById('ai-settings-button').should.exist;
+        });
+
+        it('should open the provider settings modal when the settings button is clicked', function () {
+            document.getElementById('ai-settings-button').click();
+            const dialog = document.getElementById('ai-settings-dialog');
+            dialog.should.exist;
+            dialog.style.display.should.equal('flex');
+        });
+    });
+
+    describe('Provider hot-swap via _applyProviderSettings()', function () {
+        it('should save new settings, swap the controller, and call initialize on the new one', function () {
+            const fakeStorage = createFakeStorage();
+            const store = new ProviderSettingsStore({ storage: fakeStorage });
+            aiChat._settingsStore = store;
+
+            const newFakeController = createFakeController();
+            let swappedName;
+            let swappedConfig;
+            aiChat._createController = function (name, config) {
+                swappedName = name;
+                swappedConfig = config;
+                return newFakeController;
+            };
+
+            aiChat._applyProviderSettings('openai', { baseUrl: 'http://localhost:6655', apiKey: 'k', model: 'gpt-4o' });
+
+            return new Promise(function (resolve) { setTimeout(resolve, 20); }).then(function () {
+                aiChat._providerName.should.equal('openai');
+                aiChat._providerConfig.should.deep.equal({ baseUrl: 'http://localhost:6655', apiKey: 'k', model: 'gpt-4o' });
+                aiChat._controller.should.equal(newFakeController);
+                swappedName.should.equal('openai');
+                swappedConfig.should.deep.equal({ baseUrl: 'http://localhost:6655', apiKey: 'k', model: 'gpt-4o' });
+                fakeStorage.data.aiProviderSettings.providerName.should.equal('openai');
+            });
+        });
+
+        it('should load persisted settings from storage and apply them when no controller is injected', function () {
+            const fakeStorage = createFakeStorage();
+            fakeStorage.data.aiProviderSettings = {
+                providerName: 'openai',
+                providerConfig: { baseUrl: 'http://x', apiKey: 'secret', model: 'gpt-4o' }
+            };
+            const store = new ProviderSettingsStore({ storage: fakeStorage });
+
+            const fakeCtrl = createFakeController();
+            const fakeTranscript2 = createFakeTranscript();
+            fixtures.innerHTML += '<div id="ai-chat-settings-test"></div>';
+
+            let capturedName;
+            let capturedConfig;
+
+            const chat = new AIChat('ai-chat-settings-test', {
+                settingsStore: store,
+                transcriptFactory: function (host, options) {
+                    if (options && typeof options.onCopyFailed === 'function') {
+                        fakeTranscript2.onCopyFailed = options.onCopyFailed;
+                    }
+                    return fakeTranscript2;
+                }
+            });
+
+            // Override _createController so the real AssistantController is never constructed.
+            chat._createController = function (name, config) {
+                capturedName = name;
+                capturedConfig = config;
+                return fakeCtrl;
+            };
+
+            return new Promise(function (resolve) { setTimeout(resolve, 20); }).then(function () {
+                capturedName.should.equal('openai');
+                capturedConfig.should.deep.equal({ baseUrl: 'http://x', apiKey: 'secret', model: 'gpt-4o' });
             });
         });
     });
