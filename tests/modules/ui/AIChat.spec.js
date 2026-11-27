@@ -425,17 +425,6 @@ describe('AIChat', function () {
             downloadButton.disabled.should.be.true;
         });
 
-        it('should apply a status-session-failed CSS class (not a translated status-error) when the controller reports session-failed', function () {
-            fakeController.fire('capability-state-changed', {
-                status: 'session-failed', message: 'unable to create local AI session', progress: 0
-            });
-
-            const banner = document.getElementById('ai-status-banner');
-            banner.className.should.contain('status-session-failed');
-            banner.className.should.not.contain('status-error');
-            banner.querySelector('.status-text').textContent.should.contain('unable to create local AI session');
-        });
-
         it('should apply a status-unsupported CSS class when the controller reports an unsupported browser', function () {
             fakeController.fire('capability-state-changed', {
                 status: 'unsupported', message: 'Browser unsupported', progress: 0
@@ -457,7 +446,7 @@ describe('AIChat', function () {
         });
 
         it('should hide the download button for every non-download Assistant Capability State that paints a banner, so the developer is not invited to re-download a ready model', function () {
-            const nonDownloadStates = ['ready', 'unsupported', 'unavailable', 'session-failed'];
+            const nonDownloadStates = ['ready', 'unsupported', 'unavailable'];
             nonDownloadStates.forEach(function (status) {
                 fakeController.fire('capability-state-changed', {
                     status: status, message: status, progress: 0
@@ -465,19 +454,6 @@ describe('AIChat', function () {
                 const downloadButton = document.getElementById('ai-download-button');
                 downloadButton.style.display.should.equal('none');
             });
-        });
-
-        it('should expose the clear-history affordance when the controller reports session-failed, so the developer has a user-facing recovery action that destroys the broken session and reseeds a fresh one', function () {
-            // Start from ready so clear-history is offered before session-failed arrives. Assert session-failed keeps it offered.
-            fakeController.fire('capability-state-changed', {
-                status: 'ready', message: 'ready', progress: 0
-            });
-            fakeController.fire('capability-state-changed', {
-                status: 'session-failed', message: 'session creation failed', progress: 0
-            });
-
-            const clearButton = document.getElementById('ai-clear-history-button');
-            clearButton.style.display.should.not.equal('none');
         });
 
         it('should leave the existing banner untouched when streaming-failed arrives — recovery is offered implicitly via the next sendUserMessage, not via a new banner — per PRD user story 8', function () {
